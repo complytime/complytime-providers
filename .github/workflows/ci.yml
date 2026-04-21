@@ -1,0 +1,64 @@
+# CI workflow for complytime-providers.
+# Builds both provider binaries, runs unit tests, and publishes release
+# artifacts (complyctl-provider-openscap, complyctl-provider-ampel) on tag push.
+
+name: ci
+
+on:
+    push:
+        branches:
+            - main
+        tags:
+            - 'v*'
+    pull_request:
+
+permissions:
+    contents: read
+
+jobs:
+    build-and-test:
+        name: Build and test
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+            - name: Set up Go
+              uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+              with:
+                  go-version-file: './go.mod'
+
+            - name: Build providers
+              run: make build
+
+            - name: Run unit tests
+              run: make test
+
+    release:
+        name: Publish release artifacts
+        needs: build-and-test
+        runs-on: ubuntu-latest
+        if: startsWith(github.ref, 'refs/tags/v')
+
+        permissions:
+            contents: write # for uploading release assets
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+            - name: Set up Go
+              uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+              with:
+                  go-version-file: './go.mod'
+
+            - name: Build providers
+              run: make build
+
+            - name: Upload release artifacts
+              uses: softprops/action-gh-release@e7a8f85e1c67a31e6ed99a94b41bd0b71bbee6b8 # v2.2.1
+              with:
+                  files: |
+                      bin/complyctl-provider-openscap
+                      bin/complyctl-provider-ampel

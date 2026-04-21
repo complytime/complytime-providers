@@ -1,0 +1,12 @@
+<[?xml version="1.0" encoding="utf-8"?>
+<ds:data-stream-collection xmlns:cat="urn:oasis:names:tc:entity:xmlns:xml:catalog" xmlns:cpe-dict="http://cpe.mitre.org/dictionary/2.0" xmlns:cpe-lang="http://cpe.mitre.org/language/2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:ds="http://scap.nist.gov/schema/scap/source/1.2" xmlns:html="http://www.w3.org/1999/xhtml" xmlns:ind="http://oval.mitre.org/XMLSchema/oval-definitions-5#independent" xmlns:linux="http://oval.mitre.org/XMLSchema/oval-definitions-5#linux" xmlns:ocil="http://scap.nist.gov/schema/ocil/2.0" xmlns:oval="http://oval.mitre.org/XMLSchema/oval-common-5" xmlns:oval-def="http://oval.mitre.org/XMLSchema/oval-definitions-5" xmlns:sce="http://open-scap.org/page/SCE_xccdf_stream" xmlns:unix="http://oval.mitre.org/XMLSchema/oval-definitions-5#unix" xmlns:xccdf-1.2="http://checklists.nist.gov/xccdf/1.2" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" id="scap_org.open-scap_collection_from_xccdf_ssg-rhel10-xccdf.xml" schematron-version="1.3">
+  <ds:data-stream id="scap_org.open-scap_datastream_from_xccdf_ssg-rhel10-xccdf.xml" scap-version="1.3" use-case="OTHER">
+    <ds:dictionaries>
+      <ds:component-ref id="scap_org.open-scap_cref_ssg-rhel10-cpe-dictionary.xml" xlink:href="#scap_org.open-scap_comp_ssg-rhel10-cpe-dictionary.xml">
+        <cat:catalog>
+          <cat:uri name="ssg-rhel10-cpe-oval.xml" uri="#scap_org.open-scap_cref_ssg-rhel10-cpe-oval.xml"/>
+        </cat:catalog>
+      </ds:component-ref>
+    </ds:dictionaries>
+  </ds:data-stream>
+</ds:data-stream-collection>
