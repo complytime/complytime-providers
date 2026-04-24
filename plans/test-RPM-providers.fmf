@@ -1,0 +1,6 @@
+summary: Validate complytime-providers RPM sub-packages deliver provider binaries
+
+execute:
+    script:
+      - test -x /usr/libexec/complytime/providers/complyctl-provider-openscap
+      - test -x /usr/libexec/complytime/providers/complyctl-provider-ampel

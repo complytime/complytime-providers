@@ -1,0 +1,54 @@
+upstream_project_url: https://github.com/complytime/complytime-providers
+upstream_tag_template: v{version}
+upstream_package_name: complytime-providers
+downstream_package_name: complytime-providers
+
+specfile_path: complytime-providers.spec
+
+files_to_sync:
+    - complytime-providers.spec
+    - .packit.yaml
+
+jobs:
+    - job: copr_build
+      trigger: pull_request
+      targets:
+          - fedora-rawhide-x86_64
+          - fedora-43-x86_64
+          - fedora-42-x86_64
+          - centos-stream-9-x86_64
+          - centos-stream-10-x86_64
+
+# Running tests using testing farm https://packit.dev/docs/configuration/upstream/tests
+    - job: tests
+      trigger: pull_request
+      targets:
+          - fedora-rawhide-x86_64
+          - fedora-43-x86_64
+          - fedora-42-x86_64
+          - centos-stream-9-x86_64
+          - centos-stream-10-x86_64
+
+# https://packit.dev/docs/fedora-releases-guide
+# Propose Downstream PRs once an upstream release is out
+    - job: propose_downstream
+      trigger: release
+      dist_git_branches:
+          - rawhide
+          - f43
+          - f42
+
+# Automatically submit builds to Koji after PR is merged into dist-git
+    - job: koji_build
+      trigger: commit
+      dist_git_branches:
+          - rawhide
+          - f43
+          - f42
+
+# Trigger Bodhi update for released Fedora versions
+    - job: bodhi_update
+      trigger: commit
+      dist_git_branches:
+          - f43
+          - f42
