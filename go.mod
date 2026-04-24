@@ -2,13 +2,9 @@ module github.com/complytime/complytime-providers
 
 go 1.25.0
 
-// DEVELOPMENT ONLY: replace directive points to local complyctl source.
-// MUST be removed before merging; update require below to the tagged SDK release.
-replace github.com/complytime/complyctl => ../complyctl
-
 require (
 	github.com/antchfx/xmlquery v1.5.1
-	github.com/complytime/complyctl v0.0.0-00010101000000-000000000000
+	github.com/complytime/complyctl v1.0.0-alpha.0.0.20260423124442-eafccc5f4f2b
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/stretchr/testify v1.11.1
 )

@@ -4,7 +4,7 @@ github.com/antchfx/xmlquery
 # github.com/antchfx/xpath v1.3.6
 ## explicit; go 1.14
 github.com/antchfx/xpath
-# github.com/complytime/complyctl v0.0.0-00010101000000-000000000000 => ../complyctl
+# github.com/complytime/complyctl v1.0.0-alpha.0.0.20260423124442-eafccc5f4f2b
 ## explicit; go 1.25.0
 github.com/complytime/complyctl/api/plugin
 github.com/complytime/complyctl/internal/complytime
@@ -218,4 +218,3 @@ google.golang.org/protobuf/types/known/timestamppb
 # gopkg.in/yaml.v3 v3.0.1
 ## explicit
 gopkg.in/yaml.v3
-# github.com/complytime/complyctl => ../complyctl
