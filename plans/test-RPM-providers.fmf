@@ -4,3 +4,5 @@ execute:
     script:
       - test -x /usr/libexec/complytime/providers/complyctl-provider-openscap
       - test -x /usr/libexec/complytime/providers/complyctl-provider-ampel
+      - /usr/libexec/complytime/providers/complyctl-provider-openscap --help
+      - /usr/libexec/complytime/providers/complyctl-provider-ampel --help

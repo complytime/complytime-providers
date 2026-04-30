@@ -13,8 +13,9 @@ License:        Apache-2.0
 URL:            %{base_url}
 Source0:        %{base_url}/archive/refs/tags/v%{version}.tar.gz
 
-BuildRequires:  golang
+BuildRequires:  golang >= 1.25.0
 BuildRequires:  go-rpm-macros
+ExclusiveArch:  %{go_arches}
 
 %gometa -f
 
@@ -30,13 +31,14 @@ can install only the providers they need.
 %package        openscap
 Summary:        OpenSCAP scanning provider for complyctl
 Requires:       complyctl >= 0.0.8
+Requires:       openscap-scanner
 Requires:       scap-security-guide
 
 %description    openscap
 OpenSCAP scanning provider that extends complyctl with OpenSCAP evaluation
 capabilities. It converts OSCAL assessment plans into SCAP policies,
 executes scans via the OpenSCAP engine, and returns structured results
-to complyctl. Communicates via gRPC (Generate, Scan, HealthCheck RPCs)
+to complyctl. Communicates via gRPC (Describe, Generate, Scan RPCs)
 and follows the complyctl-provider-* discovery convention.
 
 # --- Ampel provider sub-package ---
@@ -49,6 +51,9 @@ Requires:       complyctl >= 0.0.8
 Ampel scanning provider that extends complyctl with Ampel evaluation
 capabilities. It communicates via gRPC and follows the
 complyctl-provider-* discovery convention.
+
+NOTE: Requires the 'snappy' and 'ampel' CLI tools at runtime. These are
+not currently packaged in Fedora and must be installed separately.
 
 %prep
 %goprep -k
@@ -63,8 +68,8 @@ GO_BUILD_BINDIR=./bin
 mkdir -p ${GO_BUILD_BINDIR}
 
 # Build both provider binaries
-go build -buildmode=pie -o ${GO_BUILD_BINDIR}/complyctl-provider-openscap ./cmd/openscap-provider
-go build -buildmode=pie -o ${GO_BUILD_BINDIR}/complyctl-provider-ampel ./cmd/ampel-provider
+go build -mod=vendor -buildmode=pie -ldflags "${LDFLAGS}" -o ${GO_BUILD_BINDIR}/complyctl-provider-openscap ./cmd/openscap-provider
+go build -mod=vendor -buildmode=pie -ldflags "${LDFLAGS}" -o ${GO_BUILD_BINDIR}/complyctl-provider-ampel ./cmd/ampel-provider
 
 %install
 install -d -m 0755 %{buildroot}%{_libexecdir}/%{app_dir}/providers
@@ -80,13 +85,13 @@ go test -mod=vendor -v ./...
 
 %files          openscap
 %attr(0755, root, root) %{_libexecdir}/%{app_dir}/providers/complyctl-provider-openscap
-%license LICENSE vendor/modules.txt
-%doc README.md
+%license LICENSE
+%doc README.md vendor/modules.txt
 
 %files          ampel
 %attr(0755, root, root) %{_libexecdir}/%{app_dir}/providers/complyctl-provider-ampel
-%license LICENSE vendor/modules.txt
-%doc README.md
+%license LICENSE
+%doc README.md vendor/modules.txt
 
 %changelog
 * Fri Apr 24 2026 Marcus Burghardt <maburgha@redhat.com> - 0.0.1-1
