@@ -42,9 +42,21 @@ go.work.sum
 *~
 .vscode
 
+# SDD state files
+.sdd-state.json
+
+# SDD prompts
+docs/prompts/
+
+# SDD development specs
+docs/development/
+
 # Agent dirs
 .cursor
 .claude
+
+# Provider runtime workspace artifacts
+.complytime/
 
 megalinter-reports/
 
