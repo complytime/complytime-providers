@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -47,6 +48,14 @@ func (c *Config) ReposDirPath() string {
 // ResultsDirPath returns the path for per-target result files.
 func (c *Config) ResultsDirPath() string {
 	return filepath.Join(c.OpaDir(), ResultsDir)
+}
+
+// PolicyDirForBundle returns a bundle-specific policy directory path.
+func (c *Config) PolicyDirForBundle(bundleRef string) string {
+	sanitized := bundleRef
+	sanitized = strings.TrimPrefix(sanitized, "oci://")
+	sanitized = strings.NewReplacer("/", "_", ":", "_").Replace(sanitized)
+	return filepath.Join(c.OpaDir(), PolicyDir, sanitized)
 }
 
 // EnsureDirectories creates all workspace subdirectories with mode 0750.

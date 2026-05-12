@@ -242,6 +242,50 @@ func ToScanResponse(targetResults []*PerTargetResult) *provider.ScanResponse {
 	return &provider.ScanResponse{Assessments: assessments}
 }
 
+// ScanStatusAssessment returns a synthetic AssessmentLog reporting overall
+// scan health across all targets.
+func ScanStatusAssessment(targetResults []*PerTargetResult) provider.AssessmentLog {
+	successCount := 0
+	var steps []provider.Step
+
+	for _, tr := range targetResults {
+		stepName := tr.Target
+		if tr.Branch != "" {
+			stepName += "@" + tr.Branch
+		}
+
+		if tr.Status == "scanned" {
+			successCount++
+			steps = append(steps, provider.Step{
+				Name:    stepName,
+				Result:  provider.ResultPassed,
+				Message: "scanned successfully",
+			})
+		} else {
+			steps = append(steps, provider.Step{
+				Name:    stepName,
+				Result:  provider.ResultFailed,
+				Message: tr.Error,
+			})
+		}
+	}
+
+	total := len(targetResults)
+	var message string
+	if successCount == total {
+		message = fmt.Sprintf("all %d targets scanned successfully", total)
+	} else {
+		message = fmt.Sprintf("%d of %d targets scanned successfully", successCount, total)
+	}
+
+	return provider.AssessmentLog{
+		RequirementID: "scan-status",
+		Steps:         steps,
+		Message:       message,
+		Confidence:    provider.ConfidenceLevelHigh,
+	}
+}
+
 func mapResult(findingResult string) provider.Result {
 	switch findingResult {
 	case "fail":

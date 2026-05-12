@@ -8,6 +8,6 @@ import (
 )
 
 func main() {
-	opaProvider := server.New()
+	opaProvider := server.New(server.ServerOptions{})
 	provider.Serve(opaProvider)
 }

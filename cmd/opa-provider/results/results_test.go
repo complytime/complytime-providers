@@ -264,6 +264,61 @@ func TestToScanResponse_Empty(t *testing.T) {
 	assert.Empty(t, resp.Assessments)
 }
 
+func TestScanStatusAssessment_AllPassed(t *testing.T) {
+	results := []*PerTargetResult{
+		{Target: "org/repo", Branch: "main", Status: "scanned"},
+		{Target: "org/repo2", Branch: "main", Status: "scanned"},
+	}
+	assessment := ScanStatusAssessment(results)
+	assert.Equal(t, "scan-status", assessment.RequirementID)
+	assert.Len(t, assessment.Steps, 2)
+	for _, step := range assessment.Steps {
+		assert.Equal(t, provider.ResultPassed, step.Result)
+	}
+	assert.Contains(t, assessment.Message, "all 2 targets scanned")
+}
+
+func TestScanStatusAssessment_PartialFailure(t *testing.T) {
+	results := []*PerTargetResult{
+		{Target: "org/repo", Branch: "main", Status: "scanned"},
+		{Target: "org/repo2", Branch: "main", Status: "error", Error: "clone failed"},
+	}
+	assessment := ScanStatusAssessment(results)
+	assert.Equal(t, "scan-status", assessment.RequirementID)
+	assert.Len(t, assessment.Steps, 2)
+
+	passCount := 0
+	failCount := 0
+	for _, step := range assessment.Steps {
+		if step.Result == provider.ResultPassed {
+			passCount++
+		} else {
+			failCount++
+		}
+	}
+	assert.Equal(t, 1, passCount)
+	assert.Equal(t, 1, failCount)
+	assert.Contains(t, assessment.Message, "1 of 2 targets scanned")
+}
+
+func TestScanStatusAssessment_AllErrors(t *testing.T) {
+	results := []*PerTargetResult{
+		{Target: "org/repo", Branch: "main", Status: "error", Error: "fail1"},
+		{Target: "org/repo2", Branch: "main", Status: "error", Error: "fail2"},
+	}
+	assessment := ScanStatusAssessment(results)
+	for _, step := range assessment.Steps {
+		assert.Equal(t, provider.ResultFailed, step.Result)
+	}
+}
+
+func TestScanStatusAssessment_Empty(t *testing.T) {
+	assessment := ScanStatusAssessment(nil)
+	assert.Equal(t, "scan-status", assessment.RequirementID)
+	assert.Len(t, assessment.Steps, 0)
+	assert.Contains(t, assessment.Message, "all 0 targets scanned")
+}
+
 func TestWritePerTargetResult(t *testing.T) {
 	dir := t.TempDir()
 	result := &PerTargetResult{

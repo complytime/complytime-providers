@@ -27,8 +27,8 @@ needed to evaluate configuration files against OPA/Rego policies using `conftest
 
 The OPA policy bundles are built and published to OCI registries by a separate repository
 (`opa-policies-poc`). That repo generates platform-specific bundles (CI, Kubernetes,
-Terraform, Docker, Ansible) from CUE-defined compliance frameworks (ESS v11, ITSS,
-NIST 800-53, CIS) and Rego templates. Each bundle contains Rego policies with METADATA
+Terraform, Docker, Ansible) from CUE-defined compliance frameworks (NIST 800-53,
+CIS, and organization-specific standards) and Rego templates. Each bundle contains Rego policies with METADATA
 blocks that declare which compliance control IDs they enforce.
 
 The OPA provider bridges complyctl's assessment model with conftest's policy evaluation:
@@ -53,7 +53,7 @@ focused (Constitution Principle II: Simplicity & Isolation).
 | `cmd/openscap-provider/server/server.go` | LOCAL | Second reference for Provider interface usage |
 | `vendor/github.com/complytime/complyctl/pkg/provider/` | LOCAL | Provider interface contracts and type definitions |
 | `docs/provider-guide.md` | LOCAL | Provider development guide (manifest, entry point) |
-| `/Users/fortiz/Projects/opa-policies-poc/` | LOCAL | OPA policy bundle structure, Rego output format, manifest schema |
+| `opa-policies-poc/` (local clone) | LOCAL | OPA policy bundle structure, Rego output format, manifest schema |
 | [SecurityCon workflow](https://github.com/jpower432/opensource-securitycon-2025-oscal-in-action/blob/cc0facf/.github/workflows/collect.yml) | WEB | Reference workflow showing conftest pull + test pattern |
 
 ## 4. Architecture & Design

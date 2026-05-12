@@ -5,7 +5,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -13,45 +12,60 @@ import (
 
 	"github.com/complytime/complyctl/pkg/provider"
 	"github.com/complytime/complytime-providers/cmd/opa-provider/config"
+	"github.com/complytime/complytime-providers/cmd/opa-provider/loader"
 	"github.com/complytime/complytime-providers/cmd/opa-provider/results"
 	"github.com/complytime/complytime-providers/cmd/opa-provider/scan"
 	"github.com/complytime/complytime-providers/cmd/opa-provider/targets"
 	"github.com/complytime/complytime-providers/cmd/opa-provider/toolcheck"
 )
 
-// ScanRunner is used by Scan to execute scan commands.
-// It defaults to scan.ExecRunner{} and can be overridden for testing.
-var ScanRunner scan.CommandRunner = scan.ExecRunner{}
-
-// SkipToolCheck disables tool presence validation. Used in tests.
-var SkipToolCheck bool
-
-// TestWorkspaceDir overrides provider.WorkspaceDir for testing.
-var TestWorkspaceDir string
-
 var safeBranchPattern = regexp.MustCompile(`^[a-zA-Z0-9._/-]+$`)
 
 var _ provider.Provider = (*ProviderServer)(nil)
 
-// ProviderServer implements the provider.Provider interface for the OPA provider.
-type ProviderServer struct{}
+// ServerOptions configures the ProviderServer dependencies. Zero-value fields
+// receive sensible production defaults.
+type ServerOptions struct {
+	Loader       loader.DataLoader
+	Runner       scan.CommandRunner
+	ToolChecker  func() []string
+	WorkspaceDir string
+}
 
-// New returns a new ProviderServer.
-func New() *ProviderServer {
-	return &ProviderServer{}
+// ProviderServer implements the provider.Provider interface for the OPA provider.
+type ProviderServer struct {
+	opts ServerOptions
+}
+
+// New returns a new ProviderServer with the given options. Zero-value fields
+// in opts are replaced with production defaults.
+func New(opts ServerOptions) *ProviderServer {
+	if opts.Runner == nil {
+		opts.Runner = scan.ExecRunner{}
+	}
+	if opts.Loader == nil {
+		opts.Loader = loader.NewRouter(opts.Runner)
+	}
+	if opts.ToolChecker == nil {
+		opts.ToolChecker = toolcheck.CheckTools
+	}
+	if opts.WorkspaceDir == "" {
+		opts.WorkspaceDir = provider.WorkspaceDir
+	}
+	return &ProviderServer{opts: opts}
 }
 
 // Describe returns the provider metadata and health status.
-func (s *ProviderServer) Describe(_ context.Context, _ *provider.DescribeRequest) (*provider.DescribeResponse, error) {
+func (s *ProviderServer) Describe(
+	_ context.Context, _ *provider.DescribeRequest,
+) (*provider.DescribeResponse, error) {
 	healthy := true
 	var errMsg string
 
-	if !SkipToolCheck {
-		missing, _ := toolcheck.CheckTools()
-		if len(missing) > 0 {
-			healthy = false
-			errMsg = toolcheck.FormatMissingToolsError(missing).Error()
-		}
+	missing := s.opts.ToolChecker()
+	if len(missing) > 0 {
+		healthy = false
+		errMsg = toolcheck.FormatMissingToolsError(missing).Error()
 	}
 
 	return &provider.DescribeResponse{
@@ -63,68 +77,66 @@ func (s *ProviderServer) Describe(_ context.Context, _ *provider.DescribeRequest
 }
 
 // Generate is a stub that returns success. The Generate phase is deferred.
-func (s *ProviderServer) Generate(_ context.Context, _ *provider.GenerateRequest) (*provider.GenerateResponse, error) {
+func (s *ProviderServer) Generate(
+	_ context.Context, _ *provider.GenerateRequest,
+) (*provider.GenerateResponse, error) {
 	return &provider.GenerateResponse{Success: true}, nil
 }
 
 // Scan evaluates configuration files against OPA policies using conftest.
-func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*provider.ScanResponse, error) {
+func (s *ProviderServer) Scan(
+	_ context.Context, req *provider.ScanRequest,
+) (*provider.ScanResponse, error) {
 	logger := hclog.Default()
 
 	if len(req.Targets) == 0 {
 		return nil, fmt.Errorf("no targets provided: at least one target is required")
 	}
 
-	if err := checkRequiredTools(logger); err != nil {
-		return nil, err
+	missing := s.opts.ToolChecker()
+	if len(missing) > 0 {
+		logger.Warn("required tools missing", "tools", missing)
+		return nil, toolcheck.FormatMissingToolsError(missing)
 	}
 
-	// Extract opa_bundle_ref from first target's variables
-	bundleRef := extractBundleRef(req.Targets)
-	if bundleRef == "" {
-		return nil, fmt.Errorf("opa_bundle_ref variable is required but not set in any target")
-	}
-
-	workspaceDir := provider.WorkspaceDir
-	if TestWorkspaceDir != "" {
-		workspaceDir = TestWorkspaceDir
-	}
-	cfg := config.NewConfig(workspaceDir)
+	cfg := config.NewConfig(s.opts.WorkspaceDir)
 	if err := cfg.EnsureDirectories(); err != nil {
 		return nil, fmt.Errorf("directory setup failed: %w", err)
 	}
 
-	// Pull policy bundle
-	logger.Info("pulling policy bundle", "ref", bundleRef)
-	if err := scan.PullBundle(bundleRef, cfg.PolicyDirPath(), ScanRunner); err != nil {
-		return nil, fmt.Errorf("pulling policy bundle: %w", err)
-	}
-
+	bundleCache := map[string]string{}
 	var allResults []*results.PerTargetResult
 
 	for _, target := range req.Targets {
-		targetResults, err := s.processTarget(logger, target, cfg)
-		if err != nil {
-			logger.Warn("target processing failed", "target", target.TargetID, "error", err)
-			errResult := &results.PerTargetResult{
-				Target: target.TargetID,
-				Status: "error",
-				Error:  err.Error(),
-			}
-			allResults = append(allResults, errResult)
-			continue
-		}
+		targetResults := s.processTarget(logger, target, cfg, bundleCache)
 		allResults = append(allResults, targetResults...)
 	}
 
-	return results.ToScanResponse(allResults), nil
+	resp := results.ToScanResponse(allResults)
+	scanStatus := results.ScanStatusAssessment(allResults)
+	resp.Assessments = append(
+		[]provider.AssessmentLog{scanStatus}, resp.Assessments...,
+	)
+
+	return resp, nil
 }
 
 func (s *ProviderServer) processTarget(
 	logger hclog.Logger,
 	target provider.Target,
 	cfg *config.Config,
-) ([]*results.PerTargetResult, error) {
+	bundleCache map[string]string,
+) []*results.PerTargetResult {
+	bundleRef := target.Variables["opa_bundle_ref"]
+	if bundleRef == "" {
+		logger.Warn("missing opa_bundle_ref", "target", target.TargetID)
+		return []*results.PerTargetResult{{
+			Target: target.TargetID,
+			Status: "error",
+			Error:  "opa_bundle_ref variable is required but not set",
+		}}
+	}
+
 	repoURL := target.Variables["url"]
 	inputPath := target.Variables["input_path"]
 	branchesStr := target.Variables["branches"]
@@ -135,108 +147,156 @@ func (s *ProviderServer) processTarget(
 		branchesStr = "main"
 	}
 
-	if err := validateTargetVariables(repoURL, inputPath, branchesStr, scanPath, accessToken); err != nil {
-		return nil, err
+	if err := validateTargetVariables(
+		repoURL, inputPath, branchesStr, scanPath, accessToken,
+	); err != nil {
+		return []*results.PerTargetResult{{
+			Target: target.TargetID,
+			Status: "error",
+			Error:  err.Error(),
+		}}
+	}
+
+	policyDir, ok := bundleCache[bundleRef]
+	if !ok {
+		policyDir = cfg.PolicyDirForBundle(bundleRef)
+		logger.Info("pulling policy bundle", "ref", bundleRef)
+		if err := scan.PullBundle(bundleRef, policyDir, s.opts.Runner); err != nil {
+			logger.Warn("bundle pull failed", "ref", bundleRef, "error", err)
+			return []*results.PerTargetResult{{
+				Target: target.TargetID,
+				Status: "error",
+				Error:  fmt.Sprintf("pulling policy bundle: %s", err),
+			}}
+		}
+		bundleCache[bundleRef] = policyDir
 	}
 
 	if repoURL != "" {
-		return s.processRemoteTarget(logger, repoURL, branchesStr, accessToken, scanPath, cfg)
+		return s.processRemoteBranches(
+			logger, target, splitCSV(branchesStr), policyDir, cfg,
+		)
 	}
 
-	return s.processLocalTarget(logger, inputPath, cfg)
+	return s.processLocalInput(logger, target, policyDir, cfg)
 }
 
-func (s *ProviderServer) processRemoteTarget(
+func (s *ProviderServer) processRemoteBranches(
 	logger hclog.Logger,
-	repoURL, branchesStr, accessToken, scanPath string,
+	target provider.Target,
+	branches []string,
+	policyDir string,
 	cfg *config.Config,
-) ([]*results.PerTargetResult, error) {
-	branches := splitCSV(branchesStr)
+) []*results.PerTargetResult {
 	var targetResults []*results.PerTargetResult
+	repoURL := target.Variables["url"]
 
 	for _, branch := range branches {
-		result, err := s.scanRemoteBranch(logger, repoURL, branch, accessToken, scanPath, cfg)
+		branchTarget := provider.Target{
+			TargetID:  target.TargetID,
+			Variables: copyVars(target.Variables),
+		}
+		branchTarget.Variables["branch"] = branch
+
+		workDir := cfg.ReposDirPath()
+		inputPath, err := s.opts.Loader.Load(branchTarget, workDir)
 		if err != nil {
-			logger.Warn("branch scan failed", "url", repoURL, "branch", branch, "error", err)
+			logger.Warn("data load failed",
+				"target", target.TargetID, "branch", branch, "error", err)
 			errResult := &results.PerTargetResult{
 				Target: targets.RepoDisplayName(repoURL),
 				Branch: branch,
 				Status: "error",
 				Error:  err.Error(),
 			}
-			targetResults = append(targetResults, errResult)
-			if writeErr := results.WritePerTargetResult(errResult, cfg.ResultsDirPath()); writeErr != nil {
+			if writeErr := results.WritePerTargetResult(
+				errResult, cfg.ResultsDirPath(),
+			); writeErr != nil {
 				logger.Error("failed to write error result", "error", writeErr)
 			}
+			targetResults = append(targetResults, errResult)
+			continue
+		}
+
+		result, err := s.evalAndParse(
+			logger, inputPath, policyDir,
+			targets.RepoDisplayName(repoURL), branch, cfg,
+		)
+		if err != nil {
+			logger.Warn("eval failed",
+				"target", target.TargetID, "branch", branch, "error", err)
+			errResult := &results.PerTargetResult{
+				Target: targets.RepoDisplayName(repoURL),
+				Branch: branch,
+				Status: "error",
+				Error:  err.Error(),
+			}
+			if writeErr := results.WritePerTargetResult(
+				errResult, cfg.ResultsDirPath(),
+			); writeErr != nil {
+				logger.Error("failed to write error result", "error", writeErr)
+			}
+			targetResults = append(targetResults, errResult)
 			continue
 		}
 		targetResults = append(targetResults, result)
 	}
 
-	return targetResults, nil
+	return targetResults
 }
 
-func (s *ProviderServer) scanRemoteBranch(
+func (s *ProviderServer) processLocalInput(
 	logger hclog.Logger,
-	repoURL, branch, accessToken, scanPath string,
+	target provider.Target,
+	policyDir string,
+	cfg *config.Config,
+) []*results.PerTargetResult {
+	inputPath, err := s.opts.Loader.Load(target, "")
+	if err != nil {
+		return []*results.PerTargetResult{{
+			Target: target.TargetID,
+			Status: "error",
+			Error:  err.Error(),
+		}}
+	}
+
+	result, err := s.evalAndParse(
+		logger, inputPath, policyDir, inputPath, "", cfg,
+	)
+	if err != nil {
+		return []*results.PerTargetResult{{
+			Target: target.TargetID,
+			Status: "error",
+			Error:  err.Error(),
+		}}
+	}
+
+	return []*results.PerTargetResult{result}
+}
+
+func (s *ProviderServer) evalAndParse(
+	logger hclog.Logger,
+	inputPath, policyDir, displayName, branch string,
 	cfg *config.Config,
 ) (*results.PerTargetResult, error) {
-	cloneDir := filepath.Join(cfg.ReposDirPath(), targets.SanitizeRepoURL(repoURL)+"-"+branch)
-
-	logger.Info("cloning repository", "url", repoURL, "branch", branch)
-	if err := scan.CloneRepository(repoURL, branch, cloneDir, accessToken, ScanRunner); err != nil {
-		return nil, fmt.Errorf("cloning repository: %w", err)
-	}
-
-	scanDir := cloneDir
-	if scanPath != "" {
-		scanDir = filepath.Join(cloneDir, scanPath)
-	}
-
-	logger.Info("evaluating policies", "path", scanDir)
-	raw, err := scan.EvalPolicy(scanDir, cfg.PolicyDirPath(), ScanRunner)
+	logger.Info("evaluating policies", "path", inputPath)
+	raw, err := scan.EvalPolicy(inputPath, policyDir, s.opts.Runner)
 	if err != nil {
 		return nil, fmt.Errorf("evaluating policies: %w", err)
 	}
 
-	displayName := targets.RepoDisplayName(repoURL)
 	result, err := results.ParseConftestOutput(raw, displayName, branch)
 	if err != nil {
 		return nil, fmt.Errorf("parsing conftest output: %w", err)
 	}
 
-	if writeErr := results.WritePerTargetResult(result, cfg.ResultsDirPath()); writeErr != nil {
+	if writeErr := results.WritePerTargetResult(
+		result, cfg.ResultsDirPath(),
+	); writeErr != nil {
 		logger.Error("failed to write result", "error", writeErr)
 	}
 
 	return result, nil
-}
-
-func (s *ProviderServer) processLocalTarget(
-	logger hclog.Logger,
-	inputPath string,
-	cfg *config.Config,
-) ([]*results.PerTargetResult, error) {
-	if err := targets.ValidateInputPath(inputPath); err != nil {
-		return nil, fmt.Errorf("validating input path: %w", err)
-	}
-
-	logger.Info("evaluating policies", "path", inputPath)
-	raw, err := scan.EvalPolicy(inputPath, cfg.PolicyDirPath(), ScanRunner)
-	if err != nil {
-		return nil, fmt.Errorf("evaluating policies: %w", err)
-	}
-
-	result, err := results.ParseConftestOutput(raw, inputPath, "")
-	if err != nil {
-		return nil, fmt.Errorf("parsing conftest output: %w", err)
-	}
-
-	if writeErr := results.WritePerTargetResult(result, cfg.ResultsDirPath()); writeErr != nil {
-		logger.Error("failed to write result", "error", writeErr)
-	}
-
-	return []*results.PerTargetResult{result}, nil
 }
 
 // splitCSV splits a comma-separated string into trimmed, non-empty parts.
@@ -252,8 +312,11 @@ func splitCSV(s string) []string {
 	return result
 }
 
-// validateTargetVariables performs defense-in-depth validation of target variables.
-func validateTargetVariables(repoURL, inputPath, branches, scanPath, accessToken string) error {
+// validateTargetVariables performs defense-in-depth validation of target
+// variables.
+func validateTargetVariables(
+	repoURL, inputPath, branches, scanPath, accessToken string,
+) error {
 	if repoURL != "" && inputPath != "" {
 		return fmt.Errorf("specify either url or input_path, not both")
 	}
@@ -274,10 +337,14 @@ func validateTargetVariables(repoURL, inputPath, branches, scanPath, accessToken
 				continue
 			}
 			if strings.Contains(b, "..") {
-				return fmt.Errorf("branch name contains path traversal: %q", b)
+				return fmt.Errorf(
+					"branch name contains path traversal: %q", b,
+				)
 			}
 			if !safeBranchPattern.MatchString(b) {
-				return fmt.Errorf("branch name contains invalid characters: %q", b)
+				return fmt.Errorf(
+					"branch name contains invalid characters: %q", b,
+				)
 			}
 		}
 	}
@@ -293,26 +360,10 @@ func validateTargetVariables(repoURL, inputPath, branches, scanPath, accessToken
 	return nil
 }
 
-func extractBundleRef(targetList []provider.Target) string {
-	for _, t := range targetList {
-		if ref, ok := t.Variables["opa_bundle_ref"]; ok && ref != "" {
-			return ref
-		}
+func copyVars(src map[string]string) map[string]string {
+	dst := make(map[string]string, len(src))
+	for k, v := range src {
+		dst[k] = v
 	}
-	return ""
-}
-
-func checkRequiredTools(logger hclog.Logger) error {
-	if SkipToolCheck {
-		return nil
-	}
-	missing, err := toolcheck.CheckTools()
-	if err != nil {
-		return fmt.Errorf("checking required tools: %w", err)
-	}
-	if len(missing) > 0 {
-		logger.Warn("required tools missing", "tools", missing)
-		return toolcheck.FormatMissingToolsError(missing)
-	}
-	return nil
+	return dst
 }

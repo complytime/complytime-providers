@@ -5,6 +5,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,6 +60,24 @@ func TestEnsureDirectories(t *testing.T) {
 		assert.True(t, info.IsDir())
 		assert.Equal(t, os.FileMode(0750), info.Mode().Perm())
 	}
+}
+
+func TestPolicyDirForBundle(t *testing.T) {
+	dir := t.TempDir()
+	cfg := NewConfig(dir)
+	result := cfg.PolicyDirForBundle("ghcr.io/org/bundle:dev")
+	assert.True(t, strings.HasPrefix(result, cfg.OpaDir()))
+	assert.Contains(t, result, "policy")
+}
+
+func TestPolicyDirForBundle_Sanitization(t *testing.T) {
+	dir := t.TempDir()
+	cfg := NewConfig(dir)
+
+	result := cfg.PolicyDirForBundle("oci://ghcr.io/org/bundle:latest")
+	assert.NotContains(t, filepath.Base(result), ":")
+	assert.NotContains(t, filepath.Base(result), "/")
+	assert.NotContains(t, filepath.Base(result), "oci://")
 }
 
 func TestEnsureDirectories_AlreadyExist(t *testing.T) {
