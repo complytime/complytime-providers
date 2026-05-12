@@ -45,11 +45,12 @@ go.work.sum
 # SDD state files
 .sdd-state.json
 
-# SDD prompts
+# SDD artifacts (local-only, never committed)
+docs/architecture/
+docs/specs/
 docs/prompts/
-
-# SDD development specs
 docs/development/
+docs/reference/
 
 # Agent dirs
 .cursor
