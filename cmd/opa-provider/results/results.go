@@ -243,8 +243,9 @@ func ToScanResponse(targetResults []*PerTargetResult) *provider.ScanResponse {
 }
 
 // ScanStatusAssessment returns a synthetic AssessmentLog reporting overall
-// scan health across all targets.
-func ScanStatusAssessment(targetResults []*PerTargetResult) provider.AssessmentLog {
+// scan health across all targets. If writeErr is non-nil, a result-persistence
+// step is appended to signal that writing scan results to disk failed.
+func ScanStatusAssessment(targetResults []*PerTargetResult, writeErr error) provider.AssessmentLog {
 	successCount := 0
 	var steps []provider.Step
 
@@ -270,9 +271,22 @@ func ScanStatusAssessment(targetResults []*PerTargetResult) provider.AssessmentL
 		}
 	}
 
+	if writeErr != nil {
+		steps = append(steps, provider.Step{
+			Name:    "result-persistence",
+			Result:  provider.ResultError,
+			Message: writeErr.Error(),
+		})
+	}
+
 	total := len(targetResults)
 	var message string
-	if successCount == total {
+	if writeErr != nil {
+		message = fmt.Sprintf(
+			"%d of %d targets scanned successfully; result persistence errors occurred",
+			successCount, total,
+		)
+	} else if successCount == total {
 		message = fmt.Sprintf("all %d targets scanned successfully", total)
 	} else {
 		message = fmt.Sprintf("%d of %d targets scanned successfully", successCount, total)

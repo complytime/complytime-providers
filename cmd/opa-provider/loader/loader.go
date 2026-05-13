@@ -22,7 +22,7 @@ type LocalPathLoader struct{}
 
 // Load validates and returns the local input path from target variables.
 func (l LocalPathLoader) Load(target provider.Target, _ string) (string, error) {
-	inputPath := target.Variables["input_path"]
+	inputPath := target.Variables[VarInputPath]
 	if inputPath == "" {
 		return "", fmt.Errorf("input_path variable is required but empty")
 	}
@@ -46,10 +46,10 @@ type GitLoader struct {
 // Load clones the repository specified in target variables and returns the
 // path to the cloned directory (or subdirectory if scan_path is set).
 func (g GitLoader) Load(target provider.Target, workDir string) (string, error) {
-	repoURL := target.Variables["url"]
-	branch := target.Variables["branch"]
-	accessToken := target.Variables["access_token"]
-	scanPath := target.Variables["scan_path"]
+	repoURL := target.Variables[VarURL]
+	branch := target.Variables[VarBranch]
+	accessToken := target.Variables[VarAccessToken]
+	scanPath := target.Variables[VarScanPath]
 
 	if branch == "" {
 		branch = "main"
@@ -97,10 +97,10 @@ func NewRouter(runner scan.CommandRunner) *Router {
 // Load delegates to GitLoader if url is set, LocalPathLoader if input_path is
 // set, or returns an error if neither is specified.
 func (r *Router) Load(target provider.Target, workDir string) (string, error) {
-	if target.Variables["url"] != "" {
+	if target.Variables[VarURL] != "" {
 		return r.git.Load(target, workDir)
 	}
-	if target.Variables["input_path"] != "" {
+	if target.Variables[VarInputPath] != "" {
 		return r.local.Load(target, workDir)
 	}
 	return "", fmt.Errorf("target must specify url or input_path")
