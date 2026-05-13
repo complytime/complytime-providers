@@ -1,0 +1,8 @@
+# Default owners for everything in the repo.
+*                        @complytime/complytime-dev
+
+# Provider-specific approvers.
+# The last matching pattern takes precedence.
+/cmd/openscap-provider/  @complytime/openscap-provider-approvers
+/cmd/ampel-provider/     @complytime/ampel-provider-approvers
+/cmd/opa-provider/       @complytime/opa-provider-approvers
