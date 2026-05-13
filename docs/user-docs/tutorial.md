@@ -36,12 +36,12 @@ This produces `bin/complyctl-provider-opa`.
 
 ## Step 2: Install the provider
 
-Copy the binary and its manifest to the complyctl providers directory:
+Copy the binary to the complyctl providers directory. The provider is
+discovered automatically by the `complyctl-provider-` naming convention:
 
 ```bash
 mkdir -p ~/.complytime/providers
 cp bin/complyctl-provider-opa ~/.complytime/providers/
-cp c2p-opa-manifest.json ~/.complytime/providers/
 ```
 
 Verify complyctl discovers the provider:

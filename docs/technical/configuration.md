@@ -175,8 +175,8 @@ The provider applies defense-in-depth validation on all target variables:
 |:-----|:------|
 | Both `url` and `input_path` set | `"specify either url or input_path, not both"` |
 | Neither `url` nor `input_path` set | `"url or input_path is required"` |
-| `url` not HTTPS | `"url must use HTTPS scheme"` |
-| Branch name contains `..` | `"branch name contains path traversal"` |
+| `url` not HTTPS | `"url \"<url>\" must use HTTPS scheme"` |
+| Branch name contains `..` | `"branch name contains path traversal: \"<branch>\""` |
 | Branch name has invalid characters | `"branch name contains invalid characters"` |
 | `scan_path` contains `..` | `"scan_path contains path traversal"` |
 | `access_token` contains `\n`, `\r`, `\x00` | `"access_token contains invalid characters"` |

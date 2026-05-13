@@ -2,7 +2,7 @@
 
 This document covers all exported types, functions, constants, and interfaces
 in the `complyctl-provider-opa` plugin. The provider lives under
-`cmd/opa-provider/` with six subpackages.
+`cmd/opa-provider/` with seven subpackages.
 
 ## Entry Point
 
@@ -10,7 +10,7 @@ in the `complyctl-provider-opa` plugin. The provider lives under
 
 ```go
 func main() {
-    opaProvider := server.New()
+    opaProvider := server.New(server.ServerOptions{})
     provider.Serve(opaProvider)
 }
 ```
@@ -27,10 +27,28 @@ prefix. The complyctl framework manages the gRPC subprocess lifecycle via
 
 ### Types
 
+#### ServerOptions
+
+```go
+type ServerOptions struct {
+    Loader       loader.DataLoader
+    Runner       scan.CommandRunner
+    ToolChecker  func() []string
+    WorkspaceDir string
+}
+```
+
+Configures the `ProviderServer` dependencies. Zero-value fields receive sensible
+production defaults: `Runner` defaults to `scan.ExecRunner{}`, `Loader` defaults
+to `loader.NewRouter(runner)`, `ToolChecker` defaults to `toolcheck.CheckTools`,
+and `WorkspaceDir` defaults to `provider.WorkspaceDir`.
+
 #### ProviderServer
 
 ```go
-type ProviderServer struct{}
+type ProviderServer struct {
+    opts ServerOptions
+}
 ```
 
 Implements the `provider.Provider` interface from
@@ -42,11 +60,12 @@ complyctl interacts with over gRPC.
 #### New
 
 ```go
-func New() *ProviderServer
+func New(opts ServerOptions) *ProviderServer
 ```
 
-Returns a new `ProviderServer` instance. Called once in `main()` and passed to
-`provider.Serve()`.
+Returns a new `ProviderServer` with the given options. Zero-value fields in
+`opts` are replaced with production defaults. Called once in `main()` and
+passed to `provider.Serve()`.
 
 #### Describe
 
@@ -102,34 +121,24 @@ primary RPC.
 **Behavior:**
 
 1. Validates required tools are present
-2. Extracts `opa_bundle_ref` from the first target's variables
-3. Creates workspace directories via `config.EnsureDirectories()`
-4. Pulls the OPA policy bundle from the OCI registry
-5. Iterates over each target:
-   - **Remote targets** (have `url`): clones the git repository per branch,
-     runs conftest against the cloned files
-   - **Local targets** (have `input_path`): runs conftest directly against the
-     local path
-6. Aggregates all results into a `provider.ScanResponse`
+2. Creates workspace directories via `config.EnsureDirectories()`
+3. Iterates over each target:
+   - Extracts `opa_bundle_ref` from the target's variables
+   - Pulls the OPA policy bundle (cached per bundle ref within the scan call)
+   - **Remote targets** (have `url`): delegates to `DataLoader` to clone the
+     repository per branch, then runs conftest against the cloned files
+   - **Local targets** (have `input_path`): delegates to `DataLoader` to
+     validate the path, then runs conftest directly
+4. Produces a `ScanStatusAssessment` summarizing overall scan health
+5. Aggregates all results into a `provider.ScanResponse`
 
 **Error handling:** Per-target errors are captured in the results (scan
-continues). Only global errors (no targets, missing bundle ref, tool check
-failure, bundle pull failure) return an error from `Scan()` itself.
+continues). Only global errors (no targets, tool check failure) return an error
+from `Scan()` itself. Missing `opa_bundle_ref` and bundle pull failures are
+per-target errors.
 
 **Returns:** `*provider.ScanResponse` containing `AssessmentLog` entries grouped
-by requirement ID.
-
-### Package-Level Variables
-
-```go
-var ScanRunner scan.CommandRunner = scan.ExecRunner{}
-var SkipToolCheck bool
-var TestWorkspaceDir string
-```
-
-These variables exist for testing. `ScanRunner` allows injecting a mock command
-runner. `SkipToolCheck` disables tool validation. `TestWorkspaceDir` overrides
-the workspace path.
+by requirement ID, prefixed with a `scan-status` assessment.
 
 ---
 
@@ -205,6 +214,17 @@ func (c *Config) ResultsDirPath() string
 Returns `<workspace>/opa/results`. This is where per-target JSON result files
 are written.
 
+#### PolicyDirForBundle
+
+```go
+func (c *Config) PolicyDirForBundle(bundleRef string) string
+```
+
+Returns a bundle-specific policy directory path derived from the bundle
+reference. The reference is sanitized (stripping `oci://` prefix, replacing
+`/` and `:` with `_`) and placed under `<workspace>/opa/policy/<sanitized>`.
+This isolates policies from different bundles.
+
 #### EnsureDirectories
 
 ```go
@@ -269,26 +289,6 @@ conftest pull oci://<bundleRef> --policy <policyDir>
 | `bundleRef` | OCI reference (e.g., `ghcr.io/org/bundle:dev`) |
 | `policyDir` | Local directory to store downloaded policies |
 | `runner` | Command executor |
-
-#### CloneRepository
-
-```go
-func CloneRepository(url, branch, cloneDir, accessToken string, runner CommandRunner) error
-```
-
-Clones a git repository at a specific branch with `--depth 1` (shallow clone).
-If `accessToken` is non-empty, it is injected via the platform-specific
-environment variable (`GITHUB_TOKEN` or `GITLAB_TOKEN`). The token is never
-passed as a command-line argument.
-
-**Command constructed:**
-
-```
-git clone --branch <branch> --depth 1 <url> <cloneDir>
-```
-
-**Platform detection:** The function inspects the URL hostname. URLs containing
-`gitlab` use `GITLAB_TOKEN`; all others use `GITHUB_TOKEN`.
 
 #### EvalPolicy
 
@@ -417,6 +417,82 @@ indicating the violation count.
 
 All assessments use `provider.ConfidenceLevelHigh`.
 
+#### ScanStatusAssessment
+
+```go
+func ScanStatusAssessment(targetResults []*PerTargetResult) provider.AssessmentLog
+```
+
+Returns a synthetic `AssessmentLog` with `RequirementID` `"scan-status"` that
+summarizes overall scan health. Each target produces a step with `ResultPassed`
+(if scanned) or `ResultFailed` (if errored). The message reports
+`"N of M targets scanned successfully"`.
+
+---
+
+## Package `loader`
+
+**File:** `cmd/opa-provider/loader/loader.go`
+
+### Interfaces
+
+#### DataLoader
+
+```go
+type DataLoader interface {
+    Load(target provider.Target, workDir string) (string, error)
+}
+```
+
+Loads input data for a scan target into the filesystem and returns the path
+to scan. This interface decouples data acquisition (git clone, local path
+validation) from the server orchestration logic.
+
+### Types
+
+#### LocalPathLoader
+
+```go
+type LocalPathLoader struct{}
+```
+
+Validates and returns the local `input_path` from target variables. Rejects
+paths containing directory traversal (`..`) and paths that do not exist.
+
+#### GitLoader
+
+```go
+type GitLoader struct {
+    Runner scan.CommandRunner
+}
+```
+
+Clones a git repository and returns the path to scan. Reads `url`, `branch`,
+`access_token`, and `scan_path` from target variables. Uses `--depth 1`
+shallow clone. When `access_token` is provided, injects credentials via
+`GIT_CONFIG_COUNT` environment variables (credential helper pattern, no
+temporary files).
+
+#### Router
+
+```go
+type Router struct { /* unexported fields */ }
+```
+
+Dispatches to `GitLoader` (when `url` is set) or `LocalPathLoader` (when
+`input_path` is set).
+
+### Functions
+
+#### NewRouter
+
+```go
+func NewRouter(runner scan.CommandRunner) *Router
+```
+
+Creates a `Router` that dispatches to the appropriate loader based on target
+variables.
+
 ---
 
 ## Package `targets`
@@ -491,7 +567,7 @@ The external tools the OPA provider depends on.
 #### CheckTools
 
 ```go
-func CheckTools() ([]string, error)
+func CheckTools() []string
 ```
 
 Verifies that all required tools are available on the system PATH. Returns a
