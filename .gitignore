@@ -42,16 +42,6 @@ go.work.sum
 *~
 .vscode
 
-# SDD state files
-.sdd-state.json
-
-# SDD artifacts (local-only, never committed)
-docs/architecture/
-docs/specs/
-docs/prompts/
-docs/development/
-docs/reference/
-
 # Agent dirs
 .cursor
 .claude
