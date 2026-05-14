@@ -79,7 +79,11 @@ func (g GitLoader) Load(target provider.Target, workDir string) (string, error) 
 	}
 
 	if scanPath != "" {
-		return filepath.Join(cloneDir, scanPath), nil
+		cleanScanPath := filepath.Clean(scanPath)
+		if strings.Contains(cleanScanPath, "..") {
+			return "", fmt.Errorf("scan_path %q contains directory traversal", scanPath)
+		}
+		return filepath.Join(cloneDir, cleanScanPath), nil
 	}
 	return cloneDir, nil
 }
@@ -117,7 +121,7 @@ func buildCredentialHelperEnv(username, token string) []string {
 	escapedUser := strings.ReplaceAll(username, "'", "'\\''")
 	escapedToken := strings.ReplaceAll(token, "'", "'\\''")
 	helper := fmt.Sprintf(
-		`!f() { test "$1" = get && echo "username='%s'" && echo "password='%s'"; }; f`,
+		`!f() { test "$1" = get && printf 'username=%%s\npassword=%%s\n' '%s' '%s'; }; f`,
 		escapedUser, escapedToken,
 	)
 
