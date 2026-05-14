@@ -165,10 +165,18 @@ func WritePerTargetResult(result *PerTargetResult, dir string) error {
 }
 
 // ToScanResponse maps a slice of PerTargetResults to a provider.ScanResponse.
+// Findings are grouped by requirement ID into AssessmentLog entries. Each
+// target/branch scan becomes a Step within the assessment.
+//
+// TODO: Once complyctl#510 merges, operational errors (failed clones, bundle
+// pull failures, write errors) should be placed into resp.Errors instead of
+// synthetic "scan-error" assessment entries.
 func ToScanResponse(targetResults []*PerTargetResult) *provider.ScanResponse {
 	type reqGroup struct {
 		requirementID string
 		steps         []provider.Step
+		passCount     int
+		totalCount    int
 	}
 
 	groups := make(map[string]*reqGroup)
@@ -187,11 +195,16 @@ func ToScanResponse(targetResults []*PerTargetResult) *provider.ScanResponse {
 				groups[f.RequirementID] = g
 				order = append(order, f.RequirementID)
 			}
+			result := mapResult(f.Result, tr.Status)
 			g.steps = append(g.steps, provider.Step{
 				Name:    stepName,
-				Result:  mapResult(f.Result),
+				Result:  result,
 				Message: f.Reason,
 			})
+			g.totalCount++
+			if result == provider.ResultPassed {
+				g.passCount++
+			}
 		}
 
 		if tr.Status == "error" && len(tr.Findings) == 0 {
@@ -207,6 +220,7 @@ func ToScanResponse(targetResults []*PerTargetResult) *provider.ScanResponse {
 				Result:  provider.ResultError,
 				Message: tr.Error,
 			})
+			g.totalCount++
 		}
 	}
 
@@ -225,16 +239,10 @@ func ToScanResponse(targetResults []*PerTargetResult) *provider.ScanResponse {
 	assessments := make([]provider.AssessmentLog, 0, len(groups))
 	for _, reqID := range dedupOrder {
 		g := groups[reqID]
-		failCount := 0
-		for _, step := range g.steps {
-			if step.Result == provider.ResultFailed {
-				failCount++
-			}
-		}
 		assessments = append(assessments, provider.AssessmentLog{
 			RequirementID: g.requirementID,
 			Steps:         g.steps,
-			Message:       fmt.Sprintf("%d violations across %d targets", failCount, len(g.steps)),
+			Message:       fmt.Sprintf("%d of %d targets passed", g.passCount, g.totalCount),
 			Confidence:    provider.ConfidenceLevelHigh,
 		})
 	}
@@ -300,12 +308,15 @@ func ScanStatusAssessment(targetResults []*PerTargetResult, writeErr error) prov
 	}
 }
 
-func mapResult(findingResult string) provider.Result {
+func mapResult(findingResult, targetStatus string) provider.Result {
+	if targetStatus == "error" {
+		return provider.ResultError
+	}
 	switch findingResult {
-	case "fail":
-		return provider.ResultFailed
 	case "pass":
 		return provider.ResultPassed
+	case "fail":
+		return provider.ResultFailed
 	default:
 		return provider.ResultError
 	}
