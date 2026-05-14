@@ -194,7 +194,7 @@ The plugin is discovered automatically by complyctl — no manifest files or che
 
 ### Running
 
-To use the plugin with `complyctl`, see the [complyctl documentation](https://github.com/complytime/complyctl).
+To use the plugin with `complyctl`, see the quick start [guide](../../docs/QUICK_START.md).
 
 ### Using complytime-demos with a Fedora 43 VM
 
