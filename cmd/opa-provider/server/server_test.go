@@ -99,7 +99,7 @@ func newTestServer(
 	return New(ServerOptions{
 		Loader:       ldr,
 		Runner:       runner,
-		ToolChecker:  func() []string { return nil },
+		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: t.TempDir(),
 	})
 }
@@ -167,7 +167,7 @@ func TestNew_DefaultOptions(t *testing.T) {
 func TestNew_CustomOptions(t *testing.T) {
 	ldr := &mockLoader{}
 	runner := &mockRunner{}
-	checker := func() []string { return []string{"missing"} }
+	checker := func() ([]string, error) { return []string{"missing"}, nil }
 	dir := t.TempDir()
 
 	srv := New(ServerOptions{
@@ -177,14 +177,15 @@ func TestNew_CustomOptions(t *testing.T) {
 		WorkspaceDir: dir,
 	})
 	assert.Equal(t, dir, srv.opts.WorkspaceDir)
-	assert.Equal(t, []string{"missing"}, srv.opts.ToolChecker())
+	result, _ := srv.opts.ToolChecker()
+	assert.Equal(t, []string{"missing"}, result)
 }
 
 // --- Describe tests ---
 
 func TestDescribe_Healthy(t *testing.T) {
 	srv := New(ServerOptions{
-		ToolChecker: func() []string { return nil },
+		ToolChecker: func() ([]string, error) { return nil, nil },
 	})
 	resp, err := srv.Describe(
 		context.Background(), &provider.DescribeRequest{},
@@ -196,7 +197,7 @@ func TestDescribe_Healthy(t *testing.T) {
 
 func TestDescribe_Unhealthy(t *testing.T) {
 	srv := New(ServerOptions{
-		ToolChecker: func() []string { return []string{"conftest"} },
+		ToolChecker: func() ([]string, error) { return []string{"conftest"}, nil },
 	})
 	resp, err := srv.Describe(
 		context.Background(), &provider.DescribeRequest{},
@@ -208,7 +209,7 @@ func TestDescribe_Unhealthy(t *testing.T) {
 
 func TestDescribe_Variables(t *testing.T) {
 	srv := New(ServerOptions{
-		ToolChecker: func() []string { return nil },
+		ToolChecker: func() ([]string, error) { return nil, nil },
 	})
 	resp, err := srv.Describe(
 		context.Background(), &provider.DescribeRequest{},
@@ -408,7 +409,7 @@ func TestScan_NoTargets(t *testing.T) {
 
 func TestScan_ToolCheckFailure(t *testing.T) {
 	srv := New(ServerOptions{
-		ToolChecker:  func() []string { return []string{"conftest"} },
+		ToolChecker:  func() ([]string, error) { return []string{"conftest"}, nil },
 		WorkspaceDir: t.TempDir(),
 	})
 	target := localTarget(t, t.TempDir(), "ghcr.io/org/bundle:dev")
@@ -911,13 +912,13 @@ func TestScan_NoGlobals(t *testing.T) {
 	srv1 := New(ServerOptions{
 		Runner:       runner1,
 		Loader:       ldr1,
-		ToolChecker:  func() []string { return nil },
+		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: t.TempDir(),
 	})
 	srv2 := New(ServerOptions{
 		Runner:       runner2,
 		Loader:       ldr2,
-		ToolChecker:  func() []string { return nil },
+		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: t.TempDir(),
 	})
 

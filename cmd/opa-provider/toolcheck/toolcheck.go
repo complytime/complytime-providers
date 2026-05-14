@@ -13,7 +13,7 @@ var RequiredTools = []string{"conftest", "git"}
 
 // CheckTools verifies that all required tools are available on the system PATH.
 // It returns a list of missing tool names.
-func CheckTools() []string {
+func CheckTools() ([]string, error) {
 	var missing []string
 	for _, tool := range RequiredTools {
 		_, err := exec.LookPath(tool)
@@ -21,7 +21,7 @@ func CheckTools() []string {
 			missing = append(missing, tool)
 		}
 	}
-	return missing
+	return missing, nil
 }
 
 // FormatMissingToolsError constructs an error message listing each missing tool.

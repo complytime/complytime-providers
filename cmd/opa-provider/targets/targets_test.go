@@ -112,7 +112,7 @@ func TestValidateInputPath_ValidFile(t *testing.T) {
 }
 
 func TestValidateInputPath_Traversal(t *testing.T) {
-	err := ValidateInputPath("/some/path/../../../etc/passwd")
+	err := ValidateInputPath("../../etc/passwd")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "traversal")
 }

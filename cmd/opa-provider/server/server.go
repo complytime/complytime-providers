@@ -29,7 +29,7 @@ var _ provider.Provider = (*ProviderServer)(nil)
 type ServerOptions struct {
 	Loader       loader.DataLoader
 	Runner       scan.CommandRunner
-	ToolChecker  func() []string
+	ToolChecker  func() ([]string, error)
 	WorkspaceDir string
 }
 
@@ -63,7 +63,10 @@ func (s *ProviderServer) Describe(
 	healthy := true
 	var errMsg string
 
-	missing := s.opts.ToolChecker()
+	missing, err := s.opts.ToolChecker()
+	if err != nil {
+		return nil, fmt.Errorf("checking tools: %w", err)
+	}
 	if len(missing) > 0 {
 		healthy = false
 		errMsg = toolcheck.FormatMissingToolsError(missing).Error()
@@ -94,7 +97,10 @@ func (s *ProviderServer) Scan(
 		return nil, fmt.Errorf("no targets provided: at least one target is required")
 	}
 
-	missing := s.opts.ToolChecker()
+	missing, err := s.opts.ToolChecker()
+	if err != nil {
+		return nil, fmt.Errorf("checking tools: %w", err)
+	}
 	if len(missing) > 0 {
 		logger.Warn("required tools missing", "tools", missing)
 		return nil, toolcheck.FormatMissingToolsError(missing)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -90,12 +91,14 @@ func RepoDisplayName(repoURL string) string {
 }
 
 // ValidateInputPath checks that a local input path exists and does not
-// contain directory traversal sequences.
+// contain directory traversal sequences. The path is cleaned with
+// filepath.Clean to normalize traversal sequences before checking.
 func ValidateInputPath(inputPath string) error {
-	if strings.Contains(inputPath, "..") {
+	cleanPath := filepath.Clean(inputPath)
+	if strings.Contains(cleanPath, "..") {
 		return fmt.Errorf("input path %q contains directory traversal", inputPath)
 	}
-	if _, err := os.Stat(inputPath); err != nil {
+	if _, err := os.Stat(cleanPath); err != nil {
 		return fmt.Errorf("input path %q does not exist: %w", inputPath, err)
 	}
 	return nil

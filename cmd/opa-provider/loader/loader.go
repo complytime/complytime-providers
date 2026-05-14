@@ -9,7 +9,9 @@ import (
 	"strings"
 
 	"github.com/complytime/complyctl/pkg/provider"
+
 	"github.com/complytime/complytime-providers/cmd/opa-provider/scan"
+	"github.com/complytime/complytime-providers/cmd/opa-provider/targets"
 )
 
 // DataLoader loads input data for a scan target into the filesystem.
@@ -21,21 +23,23 @@ type DataLoader interface {
 type LocalPathLoader struct{}
 
 // Load validates and returns the local input path from target variables.
+// The path is cleaned with filepath.Clean to normalize traversal sequences.
 func (l LocalPathLoader) Load(target provider.Target, _ string) (string, error) {
 	inputPath := target.Variables[VarInputPath]
 	if inputPath == "" {
 		return "", fmt.Errorf("input_path variable is required but empty")
 	}
 
-	if strings.Contains(inputPath, "..") {
+	cleanPath := filepath.Clean(inputPath)
+	if strings.Contains(cleanPath, "..") {
 		return "", fmt.Errorf("input path %q contains directory traversal", inputPath)
 	}
 
-	if _, err := os.Stat(inputPath); err != nil {
+	if _, err := os.Stat(cleanPath); err != nil {
 		return "", fmt.Errorf("input path %q: %w", inputPath, err)
 	}
 
-	return inputPath, nil
+	return cleanPath, nil
 }
 
 // GitLoader clones a git repository and returns the path to scan.
@@ -55,7 +59,7 @@ func (g GitLoader) Load(target provider.Target, workDir string) (string, error) 
 		branch = "main"
 	}
 
-	cloneDir := filepath.Join(workDir, sanitizeURL(repoURL), branch)
+	cloneDir := filepath.Join(workDir, targets.SanitizeRepoURL(repoURL), branch)
 	args := []string{"clone", "--branch", branch, "--depth", "1", repoURL, cloneDir}
 
 	var err error
@@ -106,34 +110,23 @@ func (r *Router) Load(target provider.Target, workDir string) (string, error) {
 	return "", fmt.Errorf("target must specify url or input_path")
 }
 
+// buildCredentialHelperEnv creates a copy of the current environment with
+// GIT_CONFIG_COUNT-based credential helper variables appended. The token
+// is escaped for shell safety by replacing single quotes.
 func buildCredentialHelperEnv(username, token string) []string {
+	escapedUser := strings.ReplaceAll(username, "'", "'\\''")
+	escapedToken := strings.ReplaceAll(token, "'", "'\\''")
 	helper := fmt.Sprintf(
-		`!f() { test "$1" = get && echo "username=%s" && echo "password=%s"; }; f`,
-		username, token,
+		`!f() { test "$1" = get && echo "username='%s'" && echo "password='%s'"; }; f`,
+		escapedUser, escapedToken,
 	)
-	return []string{
+
+	env := os.Environ()
+	env = append(env,
 		"GIT_CONFIG_COUNT=1",
 		"GIT_CONFIG_KEY_0=credential.helper",
-		"GIT_CONFIG_VALUE_0=" + helper,
+		"GIT_CONFIG_VALUE_0="+helper,
 		"GIT_TERMINAL_PROMPT=0",
-	}
-}
-
-func sanitizeURL(repoURL string) string {
-	name := repoURL
-	for _, prefix := range []string{"https://", "http://"} {
-		if strings.HasPrefix(name, prefix) {
-			name = name[len(prefix):]
-			break
-		}
-	}
-	var result []rune
-	for _, r := range name {
-		if r == '/' || r == '.' || r == ':' {
-			result = append(result, '-')
-		} else {
-			result = append(result, r)
-		}
-	}
-	return string(result)
+	)
+	return env
 }

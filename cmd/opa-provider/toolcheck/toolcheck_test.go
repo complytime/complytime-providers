@@ -13,7 +13,8 @@ func TestCheckTools_AllPresent(t *testing.T) {
 	RequiredTools = []string{"go"}
 	defer func() { RequiredTools = origTools }()
 
-	missing := CheckTools()
+	missing, err := CheckTools()
+	assert.NoError(t, err)
 	assert.Empty(t, missing)
 }
 
@@ -22,7 +23,8 @@ func TestCheckTools_Missing(t *testing.T) {
 	RequiredTools = []string{"conftest-nonexistent-tool-abc123"}
 	defer func() { RequiredTools = origTools }()
 
-	missing := CheckTools()
+	missing, err := CheckTools()
+	assert.NoError(t, err)
 	assert.Contains(t, missing, "conftest-nonexistent-tool-abc123")
 }
 
@@ -31,7 +33,8 @@ func TestCheckTools_PartiallyMissing(t *testing.T) {
 	RequiredTools = []string{"go", "conftest-nonexistent-tool-abc123"}
 	defer func() { RequiredTools = origTools }()
 
-	missing := CheckTools()
+	missing, err := CheckTools()
+	assert.NoError(t, err)
 	assert.NotContains(t, missing, "go")
 	assert.Contains(t, missing, "conftest-nonexistent-tool-abc123")
 }
@@ -41,7 +44,8 @@ func TestCheckTools_ReturnSliceOnly(t *testing.T) {
 	RequiredTools = []string{"go"}
 	defer func() { RequiredTools = origTools }()
 
-	result := CheckTools()
+	result, err := CheckTools()
+	assert.NoError(t, err)
 	assert.Empty(t, result)
 }
 

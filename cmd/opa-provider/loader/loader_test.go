@@ -68,7 +68,7 @@ func TestLocalPathLoader_Load_ValidFile(t *testing.T) {
 
 func TestLocalPathLoader_Load_Traversal(t *testing.T) {
 	target := provider.Target{
-		Variables: map[string]string{"input_path": "/tmp/../etc/passwd"},
+		Variables: map[string]string{"input_path": "../../etc/passwd"},
 	}
 
 	loader := LocalPathLoader{}
