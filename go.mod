@@ -6,7 +6,7 @@ require (
 	github.com/antchfx/xmlquery v1.5.1
 	github.com/complytime/complybeacon/proofwatch v0.0.0-20260424082805-85cfda04ee52
 	github.com/complytime/complyctl v1.0.0-alpha.0.0.20260423124442-eafccc5f4f2b
-	github.com/gemaraproj/go-gemara v0.3.0
+	github.com/gemaraproj/go-gemara v0.5.0
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.19.0
