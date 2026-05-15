@@ -10,7 +10,7 @@ Compliance-scanning provider plugins for the [complyctl](https://github.com/comp
 | [ampel-provider](cmd/ampel-provider/) | `complyctl-provider-ampel` | In-toto attestation-based policy verification using AMPEL and snappy |
 | [opa-provider](cmd/opa-provider/) | `complyctl-provider-opa` | OPA/conftest-based configuration policy evaluation |
 
-Both providers support evidence export via OTLP (`complyctl scan --format otel`),
+The openscap and ampel providers support evidence export via OTLP (`complyctl scan --format otel`),
 shipping compliance evidence as structured log records to a Beacon collector
 via [ProofWatch](https://github.com/complytime/complybeacon).
 
