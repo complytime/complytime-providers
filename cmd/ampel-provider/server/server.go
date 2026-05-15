@@ -232,6 +232,9 @@ func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*pr
 				}
 
 				repoResults = append(repoResults, parsed)
+				if writeErr := results.WritePerRepoResult(parsed, resultsDir); writeErr != nil {
+					logger.Error("failed to write result", "error", writeErr)
+				}
 			}
 		}
 	}
