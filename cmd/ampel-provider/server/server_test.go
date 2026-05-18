@@ -337,7 +337,7 @@ func TestScan_ValidTargets(t *testing.T) {
 	resultsDir := filepath.Join(dir, provider.WorkspaceDir, config.ProviderDir, config.DefaultResultsDir)
 	files, err := os.ReadDir(resultsDir)
 	require.NoError(t, err)
-	require.Len(t, files, 2) // snappy attestation + ampel intoto result
+	require.Len(t, files, 3) // snappy attestation + ampel intoto result + per-repo result
 }
 
 func TestScan_EmptySpecs_ReturnsError(t *testing.T) {
@@ -386,11 +386,11 @@ func TestScan_MultipleSpecs(t *testing.T) {
 	require.Len(t, scanResp.Assessments, 1)
 	require.Len(t, scanResp.Assessments[0].Steps, 2)
 
-	// Verify 4 output files (2 snappy + 2 ampel)
+	// Verify 5 output files (2 snappy + 2 ampel + 1 per-repo result)
 	resultsDir := filepath.Join(dir, provider.WorkspaceDir, config.ProviderDir, config.DefaultResultsDir)
 	files, err := os.ReadDir(resultsDir)
 	require.NoError(t, err)
-	require.Len(t, files, 4)
+	require.Len(t, files, 5)
 }
 
 func TestScan_ScanError_ContinuesScanning(t *testing.T) {
