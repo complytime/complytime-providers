@@ -46,6 +46,9 @@ go.work.sum
 .cursor
 .claude
 
+# Provider runtime workspace artifacts
+.complytime/
+
 megalinter-reports/
 
 # Ignore generated credentials from google-github-actions/auth
