@@ -83,10 +83,12 @@ func (m *mockRunner) run(name string, args ...string) ([]byte, error) {
 	}
 	if name == "ampel" {
 		// Write ampel output to the results path specified by --results-path
-		for i, arg := range args {
-			if arg == "--results-path" && i+1 < len(args) {
-				_ = os.WriteFile(args[i+1], m.ampelOutput, 0600)
-				break
+		if m.ampelOutput != nil {
+			for i, arg := range args {
+				if arg == "--results-path" && i+1 < len(args) {
+					_ = os.WriteFile(args[i+1], m.ampelOutput, 0600)
+					break
+				}
 			}
 		}
 		if m.ampelErr != nil {
@@ -245,6 +247,13 @@ func TestSanitizeSpecName(t *testing.T) {
 	}
 }
 
+func writeTempPolicy(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "policy.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"policies":[]}`), 0600))
+	return path
+}
+
 func TestScanRepository_MockSuccess(t *testing.T) {
 	tmpDir := t.TempDir()
 	attestation := makeTestAttestation("abc123def456")
@@ -259,7 +268,7 @@ func TestScanRepository_MockSuccess(t *testing.T) {
 		Platform: "github",
 	}
 	cfg := ScanConfig{
-		PolicyPath: "/policy.json",
+		PolicyPath: writeTempPolicy(t, tmpDir),
 		OutputDir:  tmpDir,
 		SpecDir:    filepath.Join(tmpDir, "specs"),
 	}
@@ -297,7 +306,7 @@ func TestScanRepository_GitLabSupported(t *testing.T) {
 		Platform: "gitlab",
 	}
 	cfg := ScanConfig{
-		PolicyPath: "/policy.json",
+		PolicyPath: writeTempPolicy(t, tmpDir),
 		OutputDir:  tmpDir,
 		SpecDir:    t.TempDir(),
 	}
@@ -309,13 +318,14 @@ func TestScanRepository_GitLabSupported(t *testing.T) {
 }
 
 func TestScanRepository_SnappyError(t *testing.T) {
+	tmpDir := t.TempDir()
 	runner := &mockRunner{
 		snappyErr: fmt.Errorf("exec: \"snappy\": executable file not found in $PATH"),
 	}
 	repo := RepoTarget{URL: "https://github.com/myorg/myrepo", Platform: "github"}
 	cfg := ScanConfig{
-		PolicyPath: "/policy.json",
-		OutputDir:  t.TempDir(),
+		PolicyPath: writeTempPolicy(t, tmpDir),
+		OutputDir:  tmpDir,
 		SpecDir:    t.TempDir(),
 	}
 
@@ -335,7 +345,7 @@ func TestScanRepository_AmpelExitError_SavesResult(t *testing.T) {
 	}
 	repo := RepoTarget{URL: "https://github.com/myorg/myrepo", Platform: "github"}
 	cfg := ScanConfig{
-		PolicyPath: "/policy.json",
+		PolicyPath: writeTempPolicy(t, tmpDir),
 		OutputDir:  tmpDir,
 		SpecDir:    t.TempDir(),
 	}
@@ -355,14 +365,15 @@ func TestScanRepository_AmpelExitError_SavesResult(t *testing.T) {
 
 func TestScanRepository_AmpelNonExecError(t *testing.T) {
 	// Non-exec errors (e.g., command not found) are fatal
+	tmpDir := t.TempDir()
 	runner := &mockRunner{
 		snappyOutput: makeTestAttestation("abc123"),
 		ampelErr:     fmt.Errorf("exec: \"ampel\": executable file not found in $PATH"),
 	}
 	repo := RepoTarget{URL: "https://github.com/myorg/myrepo", Platform: "github"}
 	cfg := ScanConfig{
-		PolicyPath: "/policy.json",
-		OutputDir:  t.TempDir(),
+		PolicyPath: writeTempPolicy(t, tmpDir),
+		OutputDir:  tmpDir,
 		SpecDir:    t.TempDir(),
 	}
 
@@ -373,13 +384,14 @@ func TestScanRepository_AmpelNonExecError(t *testing.T) {
 
 func TestScanRepository_InvalidAttestationHash(t *testing.T) {
 	// Snappy returns data that can't be parsed for a hash
+	tmpDir := t.TempDir()
 	runner := &mockRunner{
 		snappyOutput: []byte(`{"_type":"statement","subject":[]}`),
 	}
 	repo := RepoTarget{URL: "https://github.com/myorg/myrepo", Platform: "github"}
 	cfg := ScanConfig{
-		PolicyPath: "/policy.json",
-		OutputDir:  t.TempDir(),
+		PolicyPath: writeTempPolicy(t, tmpDir),
+		OutputDir:  tmpDir,
 		SpecDir:    t.TempDir(),
 	}
 
@@ -403,7 +415,7 @@ func TestScanRepository_WithAccessToken_GitHub(t *testing.T) {
 		Platform:    "github",
 	}
 	cfg := ScanConfig{
-		PolicyPath: "/policy.json",
+		PolicyPath: writeTempPolicy(t, tmpDir),
 		OutputDir:  tmpDir,
 		SpecDir:    t.TempDir(),
 	}
@@ -439,7 +451,7 @@ func TestScanRepository_WithAccessToken_GitLab(t *testing.T) {
 		Platform:    "gitlab",
 	}
 	cfg := ScanConfig{
-		PolicyPath: "/policy.json",
+		PolicyPath: writeTempPolicy(t, tmpDir),
 		OutputDir:  tmpDir,
 		SpecDir:    t.TempDir(),
 	}
@@ -474,7 +486,7 @@ func TestScanRepository_NoAccessToken_UsesRun(t *testing.T) {
 		Platform: "github",
 	}
 	cfg := ScanConfig{
-		PolicyPath: "/policy.json",
+		PolicyPath: writeTempPolicy(t, tmpDir),
 		OutputDir:  tmpDir,
 		SpecDir:    t.TempDir(),
 	}
@@ -485,4 +497,43 @@ func TestScanRepository_NoAccessToken_UsesRun(t *testing.T) {
 
 	// Verify RunWithEnv was NOT called (no custom env)
 	require.Nil(t, runner.lastEnv, "RunWithEnv should not be called when no token is set")
+}
+
+func TestScanRepository_MissingPolicyFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	runner := &mockRunner{
+		snappyOutput: makeTestAttestation("abc123"),
+	}
+	repo := RepoTarget{URL: "https://github.com/myorg/myrepo", Platform: "github"}
+	cfg := ScanConfig{
+		PolicyPath: filepath.Join(tmpDir, "nonexistent-policy.json"),
+		OutputDir:  tmpDir,
+		SpecDir:    t.TempDir(),
+	}
+
+	_, err := ScanRepository(repo, "main", "/specs/test.yaml", cfg, runner)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "policy file not found")
+	require.Contains(t, err.Error(), "was Generate called?")
+}
+
+func TestScanRepository_AmpelExitError_NoResultFile(t *testing.T) {
+	// ampel verify exits non-zero and doesn't write a result file
+	tmpDir := t.TempDir()
+	runner := &mockRunner{
+		snappyOutput: makeTestAttestation("abc123"),
+		ampelOutput:  nil, // no output written to file
+		ampelErr:     &exec.ExitError{ProcessState: nil},
+	}
+	repo := RepoTarget{URL: "https://github.com/myorg/myrepo", Platform: "github"}
+	cfg := ScanConfig{
+		PolicyPath: writeTempPolicy(t, tmpDir),
+		OutputDir:  tmpDir,
+		SpecDir:    t.TempDir(),
+	}
+
+	specPath := ResolveSpecPath("github/branch-rules.yaml", cfg.SpecDir)
+	_, err := ScanRepository(repo, "main", specPath, cfg, runner)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "reading ampel results")
 }

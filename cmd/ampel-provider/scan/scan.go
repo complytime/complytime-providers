@@ -284,6 +284,10 @@ func ScanRepository(repo RepoTarget, branch, specPath string, cfg ScanConfig, ru
 		return nil, fmt.Errorf("extracting subject hash for %s branch %s: %w", repo.URL, branch, err)
 	}
 
+	if _, err := os.Stat(cfg.PolicyPath); err != nil {
+		return nil, fmt.Errorf("policy file not found at %s (was Generate called?): %w", cfg.PolicyPath, err)
+	}
+
 	// Run ampel verify with the subject hash, policy, and attestation.
 	// ampel writes the in-toto attestation with results to resultsPath.
 	// A non-zero exit code means policy checks failed, not a tool error.
@@ -297,7 +301,7 @@ func ScanRepository(repo RepoTarget, branch, specPath string, cfg ScanConfig, ru
 	if err != nil {
 		var exitErr *exec.ExitError
 		if !errors.As(err, &exitErr) {
-			return nil, fmt.Errorf("ampel verify failed for %s branch %s: %w", repo.URL, branch, err)
+			return nil, fmt.Errorf("ampel verify failed for %s branch %s: %w (output: %s)", repo.URL, branch, err, string(ampelCmdOutput))
 		}
 		logger.Info("ampel verify returned non-zero exit", "repo", repo.URL, "branch", branch, "exit_code", exitErr.ExitCode())
 	}
@@ -305,7 +309,7 @@ func ScanRepository(repo RepoTarget, branch, specPath string, cfg ScanConfig, ru
 	// Read the in-toto attestation written by ampel
 	ampelOut, err := os.ReadFile(ampelResultFile)
 	if err != nil {
-		return nil, fmt.Errorf("reading ampel results for %s branch %s: %w", repo.URL, branch, err)
+		return nil, fmt.Errorf("reading ampel results for %s branch %s: %w (ampel output: %s)", repo.URL, branch, err, string(ampelCmdOutput))
 	}
 
 	return &RawScanResult{Output: ampelOut}, nil
