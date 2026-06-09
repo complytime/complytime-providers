@@ -227,6 +227,37 @@ func ToScanResponse(targetResults []*PerTargetResult, reverseMap map[string]stri
 		}
 	}
 
+	// Synthesize passing assessments for requirements in the reverse map
+	// that have no findings. The Gemara EvaluationLog CUE schema requires
+	// at least one step per assessment, so requirements where all checks
+	// passed (zero findings from conftest) need explicit passing entries.
+	if reverseMap != nil {
+		for _, gemaraID := range sortedValues(reverseMap) {
+			if _, exists := groups[gemaraID]; exists {
+				continue
+			}
+			g := &reqGroup{requirementID: gemaraID}
+			for _, tr := range targetResults {
+				if tr.Status != "scanned" {
+					continue
+				}
+				stepName := tr.Target
+				if tr.Branch != "" {
+					stepName += "@" + tr.Branch
+				}
+				g.steps = append(g.steps, provider.Step{
+					Name:    stepName,
+					Result:  provider.ResultPassed,
+					Message: "all checks passed",
+				})
+				g.totalCount++
+				g.passCount++
+			}
+			groups[gemaraID] = g
+			order = append(order, gemaraID)
+		}
+	}
+
 	// Sort for deterministic output
 	sort.Strings(order)
 	// Deduplicate after sorting (order may have duplicates if same reqID from multiple targets)
@@ -332,6 +363,21 @@ func truncateField(s string, max int) string {
 		return s
 	}
 	return s[:max] + "[truncated]"
+}
+
+// sortedValues returns the unique values of a string map in sorted order.
+// Used to iterate reverse map values deterministically.
+func sortedValues(m map[string]string) []string {
+	seen := make(map[string]bool, len(m))
+	vals := make([]string, 0, len(m))
+	for _, v := range m {
+		if !seen[v] {
+			seen[v] = true
+			vals = append(vals, v)
+		}
+	}
+	sort.Strings(vals)
+	return vals
 }
 
 func sanitizeName(name string) string {

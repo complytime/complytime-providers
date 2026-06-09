@@ -463,6 +463,101 @@ func TestToScanResponse_MessageUsesViolationText(t *testing.T) {
 		"message should contain the violation text, not a generic pass-count summary")
 }
 
+func TestToScanResponse_PassingAssessmentsForNoFindings(t *testing.T) {
+	targetResults := []*PerTargetResult{
+		{Target: "org/repo1", Branch: "main", Status: "scanned"},
+		{Target: "org/repo2", Branch: "main", Status: "scanned"},
+	}
+	reverseMap := map[string]string{
+		"ci.action_pinning": "REQ-001",
+		"ci.permissions":    "REQ-002",
+	}
+
+	resp := ToScanResponse(targetResults, reverseMap)
+
+	require.Len(t, resp.Assessments, 2, "one assessment per mapped requirement")
+	for _, a := range resp.Assessments {
+		require.Len(t, a.Steps, 2, "one step per scanned target for %s", a.RequirementID)
+		for _, s := range a.Steps {
+			assert.Equal(t, provider.ResultPassed, s.Result)
+			assert.Equal(t, "all checks passed", s.Message)
+		}
+		assert.Equal(t, provider.ConfidenceLevelHigh, a.Confidence)
+	}
+	assert.Empty(t, resp.Errors)
+}
+
+func TestToScanResponse_MixedFindingsAndPassingRequirements(t *testing.T) {
+	targetResults := []*PerTargetResult{
+		{
+			Target: "org/repo",
+			Branch: "main",
+			Status: "scanned",
+			Findings: []Finding{
+				{RequirementID: "ci.action_pinning", Result: "fail", Reason: "unpinned action"},
+			},
+		},
+	}
+	reverseMap := map[string]string{
+		"ci.action_pinning": "REQ-001",
+		"ci.permissions":    "REQ-002",
+	}
+
+	resp := ToScanResponse(targetResults, reverseMap)
+
+	require.Len(t, resp.Assessments, 2, "should have both failing and passing assessments")
+
+	assessmentsByID := make(map[string]provider.AssessmentLog, len(resp.Assessments))
+	for _, a := range resp.Assessments {
+		assessmentsByID[a.RequirementID] = a
+	}
+
+	// REQ-001 has a finding -> should have a failing step
+	failingAssessment, ok := assessmentsByID["REQ-001"]
+	require.True(t, ok, "REQ-001 should be present")
+	require.Len(t, failingAssessment.Steps, 1)
+	assert.Equal(t, provider.ResultFailed, failingAssessment.Steps[0].Result)
+	assert.Equal(t, "unpinned action", failingAssessment.Steps[0].Message)
+
+	// REQ-002 has no findings -> should have a synthesized passing step
+	passingAssessment, ok := assessmentsByID["REQ-002"]
+	require.True(t, ok, "REQ-002 should be present")
+	require.Len(t, passingAssessment.Steps, 1)
+	assert.Equal(t, provider.ResultPassed, passingAssessment.Steps[0].Result)
+	assert.Equal(t, "all checks passed", passingAssessment.Steps[0].Message)
+}
+
+func TestToScanResponse_PassingAssessmentsExcludeErrorTargets(t *testing.T) {
+	targetResults := []*PerTargetResult{
+		{Target: "org/repo1", Branch: "main", Status: "scanned"},
+		{Target: "org/repo2", Branch: "main", Status: "error", Error: "clone failed"},
+	}
+	reverseMap := map[string]string{
+		"ci.action_pinning": "REQ-001",
+	}
+
+	resp := ToScanResponse(targetResults, reverseMap)
+
+	require.Len(t, resp.Assessments, 1)
+	a := resp.Assessments[0]
+	require.Len(t, a.Steps, 1, "only scanned targets should contribute steps")
+	assert.Equal(t, "org/repo1@main", a.Steps[0].Name,
+		"step should be from the scanned target, not the error target")
+	assert.Equal(t, provider.ResultPassed, a.Steps[0].Result)
+}
+
+func TestToScanResponse_NoPassingAssessmentsWithoutReverseMap(t *testing.T) {
+	targetResults := []*PerTargetResult{
+		{Target: "org/repo", Branch: "main", Status: "scanned"},
+	}
+
+	resp := ToScanResponse(targetResults, nil)
+
+	assert.Empty(t, resp.Assessments,
+		"no assessments should be synthesized when reverseMap is nil")
+	assert.Empty(t, resp.Errors)
+}
+
 func TestToScanResponse_MessageFallsBackWhenAllPass(t *testing.T) {
 	results := []*PerTargetResult{
 		{
