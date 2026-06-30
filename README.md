@@ -10,10 +10,6 @@ Compliance-scanning provider plugins for the [complyctl](https://github.com/comp
 | [ampel-provider](cmd/ampel-provider/) | `complyctl-provider-ampel` | In-toto attestation-based policy verification using AMPEL and snappy |
 | [opa-provider](cmd/opa-provider/) | `complyctl-provider-opa` | OPA/conftest-based configuration policy evaluation |
 
-The openscap and ampel providers support evidence export via OTLP (`complyctl scan --format otel`),
-shipping compliance evidence as structured log records to a Beacon collector
-via [ProofWatch](https://github.com/complytime/complybeacon).
-
 ## Build
 
 Requires Go 1.25.0 or higher.
@@ -62,7 +58,7 @@ Each provider is self-contained under `cmd/<name>-provider/` with its own subpac
 ## Documentation
 
 - [Provider Development Guide](docs/provider-guide.md) --
-  developing providers, including the Export interface.
+  developing providers.
 - [Dev Testing Environment](docs/dev-testing-environment.md) --
   devcontainer setup for interactive testing during PR review.
 

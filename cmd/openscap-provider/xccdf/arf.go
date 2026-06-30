@@ -38,7 +38,7 @@ func ParseARFFile(arfPath string) (*xmlquery.Node, error) {
 }
 
 // IsSkippableResult returns true for XCCDF result statuses that should
-// be excluded from both scan assessments and export evidence.
+// be excluded from scan assessments.
 func IsSkippableResult(resultText string) bool {
 	return resultText == "notselected" || resultText == "notapplicable"
 }
