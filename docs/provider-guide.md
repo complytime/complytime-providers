@@ -55,82 +55,6 @@ This field is additive: existing provider-specific workflows (such as the OPA
 provider's `opa_bundle_ref` + `conftest pull`) remain unchanged when no
 complypack is provided.
 
-## Export Interface (Optional)
-
-Providers that support evidence export implement the optional
-`provider.Exporter` interface:
-
-```go
-type Exporter interface {
-    Export(ctx context.Context, req *ExportRequest) (*ExportResponse, error)
-}
-```
-
-Export is triggered when a user runs `complyctl scan --format otel`. After the
-scan phase completes, complyctl calls `Export` on each provider that declared
-support.
-
-### Declaring Export Support
-
-Set `SupportsExport: true` in your `DescribeResponse` and add a compile-time
-interface assertion:
-
-```go
-var _ provider.Exporter = (*ProviderServer)(nil)
-```
-
-### ExportRequest and ExportResponse
-
-The `ExportRequest` carries a `CollectorConfig` with the OTLP gRPC endpoint
-and a pre-resolved bearer token (complyctl handles OIDC):
-
-```go
-type ExportRequest struct {
-    Collector CollectorConfig
-}
-
-type CollectorConfig struct {
-    Endpoint  string // host:port for the OTLP gRPC collector
-    AuthToken string // Bearer token (resolved by complyctl)
-}
-
-type ExportResponse struct {
-    Success       bool
-    ExportedCount int32
-    FailedCount   int32
-    ErrorMessage  string
-}
-```
-
-### Implementation Pattern
-
-Both providers in this repository follow the same pattern:
-
-1. **Read scan results from disk** — the `Export` method reads the results
-   written by `Scan` from the workspace directory
-2. **Convert to GemaraEvidence** — each finding is mapped to a
-   `proofwatch.GemaraEvidence` struct with Gemara metadata and assessment log
-   fields
-3. **Emit via ProofWatch** — an OTLP gRPC log exporter, `sdklog.LoggerProvider`,
-   and `ProofWatch` instance are created from the `CollectorConfig`, evidence
-   records are emitted, and the provider is shut down (flushing buffered logs)
-   before returning
-
-Each provider has an `export/` package with two files:
-
-- `export.go` — OTEL SDK setup (`NewEmitter` creates the exporter,
-  LoggerProvider, and ProofWatch; `Shutdown` flushes and tears down)
-- `convert.go` — provider-specific result-to-GemaraEvidence conversion
-
-Key dependencies for export:
-
-- `github.com/complytime/complybeacon/proofwatch` — GemaraEvidence type and
-  OTEL log emission
-- `github.com/gemaraproj/go-gemara` — Gemara metadata and assessment log types
-- `go.opentelemetry.io/otel/sdk/log` — OTEL LoggerProvider
-- `go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc` — OTLP gRPC
-  exporter
-
 ## Entry Point
 
 Each provider binary calls `provider.Serve(impl)` in `main()`:
@@ -180,8 +104,8 @@ Example (`c2p-openscap-manifest.json`):
 
 | Provider | Binary | Description |
 |:---|:---|:---|
-| `cmd/openscap-provider` | `complyctl-provider-openscap` | OpenSCAP-based compliance scanning (with OTLP export) |
-| `cmd/ampel-provider` | `complyctl-provider-ampel` | AMPEL-based policy evaluation (with OTLP export) |
+| `cmd/openscap-provider` | `complyctl-provider-openscap` | OpenSCAP-based compliance scanning |
+| `cmd/ampel-provider` | `complyctl-provider-ampel` | AMPEL-based policy evaluation |
 | `cmd/opa-provider` | `complyctl-provider-opa` | OPA/conftest-based policy evaluation |
 
 ## Building Providers

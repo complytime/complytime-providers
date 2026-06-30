@@ -14,17 +14,13 @@ import (
 
 	"github.com/complytime/complyctl/pkg/provider"
 	"github.com/complytime/complytime-providers/cmd/openscap-provider/config"
-	oscapexport "github.com/complytime/complytime-providers/cmd/openscap-provider/export"
 	"github.com/complytime/complytime-providers/cmd/openscap-provider/oscap"
 	"github.com/complytime/complytime-providers/cmd/openscap-provider/scan"
 	"github.com/complytime/complytime-providers/cmd/openscap-provider/xccdf"
 	"github.com/complytime/complytime-providers/internal/version"
 )
 
-var (
-	_ provider.Provider = (*ProviderServer)(nil)
-	_ provider.Exporter = (*ProviderServer)(nil)
-)
+var _ provider.Provider = (*ProviderServer)(nil)
 
 type ProviderServer struct{}
 
@@ -37,7 +33,6 @@ func (s *ProviderServer) Describe(_ context.Context, _ *provider.DescribeRequest
 		Healthy:                 true,
 		Version:                 version.Version(),
 		RequiredTargetVariables: []string{"profile"},
-		SupportsExport:          true,
 	}, nil
 }
 
@@ -242,74 +237,6 @@ func mergeVariables(global, target map[string]string) map[string]string {
 		merged[k] = v
 	}
 	return merged
-}
-
-// Export reads scan results from the ARF XML file and emits them as
-// GemaraEvidence OTLP log records to the configured Beacon collector via ProofWatch.
-func (s *ProviderServer) Export(ctx context.Context, req *provider.ExportRequest) (*provider.ExportResponse, error) {
-	logger := hclog.Default()
-
-	if _, err := os.Stat(config.ARFPath); os.IsNotExist(err) {
-		return &provider.ExportResponse{
-			Success:      false,
-			ErrorMessage: "no scan results available for export: ARF file not found at " + config.ARFPath,
-		}, nil
-	}
-
-	evidence, err := oscapexport.ReadAndConvert(config.ARFPath)
-	if err != nil {
-		return &provider.ExportResponse{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("reading scan results: %v", err),
-		}, nil
-	}
-
-	if len(evidence) == 0 {
-		logger.Info("no scan results to export")
-		return &provider.ExportResponse{
-			Success:       true,
-			ExportedCount: 0,
-			FailedCount:   0,
-		}, nil
-	}
-
-	emitter, err := oscapexport.NewEmitter(ctx, req.Collector)
-	if err != nil {
-		return &provider.ExportResponse{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("initializing export: %v", err),
-		}, nil
-	}
-	defer func() {
-		if shutdownErr := emitter.Shutdown(); shutdownErr != nil {
-			logger.Error("failed to shutdown emitter", "error", shutdownErr)
-		}
-	}()
-
-	var exported, failed int32
-	for _, ev := range evidence {
-		if logErr := emitter.PW.Log(ctx, ev); logErr != nil {
-			logger.Error("failed to emit evidence", "assessment_id", ev.Metadata.Id, "error", logErr)
-			failed++
-		} else {
-			exported++
-		}
-	}
-
-	logger.Info("export complete", "exported", exported, "failed", failed)
-	return &provider.ExportResponse{
-		Success:       failed == 0,
-		ExportedCount: exported,
-		FailedCount:   failed,
-		ErrorMessage:  exportErrorMessage(failed),
-	}, nil
-}
-
-func exportErrorMessage(failed int32) string {
-	if failed == 0 {
-		return ""
-	}
-	return fmt.Sprintf("%d evidence records failed to export", failed)
 }
 
 func mapResultStatus(resultText string) (provider.Result, error) {

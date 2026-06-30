@@ -3,8 +3,7 @@
 complytime-providers ships compliance-scanning provider plugins for
 the `complyctl` CLI. Each provider implements the `complyctl`
 gRPC plugin interface (hashicorp/go-plugin) with three core RPCs
-(`Describe`, `Generate`, `Scan`) and the optional `Export` RPC
-for shipping compliance evidence to an OTLP collector.
+(`Describe`, `Generate`, `Scan`).
 
 - **Type**: Multi-binary Go plugin repository
 - **Binaries**: `complyctl-provider-openscap`, `complyctl-provider-ampel`,
@@ -12,8 +11,7 @@ for shipping compliance evidence to an OTLP collector.
 - **License**: Apache-2.0
 - **Go version**: 1.25.0
 - **Key dependencies**: complyctl (plugin framework), hashicorp/go-plugin,
-  stretchr/testify, antchfx/xmlquery, proofwatch (OTLP evidence emission),
-  go-gemara (Gemara types)
+  stretchr/testify, antchfx/xmlquery
 
 ## Build & Test Commands
 
@@ -61,7 +59,6 @@ complytime-providers/
 ├── cmd/
 │   ├── openscap-provider/     # Binary: complyctl-provider-openscap
 │   │   ├── config/            #   Configuration handling
-│   │   ├── export/            #   OTLP evidence export
 │   │   ├── oscap/             #   OpenSCAP tool invocation
 │   │   ├── scan/              #   Scan orchestration
 │   │   ├── server/            #   gRPC provider implementation
@@ -70,7 +67,6 @@ complytime-providers/
 │   ├── ampel-provider/        # Binary: complyctl-provider-ampel
 │   │   ├── config/            #   Configuration handling
 │   │   ├── convert/           #   Format conversion & types
-│   │   ├── export/            #   OTLP evidence export
 │   │   ├── intoto/            #   in-toto attestation handling
 │   │   ├── results/           #   Results processing
 │   │   ├── scan/              #   Scan orchestration

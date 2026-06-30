@@ -15,7 +15,6 @@ import (
 	"github.com/complytime/complyctl/pkg/provider"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/config"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/convert"
-	ampelexport "github.com/complytime/complytime-providers/cmd/ampel-provider/export"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/results"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/scan"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/targets"
@@ -33,10 +32,7 @@ var SkipToolCheck bool
 // safeBranchPattern matches valid git branch names.
 var safeBranchPattern = regexp.MustCompile(`^[a-zA-Z0-9._/-]+$`)
 
-var (
-	_ provider.Provider = (*ProviderServer)(nil)
-	_ provider.Exporter = (*ProviderServer)(nil)
-)
+var _ provider.Provider = (*ProviderServer)(nil)
 
 // ProviderServer implements the provider.Provider interface for the AMPEL provider.
 type ProviderServer struct{}
@@ -52,7 +48,6 @@ func (s *ProviderServer) Describe(_ context.Context, _ *provider.DescribeRequest
 		Healthy:                 true,
 		Version:                 version.Version(),
 		RequiredTargetVariables: []string{"url", "specs"},
-		SupportsExport:          true,
 	}, nil
 }
 
@@ -304,68 +299,6 @@ func validateTargetVariables(repoURL string, branches, specs []string, accessTok
 	}
 
 	return nil
-}
-
-// Export reads scan results from the workspace and emits them as GemaraEvidence
-// OTLP log records to the configured Beacon collector via ProofWatch.
-func (s *ProviderServer) Export(ctx context.Context, req *provider.ExportRequest) (*provider.ExportResponse, error) {
-	logger := hclog.Default()
-
-	resultsDir := config.ResultsDirPath()
-	evidence, err := ampelexport.ReadAndConvert(resultsDir)
-	if err != nil {
-		return &provider.ExportResponse{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("reading scan results: %v", err),
-		}, nil
-	}
-
-	if len(evidence) == 0 {
-		logger.Info("no scan results to export")
-		return &provider.ExportResponse{
-			Success:       true,
-			ExportedCount: 0,
-			FailedCount:   0,
-		}, nil
-	}
-
-	emitter, err := ampelexport.NewEmitter(ctx, req.Collector)
-	if err != nil {
-		return &provider.ExportResponse{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("initializing export: %v", err),
-		}, nil
-	}
-	defer func() {
-		if shutdownErr := emitter.Shutdown(); shutdownErr != nil {
-			logger.Error("failed to shutdown emitter", "error", shutdownErr)
-		}
-	}()
-
-	var exported, failed int32
-	for _, ev := range evidence {
-		if logErr := emitter.PW.Log(ctx, ev); logErr != nil {
-			logger.Error("failed to emit evidence", "assessment_id", ev.Metadata.Id, "error", logErr)
-			failed++
-		} else {
-			exported++
-		}
-	}
-
-	logger.Info("export complete", "exported", exported, "failed", failed)
-	return &provider.ExportResponse{
-		Success:       failed == 0,
-		ExportedCount: exported,
-		FailedCount:   failed,
-		ErrorMessage:  exportErrorMessage(failed),
-	}, nil
-}
-
-func exportErrorMessage(failed int32) string {
-	if failed == 0 {
-		return ""
-	}
-	return fmt.Sprintf("%d evidence records failed to export", failed)
 }
 
 // resolvePolicyDir determines the directory containing granular policy

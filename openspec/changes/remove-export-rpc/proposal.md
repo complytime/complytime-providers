@@ -40,6 +40,6 @@ These capabilities were added in `openspec/changes/add-export-rpc` (status: impl
 - **Code**: 8 files deleted entirely, 4 files modified (server.go + server_test.go for openscap and ampel providers)
 - **Dependencies**: 4 direct dependencies removed (`proofwatch`, `go-gemara`, `otlploggrpc`, `otel/sdk/log`); transitive dependencies pruned by `go mod tidy` (`go-ocsf`, OTEL core packages)
 - **APIs**: Both providers stop declaring `SupportsExport: true` and stop implementing the `Exporter` interface. This is transparent to users since complyctl no longer calls Export.
-- **Testing**: ~13 export-related tests removed across both providers. All remaining tests must continue to pass.
+- **Testing**: ~48 export-related test functions removed: ~12 from modified server_test.go files, ~36 from deleted export package test files. All remaining tests must continue to pass.
 - **Documentation**: Export sections removed from provider guide, README, and AGENTS.md. CHANGELOG updated with breaking change entry.
 - **Upstream coordination**: Relates to [complyctl#650](https://github.com/complytime/complyctl/issues/650) (post-removal cleanup tracking in complyctl)
