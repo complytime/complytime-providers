@@ -1,3 +1,8 @@
 schema: unbound-force
 created: 2026-04-24
-status: implemented
+status: superseded
+superseded_by: remove-export-rpc
+superseded_reason: >
+  Upstream complyctl removed the Export RPC infrastructure
+  (complyctl PR #617, issue #606). Export will be redesigned
+  when the backend shape is known.
