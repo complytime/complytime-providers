@@ -49,7 +49,7 @@ The mock registry in Step 4 requires a Gemara policy layer containing real XCCDF
 | RHEL 10 | `anssi-*`, `bsi_sys_1_1_rhel10-*`, `cis_rhel10`, `ospp` |
 | OCP 4 | `nist_ocp4-*`, `cis_ocp-*`, `stig_ocp4-*`, `pcidss_*` |
 
-**Why this matters:** The component-definitions contain the mapping from compliance control IDs to XCCDF rule short names (e.g., CIS control `1.1.1.1` maps to rule `kernel_module_cramfs_disabled`). These rule short names are what the OpenSCAP plugin uses as `RequirementID` values in the policy layer.
+**Why this matters:** The component-definitions contain the mapping from compliance control IDs to XCCDF rule short names (e.g., CIS control `1.1.1.1` maps to rule `kernel_module_cramfs_disabled`). These rule short names are what the OpenSCAP plugin receives as `RequirementID` values (sourced from the Gemara `requirement-id` field) in the policy layer.
 
 ### Conversion workflow (OSCAL to Gemara policy layer)
 
@@ -247,7 +247,7 @@ controls:
 
 | Field | Value | Purpose |
 |:---|:---|:---|
-| `id` | XCCDF rule short name (e.g., `kernel_module_cramfs_disabled`) | Used as `RequirementID` — must match a rule in the SSG datastream |
+| `id` | XCCDF rule short name (e.g., `kernel_module_cramfs_disabled`) | Becomes the Gemara `requirement-id`, used as `RequirementID` — must match a rule in the SSG datastream |
 | `evaluator_id` | `openscap` | Routes the request to `complyctl-provider-openscap` |
 | `parameters.workspace` | `./.complytime/scan` | Working directory for plugin output |
 | `parameters.profile` | `cis_workstation_l1` | SSG profile short name — must exist in the auto-detected datastream |
@@ -384,7 +384,7 @@ sudo bin/complyctl scan --policy-id policies/cis-fedora-l1-workstation --format 
 ```
 Policy Layer (OCI Registry)
   │
-  ├── id: kernel_module_cramfs_disabled ─── RequirementID (XCCDF rule short name)
+  ├── id: kernel_module_cramfs_disabled ─── RequirementID (XCCDF rule short name, from Gemara requirement-id)
   ├── evaluator_id: openscap            ─── Routes to complyctl-provider-openscap
   └── parameters:
         workspace: ./.complytime/scan         ─── Plugin working directory

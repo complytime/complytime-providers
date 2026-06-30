@@ -28,9 +28,11 @@ type MappingFile struct {
 	Mappings []MappingEntry `json:"mappings"`
 }
 
-// MappingEntry maps a Gemara assessment plan RequirementID to a Rego namespace.
-// The ID field is the Rego package namespace and serves as the semantic,
-// benchmark-agnostic identity (equivalent to AMPEL's granular policy id field).
+// MappingEntry maps a Gemara requirement ID (from AssessmentPlan.RequirementId)
+// to a Rego namespace. The ID field is the Rego package namespace and serves as
+// the semantic, benchmark-agnostic identity (equivalent to AMPEL's granular
+// policy id field). The RequirementID field holds the Gemara requirement-id
+// (e.g., "CIS-K8S-5.2.6"), not the assessment plan's own id.
 type MappingEntry struct {
 	ID            string `json:"id"`
 	RequirementID string `json:"requirement_id"`
@@ -84,10 +86,11 @@ func validateMapping(m *MappingFile) error {
 	return nil
 }
 
-// MatchRequirements matches assessment plan RequirementIDs against mapping
-// entries using exact string equality (like AMPEL's MatchPolicies). Returns
-// the matched ID list (Rego namespaces), a reverse mapping for result ID
-// resolution, and any warnings for unmatched requirements.
+// MatchRequirements matches Gemara requirement IDs (cfg.RequirementID) against
+// mapping entries using exact string equality (like AMPEL's MatchPolicies).
+// Returns the matched ID list (Rego namespaces), a reverse mapping from Rego
+// namespace to Gemara requirement ID for result-time resolution, and any
+// warnings for unmatched requirements.
 func MatchRequirements(
 	configs []provider.AssessmentConfiguration,
 	mapping *MappingFile,

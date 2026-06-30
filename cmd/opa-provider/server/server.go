@@ -87,12 +87,12 @@ func (s *ProviderServer) Describe(
 	}, nil
 }
 
-// Generate reads the assessment plan's RequirementIDs, resolves the policy
-// directory (preferring ComplypackContentPath from a cached complypack over
-// opa_bundle_ref + conftest pull), loads the required mapping file, matches
-// requirements to Rego namespaces, and writes a scan-config.json for Scan
-// to consume. Returns {Success: false} if the mapping file is missing or
-// invalid.
+// Generate reads the Gemara requirement IDs from the assessment configurations,
+// resolves the policy directory (preferring ComplypackContentPath from a cached
+// complypack over opa_bundle_ref + conftest pull), loads the required mapping
+// file, matches requirement IDs to Rego namespaces, and writes a
+// scan-config.json for Scan to consume. Returns {Success: false} if the
+// mapping file is missing or invalid.
 func (s *ProviderServer) Generate(
 	_ context.Context, req *provider.GenerateRequest,
 ) (*provider.GenerateResponse, error) {

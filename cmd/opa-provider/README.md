@@ -104,7 +104,7 @@ When the plugin receives the `generate` command from complyctl, it:
 1. Validates that `conftest` and `git` are available on the system PATH
 2. Pulls the OCI policy bundle specified by `opa_bundle_ref`
 3. Looks for a `complytime-mapping.json` file in the root of the pulled bundle
-4. If found: matches each `RequirementID` from the Gemara assessment plan against the mapping entries, produces a list of matched Rego namespace IDs and a reverse mapping for result resolution
+4. If found: matches each `RequirementID` (the Gemara `requirement-id` value, not the plan's own `id`) from the assessment plan against the mapping entries, produces a list of matched Rego namespace IDs and a reverse mapping for result resolution
 5. Writes a `scan-config.json` artifact to `<workspace>/opa/generated/` for Scan to consume
 
 **Mapping file format:** Policy bundle authors MUST include a `complytime-mapping.json` file in their OCI bundle to declare which Rego namespace corresponds to which compliance requirement:
@@ -119,7 +119,7 @@ When the plugin receives the `generate` command from complyctl, it:
 }
 ```
 
-The `id` field is the Rego package namespace (the semantic, benchmark-agnostic identity, equivalent to AMPEL's granular policy `id` field). The `requirement_id` must match the Gemara assessment plan entry exactly.
+The `id` field is the Rego package namespace (the semantic, benchmark-agnostic identity, equivalent to AMPEL's granular policy `id` field). The `requirement_id` must match the Gemara assessment plan's `requirement-id` field (e.g., `CIS-K8S-5.2.6`), not the plan's own `id` field.
 
 **Missing mapping file:** If the OCI bundle does not contain a `complytime-mapping.json` file, Generate returns `{Success: false}` with an error message identifying the expected file. If the file exists but is malformed (invalid JSON, empty fields, duplicate entries), Generate returns a distinct validation error.
 
@@ -138,7 +138,7 @@ When the plugin receives the `scan` command from complyctl, it will:
    - Write per-target result files as JSON to the results directory
 5. Return assessment results to complyctl with a `scan-status` summary prepended. Operational errors (failed clones, bundle-pull failures, write errors) are reported via `ScanResponse.Errors`.
 
-**Requirement ID resolution:** Generate provides a reverse mapping that resolves Rego-derived IDs (e.g., `kubernetes.run_as_root`) to Gemara requirement IDs (e.g., `CIS-K8S-5.2.6`) in the scan response.
+**Requirement ID resolution:** Generate provides a reverse mapping that resolves Rego-derived IDs (e.g., `kubernetes.run_as_root`) to Gemara requirement IDs (from `AssessmentConfiguration.RequirementID`, e.g., `CIS-K8S-5.2.6`) in the scan response.
 
 **Error handling:** Per-target errors (clone failures, policy evaluation errors) are reported via `ScanResponse.Errors` and the scan continues with remaining targets. Global errors (missing tools, no targets) return a gRPC-level error immediately.
 

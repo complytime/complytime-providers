@@ -283,8 +283,8 @@ func TestGenerate_WithMapping(t *testing.T) {
 	resp, err := srv.Generate(context.Background(), &provider.GenerateRequest{
 		TargetVariables: map[string]string{"opa_bundle_ref": bundleRef},
 		Configuration: []provider.AssessmentConfiguration{
-			{RequirementID: "CIS-1"},
-			{RequirementID: "CIS-2"},
+			{RequirementID: "CIS-1", PlanID: "ap-cis-1"},
+			{RequirementID: "CIS-2", PlanID: "ap-cis-2"},
 		},
 	})
 	require.NoError(t, err)
@@ -320,7 +320,7 @@ func TestGenerate_WithoutMapping(t *testing.T) {
 	resp, err := srv.Generate(context.Background(), &provider.GenerateRequest{
 		TargetVariables: map[string]string{"opa_bundle_ref": bundleRef},
 		Configuration: []provider.AssessmentConfiguration{
-			{RequirementID: "CIS-1"},
+			{RequirementID: "CIS-1", PlanID: "ap-cis-1"},
 		},
 	})
 	require.NoError(t, err)
@@ -341,7 +341,7 @@ func TestGenerate_MissingBundleRef(t *testing.T) {
 
 	resp, err := srv.Generate(context.Background(), &provider.GenerateRequest{
 		Configuration: []provider.AssessmentConfiguration{
-			{RequirementID: "CIS-1"},
+			{RequirementID: "CIS-1", PlanID: "ap-cis-1"},
 		},
 	})
 	require.NoError(t, err)
@@ -380,7 +380,7 @@ func TestGenerate_WithComplypackContentPath(t *testing.T) {
 	resp, err := srv.Generate(context.Background(), &provider.GenerateRequest{
 		ComplypackContentPath: complypackDir,
 		Configuration: []provider.AssessmentConfiguration{
-			{RequirementID: "REQ-1"},
+			{RequirementID: "REQ-1", PlanID: "ap-req-1"},
 		},
 	})
 	require.NoError(t, err)
@@ -433,7 +433,7 @@ func TestGenerate_ComplypackPreferredOverBundleRef(t *testing.T) {
 		ComplypackContentPath: complypackDir,
 		TargetVariables:       map[string]string{"opa_bundle_ref": "ghcr.io/org/bundle:v1"},
 		Configuration: []provider.AssessmentConfiguration{
-			{RequirementID: "REQ-1"},
+			{RequirementID: "REQ-1", PlanID: "ap-req-1"},
 		},
 	})
 	require.NoError(t, err)
@@ -499,7 +499,7 @@ func TestGenerate_WithComplypackContentPath_TarGz(t *testing.T) {
 	resp, err := srv.Generate(context.Background(), &provider.GenerateRequest{
 		ComplypackContentPath: archivePath,
 		Configuration: []provider.AssessmentConfiguration{
-			{RequirementID: "REQ-1"},
+			{RequirementID: "REQ-1", PlanID: "ap-req-1"},
 		},
 	})
 	require.NoError(t, err)
@@ -555,7 +555,7 @@ func TestGenerate_WithComplypackContentPath_TarGz_Idempotent(t *testing.T) {
 	req := &provider.GenerateRequest{
 		ComplypackContentPath: archivePath,
 		Configuration: []provider.AssessmentConfiguration{
-			{RequirementID: "REQ-1"},
+			{RequirementID: "REQ-1", PlanID: "ap-req-1"},
 		},
 	}
 
@@ -749,7 +749,7 @@ func TestGenerate_ToolCheckFailure(t *testing.T) {
 
 	resp, err := srv.Generate(context.Background(), &provider.GenerateRequest{
 		Configuration: []provider.AssessmentConfiguration{
-			{RequirementID: "CIS-1"},
+			{RequirementID: "CIS-1", PlanID: "ap-cis-1"},
 		},
 	})
 	require.NoError(t, err)
@@ -773,7 +773,7 @@ func TestGenerate_BundlePullFailure(t *testing.T) {
 	resp, err := srv.Generate(context.Background(), &provider.GenerateRequest{
 		TargetVariables: map[string]string{"opa_bundle_ref": "ghcr.io/org/bundle:v1"},
 		Configuration: []provider.AssessmentConfiguration{
-			{RequirementID: "CIS-1"},
+			{RequirementID: "CIS-1", PlanID: "ap-cis-1"},
 		},
 	})
 	require.NoError(t, err)
@@ -808,7 +808,7 @@ func TestGenerate_MalformedMapping(t *testing.T) {
 	resp, err := srv.Generate(context.Background(), &provider.GenerateRequest{
 		TargetVariables: map[string]string{"opa_bundle_ref": bundleRef},
 		Configuration: []provider.AssessmentConfiguration{
-			{RequirementID: "CIS-1"},
+			{RequirementID: "CIS-1", PlanID: "ap-cis-1"},
 		},
 	})
 	require.NoError(t, err)
@@ -848,8 +848,8 @@ func TestGenerate_PartialMatch(t *testing.T) {
 	resp, err := srv.Generate(context.Background(), &provider.GenerateRequest{
 		TargetVariables: map[string]string{"opa_bundle_ref": bundleRef},
 		Configuration: []provider.AssessmentConfiguration{
-			{RequirementID: "CIS-1"},
-			{RequirementID: "CIS-MISSING"},
+			{RequirementID: "CIS-1", PlanID: "ap-cis-1"},
+			{RequirementID: "CIS-MISSING", PlanID: "ap-cis-missing"},
 		},
 	})
 	require.NoError(t, err)
@@ -918,7 +918,7 @@ func TestGenerate_Scan_WithMapping(t *testing.T) {
 	genResp, err := srv.Generate(context.Background(), &provider.GenerateRequest{
 		TargetVariables: map[string]string{"opa_bundle_ref": bundleRef},
 		Configuration: []provider.AssessmentConfiguration{
-			{RequirementID: "CIS-K8S-5.2.6"},
+			{RequirementID: "CIS-K8S-5.2.6", PlanID: "ap-cis-k8s-5.2.6"},
 		},
 	})
 	require.NoError(t, err)
@@ -1010,7 +1010,7 @@ func TestGenerate_Scan_MissingMappingReturnsError(t *testing.T) {
 	genResp, err := srv.Generate(context.Background(), &provider.GenerateRequest{
 		TargetVariables: map[string]string{"opa_bundle_ref": bundleRef},
 		Configuration: []provider.AssessmentConfiguration{
-			{RequirementID: "CIS-1"},
+			{RequirementID: "CIS-1", PlanID: "ap-cis-1"},
 		},
 	})
 	require.NoError(t, err)

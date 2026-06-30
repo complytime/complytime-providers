@@ -97,7 +97,7 @@ The plugin resolves granular AMPEL policy files (one JSON file per control) usin
 2. **`ampel_policy_dir` global variable** — A custom directory specified in `complytime.yaml`.
 3. **Default directory** — `{workspace}/ampel/granular-policies/`.
 
-During the `generate` phase, the plugin matches assessment configuration requirement IDs to these policies and merges the matched policies into a single bundle used for verification. Generated output is written to `{workspace}/ampel/policy/`.
+During the `generate` phase, the plugin matches assessment configuration requirement IDs (Gemara `requirement-id` values) to granular AMPEL policy IDs and merges the matched policies into a single bundle used for verification. Generated output is written to `{workspace}/ampel/policy/`.
 
 Sample policy files are available in the [complytime-demos](https://github.com/complytime/complytime-demos) repository under `base_ansible_env/files/ampel-policies/`.
 
@@ -107,7 +107,7 @@ When the plugin receives the `generate` command from complyctl, it will:
 * Resolve the granular policy source directory (complypack > `ampel_policy_dir` > default)
 * Extract complypack content archives if the source is a `content.tar.gz` file
 * Load granular AMPEL policy files from the resolved policy directory
-* Match assessment configuration requirement IDs to available AMPEL policies
+* Match assessment configuration requirement IDs (Gemara `requirement-id` values) to available granular AMPEL policies
 * Merge matched policies into a single policy bundle
 * Write the bundle to `{workspace}/ampel/policy/complytime-ampel-policy.json`
 

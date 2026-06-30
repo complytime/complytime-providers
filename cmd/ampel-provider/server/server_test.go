@@ -30,7 +30,7 @@ func TestMain(m *testing.M) {
 
 func makeTestConfigurations() []provider.AssessmentConfiguration {
 	return []provider.AssessmentConfiguration{
-		{RequirementID: "BP-1.01"},
+		{PlanID: "ap-bp-1.01", RequirementID: "BP-1.01"},
 	}
 }
 
@@ -195,7 +195,7 @@ func TestGenerate_NoMatchingPolicies(t *testing.T) {
 
 	resp, err := s.Generate(context.Background(), &provider.GenerateRequest{
 		Configuration: []provider.AssessmentConfiguration{
-			{RequirementID: "nonexistent-rule"},
+			{PlanID: "ap-nonexistent-rule", RequirementID: "nonexistent-rule"},
 		},
 	})
 	require.NoError(t, err)
@@ -215,7 +215,7 @@ func TestGenerate_OverwritesExistingPolicy(t *testing.T) {
 
 	configs1 := makeTestConfigurations()
 	configs2 := []provider.AssessmentConfiguration{
-		{RequirementID: "BP-3.01"},
+		{PlanID: "ap-bp-3.01", RequirementID: "BP-3.01"},
 	}
 
 	resp1, err := s.Generate(context.Background(), &provider.GenerateRequest{Configuration: configs1})
