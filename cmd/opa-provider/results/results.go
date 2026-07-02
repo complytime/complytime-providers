@@ -238,15 +238,15 @@ func ToScanResponse(targetResults []*PerTargetResult, reverseMap map[string]stri
 	// assessment includes a passing step with the target name so evaluation
 	// logs show a meaningful step identity.
 	syntheticSteps := buildSyntheticSteps(targetResults)
-	for _, planID := range reverseMap {
-		if _, exists := groups[planID]; !exists {
-			groups[planID] = &reqGroup{
-				requirementID: planID,
+	for _, reqID := range reverseMap {
+		if _, exists := groups[reqID]; !exists {
+			groups[reqID] = &reqGroup{
+				requirementID: reqID,
 				steps:         syntheticSteps,
 				passCount:     len(syntheticSteps),
 				totalCount:    len(syntheticSteps),
 			}
-			order = append(order, planID)
+			order = append(order, reqID)
 		}
 	}
 
@@ -289,7 +289,7 @@ func ToScanResponse(targetResults []*PerTargetResult, reverseMap map[string]stri
 }
 
 // buildSyntheticSteps creates a passing step for each scanned target so that
-// synthetic assessments (plan IDs with no findings) have step identity in the
+// synthetic assessments (requirement IDs with no findings) have step identity in the
 // evaluation log. Without this, the evaluation log shows steps: [] for
 // requirements that passed all checks.
 func buildSyntheticSteps(targetResults []*PerTargetResult) []provider.Step {
