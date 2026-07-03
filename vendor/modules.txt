@@ -4,8 +4,8 @@ github.com/antchfx/xmlquery
 # github.com/antchfx/xpath v1.3.6
 ## explicit; go 1.14
 github.com/antchfx/xpath
-# github.com/complytime/complyctl v1.0.0-beta.0
-## explicit; go 1.25.0
+# github.com/complytime/complyctl v1.0.0-rc.0
+## explicit; go 1.25.11
 github.com/complytime/complyctl/api/plugin
 github.com/complytime/complyctl/internal/complytime
 github.com/complytime/complyctl/pkg/provider
@@ -54,6 +54,13 @@ github.com/mattn/go-isatty
 # github.com/oklog/run v1.1.0
 ## explicit; go 1.13
 github.com/oklog/run
+# github.com/opencontainers/go-digest v1.0.0
+## explicit; go 1.13
+github.com/opencontainers/go-digest
+# github.com/opencontainers/image-spec v1.1.1
+## explicit; go 1.18
+github.com/opencontainers/image-spec/specs-go
+github.com/opencontainers/image-spec/specs-go/v1
 # github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 ## explicit
 github.com/pmezard/go-difflib/difflib
@@ -222,3 +229,11 @@ google.golang.org/protobuf/types/known/timestamppb
 # gopkg.in/yaml.v3 v3.0.1
 ## explicit
 gopkg.in/yaml.v3
+# oras.land/oras-go/v2 v2.6.1
+## explicit; go 1.25.0
+oras.land/oras-go/v2/content
+oras.land/oras-go/v2/errdef
+oras.land/oras-go/v2/internal/descriptor
+oras.land/oras-go/v2/internal/docker
+oras.land/oras-go/v2/internal/spec
+oras.land/oras-go/v2/registry

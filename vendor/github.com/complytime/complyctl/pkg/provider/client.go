@@ -12,7 +12,6 @@ import (
 
 var (
 	_ Provider = (*Client)(nil)
-	_ Exporter = (*Client)(nil)
 )
 
 // GenerateRequest carries assessment plan configuration to a provider.
@@ -24,7 +23,10 @@ type GenerateRequest struct {
 	ComplypackContentPath string
 }
 
-// AssessmentConfiguration binds a requirement ID to its plan and parameters.
+// AssessmentConfiguration carries one Gemara assessment plan selected for
+// provider generation. PlanID is the assessment plan id used by providers for
+// matching provider content. RequirementID is the Gemara requirement-id used
+// later for report output.
 type AssessmentConfiguration struct {
 	PlanID        string
 	RequirementID string
@@ -32,6 +34,16 @@ type AssessmentConfiguration struct {
 	// EvaluatorID is used for routing to the correct provider. It is not
 	// serialized over gRPC — routing is handled by the provider manager.
 	EvaluatorID string
+}
+
+// MatchID returns the identifier providers should use to match generated
+// content. Assessment plan IDs take precedence when present; global evaluator
+// configurations can fall back to requirement IDs.
+func (c AssessmentConfiguration) MatchID() string {
+	if c.PlanID != "" {
+		return c.PlanID
+	}
+	return c.RequirementID
 }
 
 // GenerateResponse confirms whether policy preparation succeeded.
@@ -63,10 +75,12 @@ type ScanResponse struct {
 
 // AssessmentLog holds the evaluation result for a single requirement.
 type AssessmentLog struct {
-	RequirementID string
-	Steps         []Step
-	Message       string
-	Confidence    ConfidenceLevel
+	RequirementID  string
+	Steps          []Step
+	Message        string
+	Confidence     ConfidenceLevel
+	Evidence       []Evidence
+	Recommendation string
 }
 
 // Step is one discrete check within an assessment.
@@ -74,6 +88,15 @@ type Step struct {
 	Name    string
 	Result  Result
 	Message string
+}
+
+// Evidence records a piece of data collected during assessment.
+type Evidence struct {
+	ID          string
+	Type        string
+	Description string
+	Payload     []byte
+	CollectedAt string
 }
 
 // Result is the outcome of a single assessment step.
@@ -110,26 +133,6 @@ type DescribeResponse struct {
 	ErrorMessage            string
 	RequiredGlobalVariables []string
 	RequiredTargetVariables []string
-	SupportsExport          bool
-}
-
-// ExportRequest carries collector configuration for evidence export.
-type ExportRequest struct {
-	Collector CollectorConfig
-}
-
-// CollectorConfig holds the Beacon collector endpoint and auth credentials.
-type CollectorConfig struct {
-	Endpoint  string
-	AuthToken string //nolint:gosec // not a hardcoded credential
-}
-
-// ExportResponse reports the outcome of evidence export.
-type ExportResponse struct {
-	Success       bool
-	ExportedCount int32
-	FailedCount   int32
-	ErrorMessage  string
 }
 
 // Client provides gRPC communication with a provider subprocess managed by
@@ -160,7 +163,6 @@ func (c *Client) Describe(ctx context.Context, req *DescribeRequest) (*DescribeR
 		ErrorMessage:            protoResp.GetErrorMessage(),
 		RequiredGlobalVariables: protoResp.GetRequiredGlobalVariables(),
 		RequiredTargetVariables: protoResp.GetRequiredTargetVariables(),
-		SupportsExport:          protoResp.GetSupportsExport(),
 	}, nil
 }
 
@@ -217,10 +219,12 @@ func (c *Client) Scan(ctx context.Context, req *ScanRequest) (*ScanResponse, err
 			})
 		}
 		assessments = append(assessments, AssessmentLog{
-			RequirementID: pa.GetRequirementId(),
-			Steps:         steps,
-			Message:       pa.GetMessage(),
-			Confidence:    protoConfidenceToInternal(pa.GetConfidence()),
+			RequirementID:  pa.GetRequirementId(),
+			Steps:          steps,
+			Message:        pa.GetMessage(),
+			Confidence:     protoConfidenceToInternal(pa.GetConfidence()),
+			Evidence:       protoEvidenceToInternal(pa.GetEvidence()),
+			Recommendation: pa.GetRecommendation(),
 		})
 	}
 
@@ -230,24 +234,23 @@ func (c *Client) Scan(ctx context.Context, req *ScanRequest) (*ScanResponse, err
 	}, nil
 }
 
-func (c *Client) Export(ctx context.Context, req *ExportRequest) (*ExportResponse, error) {
-	protoResp, err := c.grpcClient.Export(ctx, &pluginv2.ExportRequest{
-		Collector: &pluginv2.CollectorConfig{
-			Endpoint:  req.Collector.Endpoint,
-			AuthToken: req.Collector.AuthToken,
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("Export RPC failed: %w", err)
+func protoEvidenceToInternal(pe []*pluginv2.Evidence) []Evidence {
+	if len(pe) == 0 {
+		return nil
 	}
-
-	return &ExportResponse{
-		Success:       protoResp.GetSuccess(),
-		ExportedCount: protoResp.GetExportedCount(),
-		FailedCount:   protoResp.GetFailedCount(),
-		ErrorMessage:  protoResp.GetErrorMessage(),
-	}, nil
+	evidence := make([]Evidence, len(pe))
+	for i, e := range pe {
+		evidence[i] = Evidence{
+			ID:          e.GetId(),
+			Type:        e.GetType(),
+			Description: e.GetDescription(),
+			Payload:     e.GetPayload(),
+			CollectedAt: e.GetCollectedAt(),
+		}
+	}
+	return evidence
 }
+
 
 func protoResultToInternal(r pluginv2.Result) Result {
 	switch r {
