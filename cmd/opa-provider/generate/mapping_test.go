@@ -131,8 +131,8 @@ func TestMatchRequirements_AllMatched(t *testing.T) {
 		},
 	}
 	configs := []provider.AssessmentConfiguration{
-		{RequirementID: "CIS-1"},
-		{RequirementID: "CIS-2"},
+		{RequirementID: "CIS-1", PlanID: "ap-cis-1"},
+		{RequirementID: "CIS-2", PlanID: "ap-cis-2"},
 	}
 
 	ids, reverseMap, warnings := MatchRequirements(configs, mapping)
@@ -150,8 +150,8 @@ func TestMatchRequirements_PartialMatch(t *testing.T) {
 		},
 	}
 	configs := []provider.AssessmentConfiguration{
-		{RequirementID: "CIS-1"},
-		{RequirementID: "CIS-MISSING"},
+		{RequirementID: "CIS-1", PlanID: "ap-cis-1"},
+		{RequirementID: "CIS-MISSING", PlanID: "ap-cis-missing"},
 	}
 
 	ids, reverseMap, warnings := MatchRequirements(configs, mapping)
@@ -167,7 +167,7 @@ func TestMatchRequirements_NoneMatched(t *testing.T) {
 		Mappings: []MappingEntry{},
 	}
 	configs := []provider.AssessmentConfiguration{
-		{RequirementID: "CIS-1"},
+		{RequirementID: "CIS-1", PlanID: "ap-cis-1"},
 	}
 
 	ids, _, warnings := MatchRequirements(configs, mapping)
@@ -183,8 +183,8 @@ func TestMatchRequirements_DeduplicatesConfigs(t *testing.T) {
 		},
 	}
 	configs := []provider.AssessmentConfiguration{
-		{RequirementID: "CIS-1"},
-		{RequirementID: "CIS-1"},
+		{RequirementID: "CIS-1", PlanID: "ap-cis-1"},
+		{RequirementID: "CIS-1", PlanID: "ap-cis-1"},
 	}
 
 	ids, _, warnings := MatchRequirements(configs, mapping)

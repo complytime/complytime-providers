@@ -98,10 +98,12 @@ func buildFinding(cr conftestResult, filename, namespace string) Finding {
 	}
 }
 
-// extractRequirementID derives a requirement ID from conftest result metadata
-// or the enclosing namespace. It prefers metadata["query"] (set by conftest
-// for structured results) and falls back to the CheckResult namespace which
-// corresponds to the Rego package path (e.g. "ci.action_pinning").
+// extractRequirementID derives a Rego-namespace-based ID from conftest result
+// metadata or the enclosing namespace. It prefers metadata["query"] (set by
+// conftest for structured results) and falls back to the CheckResult namespace
+// which corresponds to the Rego package path (e.g., "ci.action_pinning").
+// The returned ID is Rego-derived and may be resolved to a Gemara requirement
+// ID later via ResolveRequirementID.
 func extractRequirementID(metadata map[string]any, namespace string) string {
 	if metadata != nil {
 		if query, ok := metadata["query"].(string); ok && query != "" {
@@ -168,9 +170,10 @@ func WritePerTargetResult(result *PerTargetResult, dir string) error {
 	return nil
 }
 
-// ResolveRequirementID resolves a Rego-derived requirement ID to a Gemara
-// requirement ID using the reverse mapping. If the mapping does not contain
-// the derived ID, the original ID is returned unchanged.
+// ResolveRequirementID resolves a Rego-derived ID (e.g., "kubernetes.run_as_root")
+// to the corresponding Gemara requirement ID (e.g., "CIS-K8S-5.2.6") using
+// the reverse mapping built by MatchRequirements. If the mapping does not
+// contain the derived ID, the original ID is returned unchanged.
 func ResolveRequirementID(derivedID string, reverseMap map[string]string) string {
 	if gemaraID, ok := reverseMap[derivedID]; ok {
 		return gemaraID
@@ -179,11 +182,12 @@ func ResolveRequirementID(derivedID string, reverseMap map[string]string) string
 }
 
 // ToScanResponse maps a slice of PerTargetResults to a provider.ScanResponse.
-// Findings are grouped by requirement ID into AssessmentLog entries. Each
-// target/branch scan becomes a Step within the assessment. Operational errors
-// (targets with Status "error" and no findings) are placed into resp.Errors.
-// When reverseMap is non-nil, Rego-derived requirement IDs are resolved to
-// Gemara requirement IDs before grouping.
+// Findings are grouped by Gemara requirement ID into AssessmentLog entries.
+// Each target/branch scan becomes a Step within the assessment. Operational
+// errors (targets with Status "error" and no findings) are placed into
+// resp.Errors. When reverseMap is non-nil, Rego-derived IDs (e.g.,
+// "kubernetes.run_as_root") are resolved to Gemara requirement IDs (e.g.,
+// "CIS-K8S-5.2.6") before grouping.
 func ToScanResponse(targetResults []*PerTargetResult, reverseMap map[string]string) *provider.ScanResponse {
 	type reqGroup struct {
 		requirementID string
@@ -227,21 +231,22 @@ func ToScanResponse(targetResults []*PerTargetResult, reverseMap map[string]stri
 		}
 	}
 
-	// Synthesize passing assessments for plan IDs that had no findings.
-	// The reverseMap values are the plan IDs sent during Generate; every
-	// plan ID should appear in the response so complyctl can resolve it.
-	// Each synthetic assessment includes a passing step with the target
-	// name so evaluation logs show a meaningful step identity.
+	// Synthesize passing assessments for requirement IDs that had no findings.
+	// The reverseMap values are the Gemara requirement IDs from the assessment
+	// configurations sent during Generate; every requirement ID should appear
+	// in the response so complyctl can correlate results. Each synthetic
+	// assessment includes a passing step with the target name so evaluation
+	// logs show a meaningful step identity.
 	syntheticSteps := buildSyntheticSteps(targetResults)
-	for _, planID := range reverseMap {
-		if _, exists := groups[planID]; !exists {
-			groups[planID] = &reqGroup{
-				requirementID: planID,
+	for _, reqID := range reverseMap {
+		if _, exists := groups[reqID]; !exists {
+			groups[reqID] = &reqGroup{
+				requirementID: reqID,
 				steps:         syntheticSteps,
 				passCount:     len(syntheticSteps),
 				totalCount:    len(syntheticSteps),
 			}
-			order = append(order, planID)
+			order = append(order, reqID)
 		}
 	}
 
@@ -284,7 +289,7 @@ func ToScanResponse(targetResults []*PerTargetResult, reverseMap map[string]stri
 }
 
 // buildSyntheticSteps creates a passing step for each scanned target so that
-// synthetic assessments (plan IDs with no findings) have step identity in the
+// synthetic assessments (requirement IDs with no findings) have step identity in the
 // evaluation log. Without this, the evaluation log shows steps: [] for
 // requirements that passed all checks.
 func buildSyntheticSteps(targetResults []*PerTargetResult) []provider.Step {

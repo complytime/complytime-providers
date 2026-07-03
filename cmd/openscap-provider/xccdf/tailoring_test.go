@@ -198,8 +198,8 @@ func TestUnselectAbsentRules(t *testing.T) {
 				{IDRef: "xccdf_org.ssgproject.content_rule_rule2", Selected: true},
 			},
 			configuration: []provider.AssessmentConfiguration{
-				{RequirementID: "rule1"},
-				{RequirementID: "rule2"},
+				{PlanID: "ap-rule1", RequirementID: "rule1"},
+				{PlanID: "ap-rule2", RequirementID: "rule2"},
 			},
 			expectedSelections: []xccdf.SelectElement{},
 		},
@@ -211,7 +211,7 @@ func TestUnselectAbsentRules(t *testing.T) {
 				{IDRef: "xccdf_org.ssgproject.content_rule_rule2", Selected: true},
 			},
 			configuration: []provider.AssessmentConfiguration{
-				{RequirementID: "rule1"},
+				{PlanID: "ap-rule1", RequirementID: "rule1"},
 			},
 			expectedSelections: []xccdf.SelectElement{
 				{IDRef: "xccdf_org.ssgproject.content_rule_rule2", Selected: false},
@@ -235,7 +235,7 @@ func TestUnselectAbsentRules(t *testing.T) {
 			tailoringSelections: []xccdf.SelectElement{},
 			dsProfileSelections: []xccdf.SelectElement{},
 			configuration: []provider.AssessmentConfiguration{
-				{RequirementID: "rule1"},
+				{PlanID: "ap-rule1", RequirementID: "rule1"},
 			},
 			expectedSelections: []xccdf.SelectElement{},
 		},
@@ -273,8 +273,8 @@ func TestSelectAdditionalRules(t *testing.T) {
 				{IDRef: "xccdf_org.ssgproject.content_rule_rule2", Selected: true},
 			},
 			configuration: []provider.AssessmentConfiguration{
-				{RequirementID: "rule1"},
-				{RequirementID: "rule2"},
+				{PlanID: "ap-rule1", RequirementID: "rule1"},
+				{PlanID: "ap-rule2", RequirementID: "rule2"},
 			},
 			expectedSelections: []xccdf.SelectElement{},
 		},
@@ -285,8 +285,8 @@ func TestSelectAdditionalRules(t *testing.T) {
 				{IDRef: "xccdf_org.ssgproject.content_rule_rule1", Selected: true},
 			},
 			configuration: []provider.AssessmentConfiguration{
-				{RequirementID: "rule1"},
-				{RequirementID: "rule2"},
+				{PlanID: "ap-rule1", RequirementID: "rule1"},
+				{PlanID: "ap-rule2", RequirementID: "rule2"},
 			},
 			expectedSelections: []xccdf.SelectElement{
 				{IDRef: "xccdf_org.ssgproject.content_rule_rule2", Selected: true},
@@ -297,8 +297,8 @@ func TestSelectAdditionalRules(t *testing.T) {
 			tailoringSelections: []xccdf.SelectElement{},
 			dsProfileSelections: []xccdf.SelectElement{},
 			configuration: []provider.AssessmentConfiguration{
-				{RequirementID: "rule1"},
-				{RequirementID: "rule2"},
+				{PlanID: "ap-rule1", RequirementID: "rule1"},
+				{PlanID: "ap-rule2", RequirementID: "rule2"},
 			},
 			expectedSelections: []xccdf.SelectElement{
 				{IDRef: "xccdf_org.ssgproject.content_rule_rule1", Selected: true},
@@ -312,7 +312,7 @@ func TestSelectAdditionalRules(t *testing.T) {
 				{IDRef: "xccdf_org.ssgproject.content_rule_rule1", Selected: false},
 			},
 			configuration: []provider.AssessmentConfiguration{
-				{RequirementID: "rule1"},
+				{PlanID: "ap-rule1", RequirementID: "rule1"},
 			},
 			expectedSelections: []xccdf.SelectElement{
 				{IDRef: "xccdf_org.ssgproject.content_rule_rule1", Selected: true},
@@ -325,9 +325,9 @@ func TestSelectAdditionalRules(t *testing.T) {
 				{IDRef: "xccdf_org.ssgproject.content_rule_rule1", Selected: true},
 			},
 			configuration: []provider.AssessmentConfiguration{
-				{RequirementID: "rule1"},
-				{RequirementID: "rule2"},
-				{RequirementID: "rule2"},
+				{PlanID: "ap-rule1", RequirementID: "rule1"},
+				{PlanID: "ap-rule2", RequirementID: "rule2"},
+				{PlanID: "ap-rule2", RequirementID: "rule2"},
 			},
 			expectedSelections: []xccdf.SelectElement{
 				{IDRef: "xccdf_org.ssgproject.content_rule_rule2", Selected: true},
@@ -365,8 +365,8 @@ func TestFilterValidRules(t *testing.T) {
 		{
 			name: "All rules present",
 			configuration: []provider.AssessmentConfiguration{
-				{RequirementID: "package_telnet-server_removed"},
-				{RequirementID: "package_telnet_removed"},
+				{PlanID: "ap-package-telnet-server-removed", RequirementID: "package_telnet-server_removed"},
+				{PlanID: "ap-package-telnet-removed", RequirementID: "package_telnet_removed"},
 			},
 			expectedValidCount:   2,
 			expectedSkippedCount: 0,
@@ -374,8 +374,8 @@ func TestFilterValidRules(t *testing.T) {
 		{
 			name: "One rule missing in datastream",
 			configuration: []provider.AssessmentConfiguration{
-				{RequirementID: "package_telnet-server_removed"},
-				{RequirementID: "this_rule_is_not_in_datastream"},
+				{PlanID: "ap-package-telnet-server-removed", RequirementID: "package_telnet-server_removed"},
+				{PlanID: "ap-this-rule-is-not-in-datastream", RequirementID: "this_rule_is_not_in_datastream"},
 			},
 			expectedValidCount:   1,
 			expectedSkippedCount: 1,
@@ -384,8 +384,8 @@ func TestFilterValidRules(t *testing.T) {
 		{
 			name: "All rules missing",
 			configuration: []provider.AssessmentConfiguration{
-				{RequirementID: "bogus_rule_a"},
-				{RequirementID: "bogus_rule_b"},
+				{PlanID: "ap-bogus-rule-a", RequirementID: "bogus_rule_a"},
+				{PlanID: "ap-bogus-rule-b", RequirementID: "bogus_rule_b"},
 			},
 			expectedValidCount:   0,
 			expectedSkippedCount: 2,
@@ -431,10 +431,10 @@ func TestGetTailoringSelections(t *testing.T) {
 		{
 			name: "All rules present",
 			configuration: []provider.AssessmentConfiguration{
-				{RequirementID: "package_telnet-server_removed"},
-				{RequirementID: "package_telnet_removed"},
-				{RequirementID: "set_password_hashing_algorithm_logindefs"},
-				{RequirementID: "set_password_hashing_algorithm_systemauth"},
+				{PlanID: "ap-package-telnet-server-removed", RequirementID: "package_telnet-server_removed"},
+				{PlanID: "ap-package-telnet-removed", RequirementID: "package_telnet_removed"},
+				{PlanID: "ap-set-password-hashing-algorithm-logindefs", RequirementID: "set_password_hashing_algorithm_logindefs"},
+				{PlanID: "ap-set-password-hashing-algorithm-systemauth", RequirementID: "set_password_hashing_algorithm_systemauth"},
 			},
 			expectedResult: []xccdf.SelectElement{},
 		},
@@ -451,11 +451,11 @@ func TestGetTailoringSelections(t *testing.T) {
 		{
 			name: "Additional rule in configuration",
 			configuration: []provider.AssessmentConfiguration{
-				{RequirementID: "package_telnet-server_removed"},
-				{RequirementID: "package_telnet_removed"},
-				{RequirementID: "set_password_hashing_algorithm_logindefs"},
-				{RequirementID: "set_password_hashing_algorithm_systemauth"},
-				{RequirementID: "account_unique_id"},
+				{PlanID: "ap-package-telnet-server-removed", RequirementID: "package_telnet-server_removed"},
+				{PlanID: "ap-package-telnet-removed", RequirementID: "package_telnet_removed"},
+				{PlanID: "ap-set-password-hashing-algorithm-logindefs", RequirementID: "set_password_hashing_algorithm_logindefs"},
+				{PlanID: "ap-set-password-hashing-algorithm-systemauth", RequirementID: "set_password_hashing_algorithm_systemauth"},
+				{PlanID: "ap-account-unique-id", RequirementID: "account_unique_id"},
 			},
 			expectedResult: []xccdf.SelectElement{
 				{IDRef: "xccdf_org.ssgproject.content_rule_account_unique_id", Selected: true},
@@ -674,6 +674,7 @@ func TestGetTailoringProfile(t *testing.T) {
 
 	tailoringConfig := []provider.AssessmentConfiguration{
 		{
+			PlanID:        "ap-set-password-hashing-algorithm-logindefs",
 			RequirementID: "set_password_hashing_algorithm_logindefs",
 			Parameters:    map[string]string{"var_password_hashing_algorithm": "YESCRYPT"},
 		},
@@ -725,6 +726,7 @@ func TestPolicyToXML(t *testing.T) {
 
 	tailoringConfig := []provider.AssessmentConfiguration{
 		{
+			PlanID:        "ap-account-unique-id",
 			RequirementID: "account_unique_id",
 			Parameters:    map[string]string{"var_password_hashing_algorithm": "YESCRYPT"},
 		},

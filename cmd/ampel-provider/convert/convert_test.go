@@ -512,8 +512,8 @@ func TestMatchPolicies_UnmatchedRule(t *testing.T) {
 	require.NoError(t, err)
 
 	input := []provider.AssessmentConfiguration{
-		{RequirementID: "require-pull-request"},
-		{RequirementID: "nonexistent-rule"},
+		{PlanID: "ap-require-pull-request", RequirementID: "require-pull-request"},
+		{PlanID: "ap-nonexistent-rule", RequirementID: "nonexistent-rule"},
 	}
 
 	matched, warnings := MatchPolicies(input, granular)
@@ -528,8 +528,8 @@ func TestMatchPolicies_AllUnmatched(t *testing.T) {
 	require.NoError(t, err)
 
 	input := []provider.AssessmentConfiguration{
-		{RequirementID: "no-such-rule-1"},
-		{RequirementID: "no-such-rule-2"},
+		{PlanID: "ap-no-such-rule-1", RequirementID: "no-such-rule-1"},
+		{PlanID: "ap-no-such-rule-2", RequirementID: "no-such-rule-2"},
 	}
 
 	matched, warnings := MatchPolicies(input, granular)
@@ -551,8 +551,8 @@ func TestMatchPolicies_DuplicateRequirements(t *testing.T) {
 	require.NoError(t, err)
 
 	input := []provider.AssessmentConfiguration{
-		{RequirementID: "require-pull-request"},
-		{RequirementID: "require-pull-request"},
+		{PlanID: "ap-require-pull-request", RequirementID: "require-pull-request"},
+		{PlanID: "ap-require-pull-request", RequirementID: "require-pull-request"},
 	}
 
 	matched, warnings := MatchPolicies(input, granular)

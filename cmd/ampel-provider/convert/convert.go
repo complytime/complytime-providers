@@ -120,9 +120,9 @@ func readRootFile(root *os.Root, relPath, absPath string) ([]byte, error) {
 	return data, nil
 }
 
-// MatchPolicies looks up each requirement ID from the assessment configurations
-// in the granular policy map. It returns the matched policies and warning
-// strings for unmatched requirements.
+// MatchPolicies looks up each Gemara requirement ID (config.RequirementID) from
+// the assessment configurations in the granular policy map. It returns the
+// matched policies and warning strings for unmatched requirements.
 func MatchPolicies(configs []provider.AssessmentConfiguration, granular map[string]*AmpelPolicy) ([]*AmpelPolicy, []string) {
 	var matched []*AmpelPolicy
 	var warnings []string

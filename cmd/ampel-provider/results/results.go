@@ -189,10 +189,11 @@ func WritePerRepoResult(result *PerRepoResult, dir string) error {
 }
 
 // ToScanResponse maps a slice of PerRepoResults to a provider.ScanResponse.
-// Findings are grouped by requirement ID (derived from TenetID) into
-// AssessmentLog entries. Each repository/branch scan becomes a Step within
-// the assessment. Operational errors (repos with Status "error" and no
-// findings) are placed into resp.Errors instead of synthetic assessments.
+// Findings are grouped by Gemara requirement ID (derived from TenetID by
+// stripping the "check-" prefix) into AssessmentLog entries. Each
+// repository/branch scan becomes a Step within the assessment. Operational
+// errors (repos with Status "error" and no findings) are placed into
+// resp.Errors instead of synthetic assessments.
 func ToScanResponse(repoResults []*PerRepoResult) *provider.ScanResponse {
 	type reqGroup struct {
 		requirementID string
@@ -210,7 +211,7 @@ func ToScanResponse(repoResults []*PerRepoResult) *provider.ScanResponse {
 		stepName := repoName + "@" + rr.Branch
 
 		for _, f := range rr.Findings {
-			// Derive requirement ID from TenetID by stripping "check-" prefix
+			// Derive Gemara requirement ID from TenetID by stripping "check-" prefix
 			reqID := strings.TrimPrefix(f.TenetID, "check-")
 
 			g, ok := groups[reqID]
