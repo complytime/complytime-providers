@@ -1,7 +1,0 @@
-# Vendor dependency Dockerfiles are not built by this project.
-# Suppress DS-0002 ("Image user should not be root") triggered by
-# vendor/go.opentelemetry.io/otel/dependencies.Dockerfile.
-#
-# This is a global suppression. Replace with path-scoped
-# .trivyignore.yaml once complytime/org-infra#312 lands.
-AVD-DS-0002
