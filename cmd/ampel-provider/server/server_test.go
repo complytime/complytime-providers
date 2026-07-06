@@ -18,6 +18,7 @@ import (
 	"github.com/complytime/complyctl/pkg/provider"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/config"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/convert"
+	"github.com/complytime/complytime-providers/cmd/ampel-provider/generate"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/scan"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/toolcheck"
 )
@@ -271,6 +272,36 @@ func TestGenerate_MissingToolReturnsError(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, resp.Success)
 	require.Contains(t, resp.ErrorMessage, "nonexistent-ampel-tool-xyz")
+}
+
+func TestGenerate_WritesScanConfig(t *testing.T) {
+	s, _ := setupServer(t)
+
+	resp, err := s.Generate(context.Background(), &provider.GenerateRequest{
+		Configuration: makeTestConfigurations(),
+	})
+	require.NoError(t, err)
+	require.True(t, resp.Success)
+
+	cfg, err := generate.ReadScanConfig(config.ScanConfigDirPath())
+	require.NoError(t, err)
+	require.Equal(t, []string{"BP-1.01"}, cfg.RequirementIDs)
+	require.NotEmpty(t, cfg.GeneratedAt)
+}
+
+func TestGenerate_NoMatchingPolicies_NoScanConfig(t *testing.T) {
+	s, _ := setupServer(t)
+
+	resp, err := s.Generate(context.Background(), &provider.GenerateRequest{
+		Configuration: []provider.AssessmentConfiguration{
+			{PlanID: "ap-nonexistent", RequirementID: "nonexistent"},
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, resp.Success)
+
+	_, err = generate.ReadScanConfig(config.ScanConfigDirPath())
+	require.Error(t, err, "scan config should not exist when no policies match")
 }
 
 // --- Generate tests: complypack content path ---
@@ -791,6 +822,113 @@ func TestScan_MissingToolReturnsError(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "nonexistent-ampel-tool-xyz")
+}
+
+func TestScan_SynthesizesPassingAssessments(t *testing.T) {
+	s, dir := setupServer(t)
+
+	// Write two granular policies
+	policyDir := config.GranularPolicyDirPath()
+	writeGranularPolicies(t, policyDir, "BP-3.01")
+
+	// Generate with both BP-1.01 and BP-3.01
+	resp, err := s.Generate(context.Background(), &provider.GenerateRequest{
+		Configuration: []provider.AssessmentConfiguration{
+			{PlanID: "ap-bp-1.01", RequirementID: "BP-1.01"},
+			{PlanID: "ap-bp-3.01", RequirementID: "BP-3.01"},
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, resp.Success)
+
+	// Verify scan config has both IDs
+	cfg, err := generate.ReadScanConfig(config.ScanConfigDirPath())
+	require.NoError(t, err)
+	require.Len(t, cfg.RequirementIDs, 2)
+
+	// Mock scan produces findings for BP-1.01 only (via ampel result attestation)
+	origRunner := ScanRunner
+	ScanRunner = &mockScanRunner{
+		snappyOutput: makeTestAttestation(),
+		ampelOutput:  makeAmpelResultAttestation(), // only has BP-1.01
+	}
+	defer func() { ScanRunner = origRunner }()
+
+	scanResp, err := s.Scan(context.Background(), &provider.ScanRequest{
+		Targets: []provider.Target{
+			{TargetID: "myorg-repo1", Variables: map[string]string{
+				"url":   "https://github.com/myorg/repo1",
+				"specs": "builtin:github/branch-rules.yaml",
+			}},
+		},
+	})
+	require.NoError(t, err)
+	// Should have 2 assessments: BP-1.01 from findings, BP-3.01 synthesized
+	require.Len(t, scanResp.Assessments, 2)
+
+	reqIDs := make(map[string]bool)
+	for _, a := range scanResp.Assessments {
+		reqIDs[a.RequirementID] = true
+	}
+	require.True(t, reqIDs["BP-1.01"], "BP-1.01 should appear from findings")
+	require.True(t, reqIDs["BP-3.01"], "BP-3.01 should appear as synthetic passing")
+
+	// Verify synthetic assessment for BP-3.01
+	for _, a := range scanResp.Assessments {
+		if a.RequirementID == "BP-3.01" {
+			require.NotEmpty(t, a.Steps, "synthetic assessment should have at least one step")
+			require.Equal(t, provider.ResultPassed, a.Steps[0].Result)
+		}
+	}
+
+	// Verify result files still written
+	resultsDir := filepath.Join(dir, provider.WorkspaceDir, config.ProviderDir, config.DefaultResultsDir)
+	files, err := os.ReadDir(resultsDir)
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+}
+
+func TestScan_MissingScanConfig_FallsBack(t *testing.T) {
+	s, _ := setupServer(t)
+
+	// Do NOT run Generate — scan config won't exist
+	require.NoError(t, config.EnsureDirectories())
+
+	// Write a minimal policy file so scan doesn't fail on missing policy
+	policyDir := config.GeneratedPolicyDirPath()
+	bundle := convert.MergeToBundle([]*convert.AmpelPolicy{
+		{
+			ID:   "BP-1.01",
+			Meta: convert.PolicyMeta{Description: "Test"},
+			Tenets: []convert.AmpelTenet{{
+				ID: "01", Code: "true",
+				Predicates: convert.PredicateSpec{Types: []string{"http://example.com/spec"}},
+				Assessment: convert.TenetMessage{Message: "OK"},
+				Error:      convert.TenetError{Message: "FAIL"},
+			}},
+		},
+	})
+	require.NoError(t, convert.WritePolicy(bundle, policyDir))
+
+	origRunner := ScanRunner
+	ScanRunner = &mockScanRunner{
+		snappyOutput: makeTestAttestation(),
+		ampelOutput:  makeAmpelResultAttestation(),
+	}
+	defer func() { ScanRunner = origRunner }()
+
+	scanResp, err := s.Scan(context.Background(), &provider.ScanRequest{
+		Targets: []provider.Target{
+			{TargetID: "myorg-repo1", Variables: map[string]string{
+				"url":   "https://github.com/myorg/repo1",
+				"specs": "builtin:github/branch-rules.yaml",
+			}},
+		},
+	})
+	require.NoError(t, err, "scan should succeed even without scan config")
+	// Without scan config, only findings-derived assessments
+	require.Len(t, scanResp.Assessments, 1)
+	require.Equal(t, "BP-1.01", scanResp.Assessments[0].RequirementID)
 }
 
 // Ensure unused imports are used

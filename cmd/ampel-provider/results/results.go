@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -194,7 +195,13 @@ func WritePerRepoResult(result *PerRepoResult, dir string) error {
 // repository/branch scan becomes a Step within the assessment. Operational
 // errors (repos with Status "error" and no findings) are placed into
 // resp.Errors instead of synthetic assessments.
-func ToScanResponse(repoResults []*PerRepoResult) *provider.ScanResponse {
+//
+// When allRequirementIDs is non-nil, any requirement ID in the list that
+// produced no findings is given a synthetic passing AssessmentLog with one
+// step per scanned repository. This ensures every requirement evaluated
+// during Generate appears in the response. When nil, only findings-derived
+// assessments are returned (backward-compatible behavior).
+func ToScanResponse(repoResults []*PerRepoResult, allRequirementIDs []string) *provider.ScanResponse {
 	type reqGroup struct {
 		requirementID string
 		steps         []provider.Step
@@ -240,6 +247,28 @@ func ToScanResponse(repoResults []*PerRepoResult) *provider.ScanResponse {
 		}
 	}
 
+	// Synthesize passing assessments for requirement IDs that had no findings.
+	// The allRequirementIDs are the Gemara requirement IDs from the assessment
+	// configurations sent during Generate; every requirement ID should appear
+	// in the response so complyctl can correlate results.
+	if allRequirementIDs != nil {
+		syntheticSteps := buildSyntheticSteps(repoResults)
+		for _, reqID := range allRequirementIDs {
+			if _, exists := groups[reqID]; !exists {
+				groups[reqID] = &reqGroup{
+					requirementID: reqID,
+					steps:         syntheticSteps,
+					passCount:     len(syntheticSteps),
+					totalCount:    len(syntheticSteps),
+				}
+				order = append(order, reqID)
+			}
+		}
+	}
+
+	// Sort for deterministic output, consistent with the OPA provider.
+	sort.Strings(order)
+
 	assessments := make([]provider.AssessmentLog, 0, len(groups))
 	for _, reqID := range order {
 		g := groups[reqID]
@@ -252,6 +281,26 @@ func ToScanResponse(repoResults []*PerRepoResult) *provider.ScanResponse {
 	}
 
 	return &provider.ScanResponse{Assessments: assessments, Errors: opErrors}
+}
+
+// buildSyntheticSteps creates a passing step for each scanned repository so
+// that synthetic assessments (requirement IDs with no findings) have step
+// identity in the evaluation log. Error repositories are excluded.
+func buildSyntheticSteps(repoResults []*PerRepoResult) []provider.Step {
+	steps := make([]provider.Step, 0, len(repoResults))
+	for _, rr := range repoResults {
+		if rr.Status == "error" {
+			continue
+		}
+		repoName := targets.RepoDisplayName(rr.Repository)
+		stepName := repoName + "@" + rr.Branch
+		steps = append(steps, provider.Step{
+			Name:    stepName,
+			Result:  provider.ResultPassed,
+			Message: "all checks passed",
+		})
+	}
+	return steps
 }
 
 func mapResult(findingResult, repoStatus string) provider.Result {

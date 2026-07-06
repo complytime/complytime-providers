@@ -67,6 +67,7 @@ complytime-providers/
 │   ├── ampel-provider/        # Binary: complyctl-provider-ampel
 │   │   ├── config/            #   Configuration handling
 │   │   ├── convert/           #   Format conversion & types
+│   │   ├── generate/          #   Generate RPC: scan config persistence
 │   │   ├── intoto/            #   in-toto attestation handling
 │   │   ├── results/           #   Results processing
 │   │   ├── scan/              #   Scan orchestration

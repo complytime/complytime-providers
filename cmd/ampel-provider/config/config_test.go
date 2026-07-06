@@ -29,6 +29,11 @@ func TestGeneratedPolicyDirPath(t *testing.T) {
 	require.Equal(t, expected, GeneratedPolicyDirPath())
 }
 
+func TestScanConfigDirPath(t *testing.T) {
+	expected := filepath.Join(provider.WorkspaceDir, ProviderDir, GeneratedPolicyDir)
+	require.Equal(t, expected, ScanConfigDirPath())
+}
+
 func TestSpecDirPath(t *testing.T) {
 	expected := filepath.Join(provider.WorkspaceDir, ProviderDir, "specs")
 	require.Equal(t, expected, SpecDirPath())

@@ -67,6 +67,13 @@ func GeneratedPolicyDirPath() string {
 	return filepath.Join(ampelDir(), GeneratedPolicyDir)
 }
 
+// ScanConfigDirPath returns the directory path where scan-config.json is stored.
+// This is the same as the generated policy directory, keeping all Generate
+// artifacts together.
+func ScanConfigDirPath() string {
+	return GeneratedPolicyDirPath()
+}
+
 // SpecDirPath returns the path for the embedded spec files directory.
 func SpecDirPath() string {
 	return filepath.Join(ampelDir(), "specs")
