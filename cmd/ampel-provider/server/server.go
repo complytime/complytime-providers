@@ -15,6 +15,7 @@ import (
 	"github.com/complytime/complyctl/pkg/provider"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/config"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/convert"
+	"github.com/complytime/complytime-providers/cmd/ampel-provider/generate"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/results"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/scan"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/targets"
@@ -112,6 +113,19 @@ func (s *ProviderServer) Generate(_ context.Context, req *provider.GenerateReque
 		return &provider.GenerateResponse{
 			Success:      false,
 			ErrorMessage: fmt.Sprintf("writing AMPEL policy bundle: %v", err),
+		}, nil
+	}
+
+	// Persist matched requirement IDs so Scan can synthesize passing
+	// assessments for requirements with zero findings.
+	requirementIDs := make([]string, len(matched))
+	for i, p := range matched {
+		requirementIDs[i] = p.ID
+	}
+	if err := generate.WriteScanConfig(config.ScanConfigDirPath(), requirementIDs); err != nil {
+		return &provider.GenerateResponse{
+			Success:      false,
+			ErrorMessage: fmt.Sprintf("writing scan config: %v", err),
 		}, nil
 	}
 
@@ -238,7 +252,18 @@ func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*pr
 		}
 	}
 
-	scanResponse := results.ToScanResponse(repoResults)
+	// Read scan config written by Generate to get the full set of requirement
+	// IDs. If missing, fall back to findings-only behavior.
+	var allRequirementIDs []string
+	scanConfig, scanCfgErr := generate.ReadScanConfig(config.ScanConfigDirPath())
+	if scanCfgErr != nil {
+		logger.Warn("scan config not found, passing assessments will not be synthesized",
+			"error", scanCfgErr)
+	} else {
+		allRequirementIDs = scanConfig.RequirementIDs
+	}
+
+	scanResponse := results.ToScanResponse(repoResults, allRequirementIDs)
 	logger.Info("scan complete", "repositories_scanned", len(repoResults))
 	return scanResponse, nil
 }
