@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package results
 
 import (
@@ -79,10 +81,11 @@ type PerRepoResult struct {
 
 // Finding represents an individual rule evaluation result.
 type Finding struct {
-	TenetID string `json:"tenet_id"`
-	Title   string `json:"title"`
-	Result  string `json:"result"`
-	Reason  string `json:"reason"`
+	TenetID  string `json:"tenet_id"`
+	Title    string `json:"title"`
+	Result   string `json:"result"`
+	Reason   string `json:"reason"`
+	Guidance string `json:"guidance,omitempty"`
 }
 
 // ParseAmpelOutput parses the in-toto attestation produced by ampel verify
@@ -151,6 +154,14 @@ func ParseAmpelOutput(raw []byte, repo, branch string) (*PerRepoResult, error) {
 				finding.Result = "fail"
 				if er.Error != nil {
 					finding.Reason = stripControlChars(er.Error.Message)
+					guidance := stripControlChars(er.Error.Guidance)
+					if len(guidance) > maxFieldSize {
+						return nil, fmt.Errorf(
+							"guidance field exceeds maximum size in policy %s",
+							policyID,
+						)
+					}
+					finding.Guidance = guidance
 				}
 			}
 
@@ -205,6 +216,7 @@ func ToScanResponse(repoResults []*PerRepoResult, allRequirementIDs []string) *p
 	type reqGroup struct {
 		requirementID string
 		steps         []provider.Step
+		guidances     []string
 		passCount     int
 		totalCount    int
 	}
@@ -234,10 +246,14 @@ func ToScanResponse(repoResults []*PerRepoResult, allRequirementIDs []string) *p
 				Result:  result,
 				Message: f.Reason,
 			})
-			g.totalCount++
+			// Track guidance only from non-passing steps
 			if result == provider.ResultPassed {
+				g.guidances = append(g.guidances, "")
 				g.passCount++
+			} else {
+				g.guidances = append(g.guidances, f.Guidance)
 			}
+			g.totalCount++
 		}
 
 		// Operational errors with no findings go to resp.Errors
@@ -272,11 +288,35 @@ func ToScanResponse(repoResults []*PerRepoResult, allRequirementIDs []string) *p
 	assessments := make([]provider.AssessmentLog, 0, len(groups))
 	for _, reqID := range order {
 		g := groups[reqID]
+
+		// Determine message and recommendation from steps.
+		// Use the first non-passing step's message and guidance.
+		// If all pass, use the first step's message (no recommendation).
+		// Fall back to count string only when all messages are empty.
+		var msg, recommendation string
+		for i, s := range g.steps {
+			if s.Result != provider.ResultPassed {
+				msg = s.Message
+				recommendation = g.guidances[i]
+				break
+			}
+		}
+		if msg == "" && len(g.steps) > 0 {
+			msg = g.steps[0].Message
+		}
+		if msg == "" {
+			msg = fmt.Sprintf(
+				"%d of %d checks passed",
+				g.passCount, g.totalCount,
+			)
+		}
+
 		assessments = append(assessments, provider.AssessmentLog{
-			RequirementID: g.requirementID,
-			Steps:         g.steps,
-			Message:       fmt.Sprintf("%d of %d repositories passed", g.passCount, g.totalCount),
-			Confidence:    provider.ConfidenceLevelHigh,
+			RequirementID:  g.requirementID,
+			Steps:          g.steps,
+			Message:        msg,
+			Recommendation: recommendation,
+			Confidence:     provider.ConfidenceLevelHigh,
 		})
 	}
 

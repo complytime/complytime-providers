@@ -38,8 +38,6 @@ is available; it is just not surfaced.
 - `guidance-recommendation`: Propagate the Ampel `error.guidance` field
   to `AssessmentLog.Recommendation` for remediation context in reports.
 
-### Modified Capabilities
-
 ## Impact
 
 - `cmd/ampel-provider/results/results.go`: `Finding` struct gains
@@ -54,3 +52,8 @@ is available; it is just not surfaced.
   the needed fields.
 - No proto/API changes — `provider.AssessmentLog` already has
   `Recommendation` and `Message` fields.
+- `CHANGELOG.md`: Entry needed for the user-visible message format
+  change and new `Recommendation` population.
+- ResultSet-level `error.guidance` is out of scope — it applies to
+  operational errors routed to `resp.Errors`, which is a string
+  slice without structured guidance support.

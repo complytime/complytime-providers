@@ -33,8 +33,8 @@ complyctl changes are required.
   evaluation logs and reports show actionable policy-defined text.
 - Propagate `error.guidance` to `AssessmentLog.Recommendation` for
   platform-specific remediation instructions in reports.
-- Align Ampel provider message behavior with the OPA provider's
-  existing pattern.
+- Follow the OPA provider's failure-case message pattern and extend
+  it for passing results by surfacing `assessment.message`.
 - Fix vocabulary from "repositories" to "checks" in the fallback
   count string.
 
@@ -56,9 +56,13 @@ iterate through steps to find the first non-passing step. Use its
 first step's `Message`. Fall back to a count string only when all
 step messages are empty.
 
-**Rationale**: This matches the OPA provider's existing behavior,
-maintains cross-provider consistency, and surfaces the most relevant
-information. The first non-passing step's message is chosen because
+**Rationale**: For non-passing results this matches the OPA
+provider's existing pattern. For all-passing results this improves
+on OPA's pattern by using the tenet's `assessment.message` instead
+of a generic count string, since Ampel tenets consistently provide
+descriptive pass messages. The fallback count string uses "checks"
+(not "targets" as in OPA) because Ampel evaluates tenet checks per
+repository. The first non-passing step's message is chosen because
 it represents the most actionable finding — users need to know what
 failed and why.
 

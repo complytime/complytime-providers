@@ -49,3 +49,26 @@ attestation through to `ToScanResponse`.
   `status: "PASS"`
 - **THEN** the resulting `Finding` SHALL have an empty `Guidance`
   field (assessments do not carry guidance)
+
+### Requirement: Guidance field sanitization
+
+The `Guidance` field SHALL be sanitized using the same defensive
+patterns applied to other externally-sourced string fields
+(`stripControlChars()` and `maxFieldSize` validation), ensuring
+consistent input handling across all fields extracted from the
+Ampel attestation.
+
+#### Scenario: Guidance with control characters
+
+- **WHEN** `error.guidance` contains control characters (e.g., `\x00`,
+  `\x1b`)
+- **THEN** the `Finding.Guidance` field SHALL have control characters
+  stripped, matching the `stripControlChars()` behavior applied to
+  `Finding.Reason`
+
+#### Scenario: Oversized guidance
+
+- **WHEN** `error.guidance` exceeds `maxFieldSize`
+- **THEN** `ParseAmpelOutput` SHALL return an error indicating the
+  guidance field exceeds maximum size, matching the rejection pattern
+  applied to other bounded fields (`checkID`, `description`)
