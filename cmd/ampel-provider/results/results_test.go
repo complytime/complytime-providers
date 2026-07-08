@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package results
 
 import (
@@ -40,13 +42,15 @@ func TestParseAmpelOutput_Fail(t *testing.T) {
 	require.Equal(t, "fail", result.Status)
 	require.Len(t, result.Findings, 2)
 
-	var failCount int
-	for _, f := range result.Findings {
-		if f.Result == "fail" {
-			failCount++
-		}
-	}
-	require.Equal(t, 1, failCount)
+	require.Equal(t, "check-BP-1.01", result.Findings[0].TenetID)
+	require.Equal(t, "pass", result.Findings[0].Result)
+
+	require.Equal(t, "check-BP-2.01", result.Findings[1].TenetID)
+	require.Equal(t, "fail", result.Findings[1].Result)
+	require.Equal(t,
+		"Minimum approvals is 1, expected at least 2",
+		result.Findings[1].Reason,
+	)
 }
 
 func TestParseAmpelOutput_DSSEEnvelope(t *testing.T) {
@@ -74,7 +78,11 @@ func TestParseAmpelOutput_Error(t *testing.T) {
 	result, err := ParseAmpelOutput(data, "https://github.com/myorg/repo1", "main")
 	require.NoError(t, err)
 	require.Equal(t, "error", result.Status)
-	require.NotEmpty(t, result.Error)
+	require.Equal(t,
+		"failed to fetch branch protection data: "+
+			"API rate limit exceeded",
+		result.Error,
+	)
 }
 
 func TestParseAmpelOutput_Empty(t *testing.T) {
@@ -187,6 +195,128 @@ func TestParseAmpelOutput_OversizedErrorField(t *testing.T) {
 	require.Contains(t, err.Error(), "exceeds maximum size")
 }
 
+func TestParseAmpelOutput_GuidanceExtraction(t *testing.T) {
+	data := loadFixture(t, "testdata/ampel-verify-fail.json")
+	result, err := ParseAmpelOutput(
+		data, "https://github.com/myorg/repo1", "main",
+	)
+	require.NoError(t, err)
+	require.Len(t, result.Findings, 2)
+
+	// First finding is a pass — no guidance expected
+	require.Empty(t, result.Findings[0].Guidance)
+
+	// Second finding is a fail with guidance from the fixture
+	require.Equal(t,
+		"Set minimum approvals to 2 or more",
+		result.Findings[1].Guidance,
+	)
+}
+
+func TestParseAmpelOutput_GuidanceEmptyOnPass(t *testing.T) {
+	data := loadFixture(t, "testdata/ampel-verify-pass.json")
+	result, err := ParseAmpelOutput(
+		data, "https://github.com/myorg/repo1", "main",
+	)
+	require.NoError(t, err)
+	for _, f := range result.Findings {
+		require.Empty(t, f.Guidance,
+			"passing tenet %s should have empty guidance", f.TenetID)
+	}
+}
+
+func TestParseAmpelOutput_GuidanceEmptyOnFailWithoutGuidance(t *testing.T) {
+	stmt := ampelResultStatement{
+		Predicate: ampelResultSetPred{
+			Status: "FAIL",
+			Results: []ampelPolicyResult{
+				{
+					Status: "FAIL",
+					Policy: ampelPolicyRef{ID: "BP-1.01"},
+					EvalResults: []ampelEvalResult{
+						{
+							ID:     "01",
+							Status: "FAIL",
+							Error:  &ampelError{Message: "Something failed"},
+						},
+					},
+					Meta: ampelResultMeta{Description: "Test"},
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(stmt)
+	require.NoError(t, err)
+
+	result, err := ParseAmpelOutput(data, "repo", "main")
+	require.NoError(t, err)
+	require.Len(t, result.Findings, 1)
+	require.Empty(t, result.Findings[0].Guidance,
+		"failing tenet without error.guidance should have empty guidance")
+}
+
+func TestParseAmpelOutput_GuidanceControlCharsStripped(t *testing.T) {
+	stmt := ampelResultStatement{
+		Predicate: ampelResultSetPred{
+			Status: "FAIL",
+			Results: []ampelPolicyResult{
+				{
+					Status: "FAIL",
+					Policy: ampelPolicyRef{ID: "BP-1.01"},
+					EvalResults: []ampelEvalResult{
+						{
+							ID:     "01",
+							Status: "FAIL",
+							Error: &ampelError{
+								Message:  "Failed",
+								Guidance: "Fix\x00this\x07now",
+							},
+						},
+					},
+					Meta: ampelResultMeta{Description: "Test"},
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(stmt)
+	require.NoError(t, err)
+
+	result, err := ParseAmpelOutput(data, "repo", "main")
+	require.NoError(t, err)
+	require.Equal(t, "Fixthisnow", result.Findings[0].Guidance)
+}
+
+func TestParseAmpelOutput_OversizedGuidance(t *testing.T) {
+	stmt := ampelResultStatement{
+		Predicate: ampelResultSetPred{
+			Status: "FAIL",
+			Results: []ampelPolicyResult{
+				{
+					Status: "FAIL",
+					Policy: ampelPolicyRef{ID: "BP-1.01"},
+					EvalResults: []ampelEvalResult{
+						{
+							ID:     "01",
+							Status: "FAIL",
+							Error: &ampelError{
+								Message:  "Failed",
+								Guidance: strings.Repeat("g", maxFieldSize+1),
+							},
+						},
+					},
+					Meta: ampelResultMeta{Description: "Test"},
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(stmt)
+	require.NoError(t, err)
+
+	_, err = ParseAmpelOutput(data, "repo", "main")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "guidance field exceeds maximum size")
+}
+
 func TestWritePerRepoResult(t *testing.T) {
 	dir := t.TempDir()
 	result := &PerRepoResult{
@@ -223,6 +353,17 @@ func TestWritePerRepoResult_Overwrites(t *testing.T) {
 	require.Contains(t, string(data), `"fail"`)
 }
 
+func TestWritePerRepoResult_InvalidDir(t *testing.T) {
+	result := &PerRepoResult{
+		Repository: "https://github.com/org/repo",
+		Branch:     "main",
+		Status:     "pass",
+	}
+	err := WritePerRepoResult(result, "/dev/null/impossible")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "creating results directory")
+}
+
 func TestToScanResponse(t *testing.T) {
 	repoResults := []*PerRepoResult{
 		{
@@ -230,7 +371,10 @@ func TestToScanResponse(t *testing.T) {
 			Branch:     "main",
 			Status:     "pass",
 			Findings: []Finding{
-				{TenetID: "check-BP-1.01", Title: "Check 1", Result: "pass", Reason: "OK"},
+				{
+					TenetID: "check-BP-1.01", Title: "Check 1",
+					Result: "pass", Reason: "OK",
+				},
 			},
 		},
 		{
@@ -238,7 +382,11 @@ func TestToScanResponse(t *testing.T) {
 			Branch:     "main",
 			Status:     "fail",
 			Findings: []Finding{
-				{TenetID: "check-BP-1.01", Title: "Check 1", Result: "fail", Reason: "Not configured"},
+				{
+					TenetID: "check-BP-1.01", Title: "Check 1",
+					Result: "fail", Reason: "Not configured",
+					Guidance: "Enable branch protection",
+				},
 			},
 		},
 	}
@@ -251,6 +399,12 @@ func TestToScanResponse(t *testing.T) {
 	require.Equal(t, "BP-1.01", assessment.RequirementID)
 	require.Len(t, assessment.Steps, 2)
 	require.Equal(t, provider.ConfidenceLevelHigh, assessment.Confidence)
+
+	// Message uses the first non-passing step's reason
+	require.Equal(t, "Not configured", assessment.Message)
+	// Recommendation uses the first non-passing step's guidance
+	require.Equal(t, "Enable branch protection",
+		assessment.Recommendation)
 
 	// Sort by Name for deterministic assertions
 	steps := assessment.Steps
@@ -272,8 +426,14 @@ func TestToScanResponse_MultipleChecks(t *testing.T) {
 			Branch:     "main",
 			Status:     "pass",
 			Findings: []Finding{
-				{TenetID: "check-BP-1.01", Title: "Check 1", Result: "pass", Reason: "OK"},
-				{TenetID: "check-BP-2.01", Title: "Check 2", Result: "pass", Reason: "OK"},
+				{
+					TenetID: "check-BP-1.01", Title: "Check 1",
+					Result: "pass", Reason: "PR required",
+				},
+				{
+					TenetID: "check-BP-2.01", Title: "Check 2",
+					Result: "pass", Reason: "Approvals OK",
+				},
 			},
 		},
 		{
@@ -281,8 +441,15 @@ func TestToScanResponse_MultipleChecks(t *testing.T) {
 			Branch:     "main",
 			Status:     "fail",
 			Findings: []Finding{
-				{TenetID: "check-BP-1.01", Title: "Check 1", Result: "fail", Reason: "Not configured"},
-				{TenetID: "check-BP-2.01", Title: "Check 2", Result: "pass", Reason: "OK"},
+				{
+					TenetID: "check-BP-1.01", Title: "Check 1",
+					Result: "fail", Reason: "Not configured",
+					Guidance: "Enable branch protection",
+				},
+				{
+					TenetID: "check-BP-2.01", Title: "Check 2",
+					Result: "pass", Reason: "Approvals OK",
+				},
 			},
 		},
 	}
@@ -294,8 +461,18 @@ func TestToScanResponse_MultipleChecks(t *testing.T) {
 
 	// Each assessment should have 2 steps (one per repo)
 	for _, a := range resp.Assessments {
-		require.Len(t, a.Steps, 2, "RequirementID %s should have 2 steps", a.RequirementID)
+		require.Len(t, a.Steps, 2,
+			"RequirementID %s should have 2 steps", a.RequirementID)
 	}
+
+	// BP-1.01 has a failing step → message override with guidance
+	require.Equal(t, "Not configured", resp.Assessments[0].Message)
+	require.Equal(t, "Enable branch protection",
+		resp.Assessments[0].Recommendation)
+
+	// BP-2.01 all pass → uses first step's message, no recommendation
+	require.Equal(t, "Approvals OK", resp.Assessments[1].Message)
+	require.Empty(t, resp.Assessments[1].Recommendation)
 }
 
 func TestToScanResponse_ErrorRepo(t *testing.T) {
@@ -369,7 +546,8 @@ func TestToScanResponse_PassingRequirements(t *testing.T) {
 	require.Equal(t, provider.ResultPassed, synthetic.Steps[0].Result)
 	require.Equal(t, "myorg/repo1@main", synthetic.Steps[0].Name)
 	require.Equal(t, "all checks passed", synthetic.Steps[0].Message)
-	require.Contains(t, synthetic.Message, "1 of 1 repositories passed")
+	// Synthetic steps all pass → message override uses first step's message
+	require.Equal(t, "all checks passed", synthetic.Message)
 }
 
 func TestToScanResponse_NilRequirementIDs_FindingsOnly(t *testing.T) {
@@ -385,7 +563,8 @@ func TestToScanResponse_NilRequirementIDs_FindingsOnly(t *testing.T) {
 	}
 
 	resp := ToScanResponse(repoResults, nil)
-	require.Len(t, resp.Assessments, 1, "nil allRequirementIDs should produce findings-only assessments")
+	require.Len(t, resp.Assessments, 1,
+		"nil allRequirementIDs should produce findings-only assessments")
 	require.Equal(t, "BP-1.01", resp.Assessments[0].RequirementID)
 }
 
@@ -413,6 +592,109 @@ func TestToScanResponse_ErrorReposExcludedFromSyntheticSteps(t *testing.T) {
 	require.Len(t, resp.Assessments[0].Steps, 1)
 	require.Equal(t, "myorg/repo1@main", resp.Assessments[0].Steps[0].Name)
 	require.Equal(t, provider.ResultPassed, resp.Assessments[0].Steps[0].Result)
+}
+
+func TestToScanResponse_AllPassing(t *testing.T) {
+	repoResults := []*PerRepoResult{
+		{
+			Repository: "https://github.com/myorg/repo1",
+			Branch:     "main",
+			Status:     "pass",
+			Findings: []Finding{
+				{
+					TenetID: "check-BP-1.01", Title: "Check 1",
+					Result: "pass", Reason: "PR required",
+				},
+			},
+		},
+		{
+			Repository: "https://github.com/myorg/repo2",
+			Branch:     "main",
+			Status:     "pass",
+			Findings: []Finding{
+				{
+					TenetID: "check-BP-1.01", Title: "Check 1",
+					Result: "pass", Reason: "PR required",
+				},
+			},
+		},
+	}
+
+	resp := ToScanResponse(repoResults, nil)
+	require.Len(t, resp.Assessments, 1)
+	assessment := resp.Assessments[0]
+
+	// All passing → uses the first step's assessment message
+	require.Equal(t, "PR required", assessment.Message)
+	// No recommendation when all pass
+	require.Empty(t, assessment.Recommendation)
+}
+
+func TestToScanResponse_Recommendation(t *testing.T) {
+	t.Run("FailureWithGuidance", func(t *testing.T) {
+		repoResults := []*PerRepoResult{
+			{
+				Repository: "https://github.com/myorg/repo1",
+				Branch:     "main",
+				Status:     "fail",
+				Findings: []Finding{
+					{
+						TenetID:  "check-BP-1.01",
+						Title:    "Check 1",
+						Result:   "fail",
+						Reason:   "Approvals too low",
+						Guidance: "Set approvals >= 2",
+					},
+				},
+			},
+		}
+		resp := ToScanResponse(repoResults, nil)
+		require.Len(t, resp.Assessments, 1)
+		require.Equal(t, "Set approvals >= 2",
+			resp.Assessments[0].Recommendation)
+	})
+
+	t.Run("FailureWithoutGuidance", func(t *testing.T) {
+		repoResults := []*PerRepoResult{
+			{
+				Repository: "https://github.com/myorg/repo1",
+				Branch:     "main",
+				Status:     "fail",
+				Findings: []Finding{
+					{
+						TenetID: "check-BP-1.01",
+						Title:   "Check 1",
+						Result:  "fail",
+						Reason:  "Something wrong",
+					},
+				},
+			},
+		}
+		resp := ToScanResponse(repoResults, nil)
+		require.Len(t, resp.Assessments, 1)
+		require.Empty(t, resp.Assessments[0].Recommendation)
+	})
+
+	t.Run("AllPass", func(t *testing.T) {
+		repoResults := []*PerRepoResult{
+			{
+				Repository: "https://github.com/myorg/repo1",
+				Branch:     "main",
+				Status:     "pass",
+				Findings: []Finding{
+					{
+						TenetID: "check-BP-1.01",
+						Title:   "Check 1",
+						Result:  "pass",
+						Reason:  "All good",
+					},
+				},
+			},
+		}
+		resp := ToScanResponse(repoResults, nil)
+		require.Len(t, resp.Assessments, 1)
+		require.Empty(t, resp.Assessments[0].Recommendation)
+	})
 }
 
 func TestToScanResponse_MixedFindingsAndPassing(t *testing.T) {
@@ -454,7 +736,8 @@ func TestToScanResponse_MixedFindingsAndPassing(t *testing.T) {
 	// Find BP-3.01 (synthetic) and verify
 	for _, a := range resp.Assessments {
 		if a.RequirementID == "BP-3.01" {
-			require.Len(t, a.Steps, 2, "synthetic should have one step per non-error repo")
+			require.Len(t, a.Steps, 2,
+				"synthetic should have one step per non-error repo")
 			for _, step := range a.Steps {
 				require.Equal(t, provider.ResultPassed, step.Result)
 			}
@@ -474,7 +757,8 @@ func TestToScanResponse_DuplicateRequirementIDs(t *testing.T) {
 	allReqIDs := []string{"BP-1.01", "BP-1.01"}
 
 	resp := ToScanResponse(repoResults, allReqIDs)
-	require.Len(t, resp.Assessments, 1, "duplicate requirement IDs should not produce duplicate assessments")
+	require.Len(t, resp.Assessments, 1,
+		"duplicate requirement IDs should not produce duplicate assessments")
 	require.Equal(t, "BP-1.01", resp.Assessments[0].RequirementID)
 }
 
@@ -491,8 +775,42 @@ func TestToScanResponse_EmptyRequirementIDs(t *testing.T) {
 	}
 
 	resp := ToScanResponse(repoResults, []string{})
-	require.Len(t, resp.Assessments, 1, "empty allRequirementIDs should produce findings-only assessments")
+	require.Len(t, resp.Assessments, 1,
+		"empty allRequirementIDs should produce findings-only assessments")
 	require.Equal(t, "BP-1.01", resp.Assessments[0].RequirementID)
+}
+
+func TestToScanResponse_EmptyMessageFallback(t *testing.T) {
+	repoResults := []*PerRepoResult{
+		{
+			Repository: "https://github.com/myorg/repo1",
+			Branch:     "main",
+			Status:     "pass",
+			Findings: []Finding{
+				{
+					TenetID: "check-BP-1.01", Title: "Check 1",
+					Result: "pass", Reason: "",
+				},
+			},
+		},
+		{
+			Repository: "https://github.com/myorg/repo2",
+			Branch:     "main",
+			Status:     "pass",
+			Findings: []Finding{
+				{
+					TenetID: "check-BP-1.01", Title: "Check 1",
+					Result: "pass", Reason: "",
+				},
+			},
+		},
+	}
+
+	resp := ToScanResponse(repoResults, nil)
+	require.Len(t, resp.Assessments, 1)
+	// All step messages empty → falls back to count string with "checks"
+	require.Equal(t, "2 of 2 checks passed",
+		resp.Assessments[0].Message)
 }
 
 func TestBuildSyntheticSteps(t *testing.T) {

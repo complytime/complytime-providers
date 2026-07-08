@@ -10,6 +10,8 @@
 
 ### Features
 
+- **ampel-provider**: `AssessmentLog.Message` now uses the tenet's `error.message` (on failure) or `assessment.message` (on pass) instead of the generic `"X of Y repositories passed"` count string. Falls back to `"X of Y checks passed"` only when all step messages are empty.
+- **ampel-provider**: `AssessmentLog.Recommendation` is now populated from the `error.guidance` field in Ampel tenet evaluations, providing platform-specific remediation instructions in complyctl reports.
 - **ampel-provider**: `LoadGranularPolicies` now recursively walks subdirectories to find policy JSON files, enabling structured policy source directories. Includes symlink safety (skips symlinks), duplicate policy ID detection (returns error naming both paths), and uses `os.Root` for TOCTOU-safe file reads.
 - **opa-provider**: Generate now accepts `ComplypackContentPath` from complyctl, using cached complypack content directly instead of requiring `opa_bundle_ref` + `conftest pull`. Supports both directory and tar.gz archive formats (extracted idempotently with path traversal protection). ComplypackContentPath takes precedence when both sources are provided.
 - **opa-provider**: Added RPM sub-package (`complytime-providers-opa`) for Fedora packaging. Requires `conftest` CLI at runtime (not yet packaged in Fedora).
