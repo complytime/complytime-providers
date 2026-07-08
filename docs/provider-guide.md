@@ -34,26 +34,71 @@ declared variable requirements. `Generate` converts the OSCAL assessment plan
 into provider-specific policy artifacts. `Scan` invokes the underlying policy
 engine and returns assessment results.
 
-### Complypack Content Path
+### GenerateRequest
 
-The `GenerateRequest` includes an optional `ComplypackContentPath` field. When
-complyctl has a cached complypack for the provider's evaluator ID, it sets this
-field to the local cache path (typically a `content.tar.gz` archive under
-`~/.complytime/complypacks/<evaluator-id>/<version>/`).
+The `GenerateRequest` struct carries configuration from complyctl to your
+provider's `Generate` RPC:
 
-Providers that consume `ComplypackContentPath` should follow this resolution
-order in their `Generate` implementation:
+```go
+type GenerateRequest struct {
+    GlobalVariables       map[string]string            // user-defined key/value pairs from the complyctl config
+    Configuration         []AssessmentConfiguration    // assessment plan entries selected for this provider
+    TargetVariables       map[string]string            // target-scoped overrides for provider variables
+    ComplypackContentPath string                       // path to cached complypack content (see below)
+}
+```
 
-1. **ComplypackContentPath** (if non-empty) -- use the provided path directly.
-   The path may be a directory or a tar.gz archive; providers that receive an
-   archive must extract it before reading content files.
-2. **Provider-specific fallback** (e.g., `opa_bundle_ref` + pull) -- use when
-   no complypack is available.
-3. **Error** -- when neither source is available.
+## Complypack Support
 
-This field is additive: existing provider-specific workflows (such as the OPA
-provider's `opa_bundle_ref` + `conftest pull`) remain unchanged when no
-complypack is provided.
+Complypacks are opaque content bundles (`content.tar.gz`) identified by
+evaluator ID and fetched by `complyctl get`. They allow content authors to
+package provider-specific policy files, data, and configuration into a single
+distributable archive.
+
+When a complypack exists for your provider's evaluator ID, complyctl sets
+`GenerateRequest.ComplypackContentPath` to the local cache path (typically
+`~/.complytime/complypacks/<evaluator-id>/<version>/content.tar.gz`). When no
+complypack is available the field is an empty string.
+
+### Adoption pattern
+
+Check `ComplypackContentPath` first, fall back to your existing content
+source, and error when neither is available:
+
+```go
+func (s *MyProvider) resolvePolicyDir(
+	req *provider.GenerateRequest,
+) (string, error) {
+	// 1. Complypack content (highest priority)
+	if req.ComplypackContentPath != "" {
+		return resolveComplypackPath(req.ComplypackContentPath)
+	}
+
+	// 2. Provider-specific fallback (e.g. variable-driven bundle pull)
+	if ref := req.GlobalVariables["my_bundle_ref"]; ref != "" {
+		return pullBundle(ref)
+	}
+
+	// 3. No content available
+	return "", fmt.Errorf(
+		"either a complypack or my_bundle_ref variable is required")
+}
+```
+
+### Provider responsibilities
+
+- **Extraction**: the path may point to a `tar.gz` archive or an already-
+  extracted directory. If it is an archive, extract it before reading files.
+- **Zip-slip protection**: validate that extracted file paths do not escape the
+  target directory. Use `filepath.Rel` or equivalent to reject paths containing
+  `..` components.
+- **Content format**: the archive layout is provider-defined. Document what
+  your provider expects (e.g. a `policies/` directory, Rego files, XCCDF
+  tailoring).
+- **Backward compatibility**: always check for an empty string before using the
+  path. Providers must continue to work without a complypack. For example, the
+  OPA provider's `opa_bundle_ref` + `conftest pull` workflow remains unchanged
+  when no complypack is provided.
 
 ## Entry Point
 
