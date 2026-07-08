@@ -12,9 +12,9 @@ See [`docs/configuration.md`](docs/configuration.md) for the
 | Go 1.24+ | Build `complyctl` and `openscap-provider` |
 | `openscap-scanner` | Provides the `oscap` CLI used by the provider |
 | `scap-security-guide` | Provides SCAP Datastream XML files in `/usr/share/xml/scap/ssg/content/` |
-| RHEL, CentOS, or Fedora | SSG datastreams are distribution-specific; the provider auto-detects via `/etc/os-release` |
+| Supported Linux distribution | SSG datastreams are distribution-specific; the provider auto-detects via `/etc/os-release` (RHEL, CentOS Stream, Fedora, SUSE, openSUSE, Amazon Linux) |
 
-**Install system dependencies (Fedora/RHEL/CentOS):**
+**Install system dependencies (Fedora/RHEL/CentOS Stream):**
 
 ```bash
 sudo dnf install -y openscap-scanner scap-security-guide
