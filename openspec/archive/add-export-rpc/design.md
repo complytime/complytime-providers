@@ -28,7 +28,7 @@ ProofWatch (`github.com/complytime/complybeacon/proofwatch`) provides the `Gemar
 
 - No changes to the vendored complyctl SDK or proto definitions
 - No custom OTLP transport or retry logic (the OTEL SDK handles this)
-- No enrichment logic (TruthBeam in the collector handles enrichment)
+- No enrichment logic (the collector handles OCSF normalization and export)
 - No OTLP HTTP fallback (gRPC only for initial implementation)
 - No end-to-end integration tests against a real collector (unit tests with noop providers only)
 
