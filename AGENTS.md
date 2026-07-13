@@ -91,6 +91,8 @@ complytime-providers/
 ├── plans/                     # TMT/FMF RPM validation tests
 ├── .github/workflows/         # CI configuration
 ├── openspec/                  # OpenSpec change workflow
+│   ├── archive/               #   Completed/superseded change specs
+│   └── changes/               #   Active change specs
 ├── .opencode/                 # Agent definitions & convention packs
 ├── .goreleaser.yaml           # GoReleaser v2 release config
 └── complytime-providers.spec  # RPM packaging spec

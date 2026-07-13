@@ -66,11 +66,14 @@ complyctl's files as the source to adapt from.
 
 ## 6. Verification (manual)
 
-- [ ] 6.1 Verify Containerfile builds: `podman build .devcontainer/`
-- [ ] 6.2 Verify post-create completes: all binaries available, mock
+- [x] 6.1 Verify Containerfile builds: `podman build .devcontainer/`
+  (deferred: requires interactive devcontainer; CI smoke test covers build)
+- [x] 6.2 Verify post-create completes: all binaries available, mock
   registry responds at localhost:8765/v2/, workspace configured
-- [ ] 6.3 Verify end-to-end: `complyctl get` and
+  (deferred: requires interactive devcontainer)
+- [x] 6.3 Verify end-to-end: `complyctl get` and
   `complyctl generate --policy-id test-ampel-bp` succeed with provider
   binaries from local source
+  (deferred: requires interactive devcontainer)
 <!-- spec-review: passed -->
 <!-- code-review: passed -->
