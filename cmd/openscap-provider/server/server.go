@@ -245,6 +245,8 @@ func mapResultStatus(resultText string) (provider.Result, error) {
 		return provider.ResultPassed, nil
 	case "fail":
 		return provider.ResultFailed, nil
+	case "notapplicable":
+		return provider.ResultSkipped, nil
 	case "error", "unknown":
 		return provider.ResultError, nil
 	}
