@@ -18,6 +18,7 @@
 - [ ] 2.7 Add `TestResolveComplypackPath_FailedExtractionCleansUp` — verify partial extraction is removed on error, then call again with a valid archive and verify it extracts successfully (regression test for OPA cleanup bug per TC-006)
 - [ ] 2.8 Add `TestExtractTarGz_AggregateSizeExceededByOne` — archive with total bytes == `maxTotalExtractedSize + 1` fails (boundary: one byte over the limit)
 - [ ] 2.9 Add `TestExtractTarGz_FileCountExceededByOne` — archive with `maxExtractedFileCount + 1` files fails (boundary: one file over the limit)
+- [ ] 2.10 Add `TestExtractTarGz_BothLimitsExceeded` — archive that exceeds both file count and aggregate bytes limits; assert file count error is returned, not the aggregate bytes error (check precedence per spec)
 
 ## 3. Migrate ampel provider
 
@@ -45,3 +46,4 @@
 
 - [ ] 6.1 Add CHANGELOG.md entry for: aggregate extraction limits, shared archive package, OPA cleanup fix
 - [ ] 6.2 Update AGENTS.md project structure tree to include `internal/archive/` under the internal/ section, and update the Architecture section prose to reflect that `internal/archive/` is now shared between providers alongside `internal/version/`
+- [ ] 6.3 Update README.md project structure tree to include `internal/archive/`, and update the architecture description to reflect that `internal/archive/` provides shared extraction utilities between providers
