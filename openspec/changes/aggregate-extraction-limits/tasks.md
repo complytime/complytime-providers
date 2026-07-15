@@ -47,3 +47,4 @@
 - [ ] 6.1 Add CHANGELOG.md entry for: aggregate extraction limits, shared archive package, OPA cleanup fix
 - [ ] 6.2 Update AGENTS.md project structure tree to include `internal/archive/` under the internal/ section, and update the Architecture section prose to reflect that `internal/archive/` is now shared between providers alongside `internal/version/`
 - [ ] 6.3 Update README.md project structure tree to include `internal/archive/`, and update the architecture description to reflect that `internal/archive/` provides shared extraction utilities between providers
+<!-- spec-review: passed -->
