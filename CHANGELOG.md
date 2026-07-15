@@ -20,6 +20,7 @@
 
 - **ampel-provider**: Synthesize passing assessment logs for requirements with zero findings so every evaluated requirement appears in the scan response. Previously, requirements where all checks passed were silently omitted from the `ScanResponse`. (Fixes #65)
 - **opa-provider**: Removed synthetic `scan-status` assessment entry that used a hardcoded `RequirementID` not matching any assessment plan ID. All `ScanResponse.Assessments` entries now contain valid plan IDs that `complyctl` can resolve via `resolveAssessmentIDs()`. (Fixes #67)
+- **openscap-provider**: Scan results now restore original match IDs from assessment configuration instead of returning XCCDF rule short names. When a PlanID is present, the scan response uses it; otherwise falls back to the XCCDF short name. (Fixes complytime/complyctl#413)
 
 ### Infrastructure
 
