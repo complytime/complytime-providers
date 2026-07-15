@@ -49,11 +49,15 @@ Differences between the two copies:
 
 ### D3: Aggregate counters in the extraction loop
 
-**Decision:** Add `totalBytes int64` and `fileCount int` counters to the `ExtractTarGz` loop. Check `fileCount` before extracting each regular file. Update `totalBytes` after each successful `writeFileFromTar` call (using the returned byte count).
+**Decision:** Add `totalBytes int64` and `fileCount int` counters to the `ExtractTarGz` loop. Check `fileCount` before extracting each regular file. Update `totalBytes` after each successful `writeFileFromTar` call (using the returned byte count). This establishes a deterministic check precedence: file count is checked pre-extraction, aggregate bytes post-extraction. When both limits could be exceeded by the same entry, the file count error surfaces first.
 
-**Rationale:** This is the simplest approach with minimal overhead. The counters are checked at each iteration of the extraction loop, so an archive that exceeds limits is rejected as early as possible. Having `writeFileFromTar` return the bytes written enables accurate tracking without re-reading the file.
+The `writeFileFromTar` signature changes from `error` to `(int64, error)` to return actual bytes written. The aggregate counter uses actual bytes written (not tar header size declarations) because headers can lie. If `writeFileFromTar` returns an error, extraction aborts with that error immediately — the aggregate counter is not updated.
+
+**Rationale:** This is the simplest approach with minimal overhead. The counters are checked at each iteration of the extraction loop, so an archive that exceeds limits is rejected as early as possible. Having `writeFileFromTar` return the bytes written enables accurate tracking without re-reading the file. The limit values (500 MB total, 10,000 files) provide ~50x headroom over realistic complypack sizes (typically < 10 MB with < 100 files) while preventing pathological cases.
 
 **Alternative considered:** Pre-scanning tar headers for file sizes before extraction. Rejected because tar headers can lie about file sizes (the actual compressed content may differ), and it would require a second pass.
+
+**Boundary semantics:** Both limits use strict greater-than comparison (`>`). Exactly 500 MB or exactly 10,000 files is allowed; the limit triggers on the value that exceeds it. Directory entries do not count toward the file count (they are structural, not content; the aggregate bytes limit provides sufficient inode protection).
 
 ### D4: Include partial-extraction cleanup in shared code
 
@@ -66,3 +70,4 @@ Differences between the two copies:
 - **[Structural change]** Moving code to `internal/archive/` changes the project's isolation model where providers were previously self-contained. -> Mitigation: `internal/version/` already establishes the precedent for shared internal packages. The extraction logic is genuinely shared and identical.
 - **[Test migration effort]** Tests from `unpack_test.go` and `server_test.go` must be migrated to the new package. -> Mitigation: The ampel provider's test suite is more comprehensive and serves as the primary source. OPA-specific extraction tests that duplicate coverage are removed rather than migrated.
 - **[Behavioral change for OPA provider]** OPA provider now cleans up partial extractions, which it previously did not. -> Mitigation: This is a bug fix. Leaving corrupted partial extractions for reuse is incorrect behavior.
+- **[Disk space exhaustion]** If the filesystem runs out of space during extraction, `writeFileFromTar` will return an I/O error, triggering the cleanup path. If cleanup itself fails due to disk pressure, the partial extraction directory may persist; the idempotent check will reuse it on retry, which may produce incorrect results. This is an existing limitation not addressed by this change.

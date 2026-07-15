@@ -2,7 +2,15 @@
 
 PR #52 added secure tar.gz extraction for complypack content in the ampel provider (`cmd/ampel-provider/server/unpack.go`), porting the logic from the OPA provider (`cmd/opa-provider/server/server.go`). Both implementations cap individual extracted files at 100 MB but do not enforce aggregate limits on total extracted content or file count. An archive containing many small files (each under 100 MB) could consume significant disk space or exhaust inodes during extraction.
 
-Additionally, the two extraction implementations are functionally identical copy-pasted code. Applying the aggregate limits separately to each copy would violate the Single Source of Truth principle and create ongoing maintenance risk. Ref: [complytime/complytime-providers#71](https://github.com/complytime/complytime-providers/issues/71).
+Additionally, the two extraction implementations are functionally identical copy-pasted code. Applying the aggregate limits separately to each copy would violate the Single Source of Truth principle (Constitution I) and create ongoing maintenance risk — as already evidenced by the OPA provider's missing partial-extraction cleanup, a bug introduced by the original copy-paste. This consolidation was explicitly deferred as a non-goal in the `ampel-complypack-content` OpenSpec (now archived): "Extracting shared tar extraction code into a common internal package (can be done later once a third provider needs it)." The aggregate limits feature provides the forcing function to consolidate now. Ref: [complytime/complytime-providers#71](https://github.com/complytime/complytime-providers/issues/71).
+
+### Scope Justification
+
+This OpenSpec bundles three concerns that are inseparable:
+
+1. **Aggregate extraction limits** — the feature requested by issue #71
+2. **Code consolidation** into `internal/archive/` — required by Constitution Principle I (Single Source of Truth); duplicating the aggregate limit fix across both providers would guarantee future drift
+3. **OPA provider cleanup bug fix** — a direct consequence of the duplication; the shared implementation inherits the ampel provider's correct cleanup behavior
 
 ## What Changes
 
@@ -34,28 +42,46 @@ Additionally, the two extraction implementations are functionally identical copy
 
 ## Constitution Alignment
 
-Assessed against the Unbound Force org constitution.
+Assessed against the ComplyTime Constitution (`.specify/memory/constitution.md`).
 
-### I. Autonomous Collaboration
+### I. Single Source of Truth (Centralized Constants)
 
-**Assessment**: PASS
+**Assessment**: PASS — primary driver
 
-The shared package produces self-describing errors with clear context (file path, limit exceeded, etc.). No changes to artifact-based communication patterns.
+This change directly addresses a Single Source of Truth violation: identical extraction code duplicated across two providers. Consolidation into `internal/archive/` ensures limit constants, security checks, and cleanup behavior are defined once.
 
-### II. Composability First
-
-**Assessment**: PASS
-
-The `internal/archive/` package is standalone with no provider-specific dependencies. Both providers consume it identically. The package does one thing (secure archive extraction) and does it well.
-
-### III. Observable Quality
+### II. Simplicity & Isolation
 
 **Assessment**: PASS
 
-All limits are defined as named constants with documentation. Error messages include the specific limit value and the entry that triggered the violation, enabling clear diagnostics.
+The `internal/archive/` package is standalone with no provider-specific dependencies. Both providers consume it identically. Functions follow the Single Responsibility Principle.
 
-### IV. Testability
+### III. Incremental Improvement
+
+**Assessment**: PASS — scope justified
+
+While this change bundles three concerns (aggregate limits, consolidation, OPA cleanup fix), all three are inseparable: applying limits without consolidation would violate Principle I, and the cleanup fix is a direct consequence of the duplication. See Scope Justification above.
+
+### IV. Readability First
 
 **Assessment**: PASS
 
-The shared package is testable in isolation. Tests verify observable side effects (extracted files, error returns, partial cleanup). The dependency injection pattern used by both providers is unchanged.
+The shared package uses explicit naming (`maxTotalExtractedSize`, `maxExtractedFileCount`) and self-documenting error messages that include limit values and the entry that triggered the violation.
+
+### V. Do Not Reinvent the Wheel
+
+**Assessment**: N/A
+
+No new dependencies introduced. Uses Go stdlib (`archive/tar`, `compress/gzip`, `io`).
+
+### VI. Composability (The Unix Philosophy)
+
+**Assessment**: PASS
+
+The `internal/archive/` package does one thing (secure archive extraction) and does it well. `ExtractTarGz` and `ResolveComplypackPath` are independently usable.
+
+### VII. Convention Over Configuration
+
+**Assessment**: PASS
+
+Limits are opinionated defaults (500 MB, 10,000 files) kept as unexported constants. Users do not need to configure them.
