@@ -22,7 +22,12 @@ import (
 
 var _ provider.Provider = (*ProviderServer)(nil)
 
-type ProviderServer struct{}
+type ProviderServer struct {
+	// ruleToMatchID maps XCCDF rule short names to the original match
+	// IDs from AssessmentConfiguration. Built during Generate so that
+	// Scan can restore the original IDs on assessment results.
+	ruleToMatchID map[string]string
+}
 
 func New() *ProviderServer {
 	return &ProviderServer{}
@@ -43,6 +48,7 @@ func (s *ProviderServer) Generate(ctx context.Context, req *provider.GenerateReq
 			ErrorMessage: err.Error(),
 		}, nil
 	}
+	s.ruleToMatchID = buildRuleToMatchIDMap(req.Configuration)
 	return &provider.GenerateResponse{Success: true}, nil
 }
 
@@ -119,7 +125,7 @@ func (s *ProviderServer) Scan(ctx context.Context, req *provider.ScanRequest) (*
 		return nil, err
 	}
 
-	assessments, err := buildAssessmentsFromARF(xmlnode)
+	assessments, err := buildAssessmentsFromARF(xmlnode, s.ruleToMatchID)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +152,7 @@ func runScanAndParseARF(ctx context.Context, vars map[string]string) (*xmlquery.
 	return xccdf.ParseARFFile(config.ARFPath)
 }
 
-func buildAssessmentsFromARF(xmlnode *xmlquery.Node) ([]provider.AssessmentLog, error) {
+func buildAssessmentsFromARF(xmlnode *xmlquery.Node, ruleToMatchID map[string]string) ([]provider.AssessmentLog, error) {
 	targetEl := xmlnode.SelectElement("//target")
 	if targetEl == nil {
 		return nil, errors.New("result has no 'target' attribute")
@@ -158,7 +164,7 @@ func buildAssessmentsFromARF(xmlnode *xmlquery.Node) ([]provider.AssessmentLog, 
 
 	var assessments []provider.AssessmentLog
 	for i := range results {
-		assessment, skip, err := assessmentFromRuleResult(results[i], ruleTable, target)
+		assessment, skip, err := assessmentFromRuleResult(results[i], ruleTable, target, ruleToMatchID)
 		if err != nil {
 			return nil, err
 		}
@@ -169,13 +175,13 @@ func buildAssessmentsFromARF(xmlnode *xmlquery.Node) ([]provider.AssessmentLog, 
 	return assessments, nil
 }
 
-func assessmentFromRuleResult(result *xmlquery.Node, ruleTable map[string]*xmlquery.Node, target string) (provider.AssessmentLog, bool, error) {
+func assessmentFromRuleResult(result *xmlquery.Node, ruleTable map[string]*xmlquery.Node, target string, ruleToMatchID map[string]string) (provider.AssessmentLog, bool, error) {
 	ruleIDRef, rule, resultText, skip := resolveRuleResult(result, ruleTable)
 	if skip {
 		return provider.AssessmentLog{}, true, nil
 	}
 
-	return buildAssessmentLog(rule, result, ruleIDRef, resultText, target)
+	return buildAssessmentLog(rule, result, ruleIDRef, resultText, target, ruleToMatchID)
 }
 
 func resolveRuleResult(result *xmlquery.Node, ruleTable map[string]*xmlquery.Node) (string, *xmlquery.Node, string, bool) {
@@ -196,13 +202,13 @@ func resolveRuleResult(result *xmlquery.Node, ruleTable map[string]*xmlquery.Nod
 	return ruleIDRef, rule, resultText, false
 }
 
-func buildAssessmentLog(rule, result *xmlquery.Node, ruleIDRef, resultText, target string) (provider.AssessmentLog, bool, error) {
+func buildAssessmentLog(rule, result *xmlquery.Node, ruleIDRef, resultText, target string, ruleToMatchID map[string]string) (provider.AssessmentLog, bool, error) {
 	ovalRefEl := xccdf.FindOVALCheckContentRef(rule)
 	if ovalRefEl == nil {
 		return provider.AssessmentLog{}, true, nil
 	}
 
-	requirementID, err := xccdf.ParseCheck(ovalRefEl)
+	xccdfShortName, err := xccdf.ParseCheck(ovalRefEl)
 	if err != nil {
 		return provider.AssessmentLog{}, false, err
 	}
@@ -210,6 +216,14 @@ func buildAssessmentLog(rule, result *xmlquery.Node, ruleIDRef, resultText, targ
 	mappedResult, err := mapResultStatus(resultText)
 	if err != nil {
 		return provider.AssessmentLog{}, false, err
+	}
+
+	// Restore the original match ID from the assessment configuration.
+	// If no mapping exists (e.g. Scan called without prior Generate),
+	// fall back to the XCCDF short name.
+	requirementID := xccdfShortName
+	if matchID, ok := ruleToMatchID[xccdfShortName]; ok {
+		requirementID = matchID
 	}
 
 	return provider.AssessmentLog{
@@ -224,6 +238,18 @@ func buildAssessmentLog(rule, result *xmlquery.Node, ruleIDRef, resultText, targ
 		Message:    fmt.Sprintf("Host %s evaluated", target),
 		Confidence: provider.ConfidenceLevelHigh,
 	}, false, nil
+}
+
+// buildRuleToMatchIDMap creates a mapping from XCCDF rule short names
+// (used as RequirementID in AssessmentConfiguration) to the original
+// match IDs that complyctl sent. This lets Scan restore the original
+// IDs on assessment results instead of returning XCCDF short names.
+func buildRuleToMatchIDMap(configs []provider.AssessmentConfiguration) map[string]string {
+	m := make(map[string]string, len(configs))
+	for _, cfg := range configs {
+		m[cfg.RequirementID] = cfg.MatchID()
+	}
+	return m
 }
 
 // mergeVariables combines global and target variable maps into a single

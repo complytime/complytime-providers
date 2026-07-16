@@ -138,7 +138,7 @@ func TestBuildAssessmentsFromARF_NoTarget(t *testing.T) {
 		</ds:component></root>`
 	node, err := xmlquery.Parse(strings.NewReader(xml))
 	require.NoError(t, err)
-	_, err = buildAssessmentsFromARF(node)
+	_, err = buildAssessmentsFromARF(node, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no 'target' attribute")
 }
@@ -151,7 +151,7 @@ func TestBuildAssessmentsFromARF_NoResults(t *testing.T) {
 		</ds:component></root>`
 	node, err := xmlquery.Parse(strings.NewReader(xml))
 	require.NoError(t, err)
-	assessments, err := buildAssessmentsFromARF(node)
+	assessments, err := buildAssessmentsFromARF(node, nil)
 	require.NoError(t, err)
 	assert.Empty(t, assessments)
 }
@@ -170,6 +170,84 @@ func TestMergeVariables(t *testing.T) {
 	assert.Equal(t, "1", merged["a"])
 	assert.Equal(t, "override", merged["b"])
 	assert.Equal(t, "3", merged["c"])
+}
+
+func TestBuildAssessmentLog_UsesMatchIDMapping(t *testing.T) {
+	// Rule XML with an OVAL check-content-ref that ParseCheck extracts
+	// short name "sshd_disable_root_login" from. Uses the xccdf-1.2
+	// namespace expected by FindOVALCheckContentRef.
+	ruleXML := `<rule xmlns:xccdf-1.2="http://checklists.nist.gov/xccdf/1.2">
+		<xccdf-1.2:title>Disable Root Login</xccdf-1.2:title>
+		<xccdf-1.2:check system="http://oval.mitre.org/XMLSchema/oval-definitions-5">
+			<xccdf-1.2:check-content-ref name="oval:ssg-sshd_disable_root_login:def:1"/>
+		</xccdf-1.2:check>
+	</rule>`
+	resultXML := `<rule-result><result>pass</result><message>ok</message></rule-result>`
+
+	ruleNode, err := xmlquery.Parse(strings.NewReader(ruleXML))
+	require.NoError(t, err)
+	resultNode, err := xmlquery.Parse(strings.NewReader(resultXML))
+	require.NoError(t, err)
+
+	rule := ruleNode.SelectElement("rule")
+	result := resultNode.SelectElement("rule-result")
+	ruleIDRef := "xccdf_org.ssgproject.content_rule_sshd_disable_root_login"
+
+	t.Run("WithMapping", func(t *testing.T) {
+		// Map XCCDF short name → original match ID (e.g. a plan ID)
+		ruleToMatchID := map[string]string{
+			"sshd_disable_root_login": "plan-123-ssh-root",
+		}
+		assessment, skip, err := buildAssessmentLog(rule, result, ruleIDRef, "pass", "host1", ruleToMatchID)
+		require.NoError(t, err)
+		assert.False(t, skip)
+		assert.Equal(t, "plan-123-ssh-root", assessment.RequirementID,
+			"should use the mapped match ID, not the XCCDF short name")
+	})
+
+	t.Run("WithoutMapping", func(t *testing.T) {
+		// No mapping — falls back to XCCDF short name
+		assessment, skip, err := buildAssessmentLog(rule, result, ruleIDRef, "pass", "host1", nil)
+		require.NoError(t, err)
+		assert.False(t, skip)
+		assert.Equal(t, "sshd_disable_root_login", assessment.RequirementID,
+			"should fall back to XCCDF short name when no mapping exists")
+	})
+
+	t.Run("MappingMiss", func(t *testing.T) {
+		// Mapping exists but doesn't contain this rule
+		ruleToMatchID := map[string]string{
+			"some_other_rule": "plan-456",
+		}
+		assessment, skip, err := buildAssessmentLog(rule, result, ruleIDRef, "pass", "host1", ruleToMatchID)
+		require.NoError(t, err)
+		assert.False(t, skip)
+		assert.Equal(t, "sshd_disable_root_login", assessment.RequirementID,
+			"should fall back to XCCDF short name when rule not in mapping")
+	})
+}
+
+func TestBuildRuleToMatchIDMap(t *testing.T) {
+	configs := []provider.AssessmentConfiguration{
+		{PlanID: "plan-123", RequirementID: "sshd_disable_root_login"},
+		{PlanID: "", RequirementID: "audit_perm_change_success"},
+		{PlanID: "plan-456", RequirementID: "enable_fips_mode"},
+	}
+
+	m := buildRuleToMatchIDMap(configs)
+
+	// PlanID present → MatchID() returns PlanID
+	assert.Equal(t, "plan-123", m["sshd_disable_root_login"])
+	// PlanID empty → MatchID() returns RequirementID (identity mapping)
+	assert.Equal(t, "audit_perm_change_success", m["audit_perm_change_success"])
+	// PlanID present → MatchID() returns PlanID
+	assert.Equal(t, "plan-456", m["enable_fips_mode"])
+}
+
+func TestBuildRuleToMatchIDMap_Empty(t *testing.T) {
+	m := buildRuleToMatchIDMap(nil)
+	assert.NotNil(t, m)
+	assert.Empty(t, m)
 }
 
 func TestRuleResultMessage(t *testing.T) {
