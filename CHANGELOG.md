@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Security
+
+- **ampel-provider**, **opa-provider**: Added aggregate extraction size limit (500 MB total) and file count limit (10,000 files) for complypack tar.gz archives. Previously, only individual files were capped at 100 MB. (Fixes #71)
+- **opa-provider**: Fixed missing cleanup of partial extractions on error. Previously, a failed extraction left corrupted content that would be silently reused on subsequent attempts.
+
+### Infrastructure
+
+- Consolidated duplicate tar.gz extraction code from ampel and OPA providers into shared `internal/archive/` package, eliminating code duplication and ensuring consistent security behavior across providers.
+
 ### Breaking Changes
 
 - **openscap-provider**, **ampel-provider**: Removed Export RPC implementation and `SupportsExport: true` from Describe responses. The upstream complyctl removed the `Exporter` interface and all export infrastructure (complyctl PR #617, issue #606). No action required since complyctl no longer calls Export. Remove any local tooling that checks `SupportsExport`. Dependencies removed: `proofwatch`, `go-gemara`, `otlploggrpc`, `otel/sdk/log`.

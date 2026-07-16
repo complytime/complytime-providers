@@ -49,11 +49,12 @@ cmd/
 ├── ampel-provider/      # In-toto attestation verification
 └── opa-provider/        # OPA/conftest policy evaluation
 internal/
+├── archive/             # Shared tar.gz extraction with security constraints
 └── complytime/testdata/ # Shared XML test fixtures
 docs/                    # Documentation
 ```
 
-Each provider is self-contained under `cmd/<name>-provider/` with its own subpackage hierarchy. No shared library code between providers.
+Each provider is self-contained under `cmd/<name>-provider/` with its own subpackage hierarchy. Shared utilities live in `internal/`: `internal/archive/` provides secure archive extraction for complypack content, and `internal/version/` provides build-time version injection.
 
 ## Documentation
 
