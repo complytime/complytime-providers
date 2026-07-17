@@ -28,6 +28,7 @@ func TestMapResultStatus(t *testing.T) {
 		{"pass", "pass", provider.ResultPassed, nil},
 		{"fixed", "fixed", provider.ResultPassed, nil},
 		{"fail", "fail", provider.ResultFailed, nil},
+		{"notapplicable", "notapplicable", provider.ResultSkipped, nil},
 		{"error", "error", provider.ResultError, nil},
 		{"unknown", "unknown", provider.ResultError, nil},
 		{"invalid", "invalid", provider.ResultError, errors.New("couldn't match invalid")},
@@ -154,6 +155,62 @@ func TestBuildAssessmentsFromARF_NoResults(t *testing.T) {
 	assessments, err := buildAssessmentsFromARF(node, nil)
 	require.NoError(t, err)
 	assert.Empty(t, assessments)
+}
+
+func TestBuildAssessmentsFromARF_NotApplicable(t *testing.T) {
+	// A rule-result with "notapplicable" must produce a ResultSkipped
+	// assessment, not be silently dropped.
+	xml := `<root xmlns:ds="http://scap.nist.gov/schema/scap/source/1.2"
+	              xmlns:xccdf-1.2="http://checklists.nist.gov/xccdf/1.2">
+		<target>host1</target>
+		<ds:component>
+			<xccdf-1.2:Benchmark>
+				<xccdf-1.2:Rule id="xccdf_org.ssgproject.content_rule_test_na">
+					<xccdf-1.2:title>Test NA Rule</xccdf-1.2:title>
+					<xccdf-1.2:check system="http://oval.mitre.org/XMLSchema/oval-definitions-5">
+						<xccdf-1.2:check-content-ref name="oval:ssg-test_na:def:1"/>
+					</xccdf-1.2:check>
+				</xccdf-1.2:Rule>
+			</xccdf-1.2:Benchmark>
+		</ds:component>
+		<rule-result idref="xccdf_org.ssgproject.content_rule_test_na">
+			<result>notapplicable</result>
+		</rule-result>
+	</root>`
+	node, err := xmlquery.Parse(strings.NewReader(xml))
+	require.NoError(t, err)
+	assessments, err := buildAssessmentsFromARF(node)
+	require.NoError(t, err)
+	require.Len(t, assessments, 1, "notapplicable must produce an assessment, not be dropped")
+	assert.Equal(t, "test_na", assessments[0].RequirementID)
+	require.Len(t, assessments[0].Steps, 1)
+	assert.Equal(t, provider.ResultSkipped, assessments[0].Steps[0].Result)
+}
+
+func TestBuildAssessmentsFromARF_NotSelected(t *testing.T) {
+	// A rule-result with "notselected" must still be silently dropped.
+	xml := `<root xmlns:ds="http://scap.nist.gov/schema/scap/source/1.2"
+	              xmlns:xccdf-1.2="http://checklists.nist.gov/xccdf/1.2">
+		<target>host1</target>
+		<ds:component>
+			<xccdf-1.2:Benchmark>
+				<xccdf-1.2:Rule id="xccdf_org.ssgproject.content_rule_test_ns">
+					<xccdf-1.2:title>Test NS Rule</xccdf-1.2:title>
+					<xccdf-1.2:check system="http://oval.mitre.org/XMLSchema/oval-definitions-5">
+						<xccdf-1.2:check-content-ref name="oval:ssg-test_ns:def:1"/>
+					</xccdf-1.2:check>
+				</xccdf-1.2:Rule>
+			</xccdf-1.2:Benchmark>
+		</ds:component>
+		<rule-result idref="xccdf_org.ssgproject.content_rule_test_ns">
+			<result>notselected</result>
+		</rule-result>
+	</root>`
+	node, err := xmlquery.Parse(strings.NewReader(xml))
+	require.NoError(t, err)
+	assessments, err := buildAssessmentsFromARF(node)
+	require.NoError(t, err)
+	assert.Empty(t, assessments, "notselected must still be skipped")
 }
 
 func TestFindOVALCheckContentRef_NoChecks(t *testing.T) {

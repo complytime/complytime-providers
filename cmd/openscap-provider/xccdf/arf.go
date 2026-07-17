@@ -38,9 +38,13 @@ func ParseARFFile(arfPath string) (*xmlquery.Node, error) {
 }
 
 // IsSkippableResult returns true for XCCDF result statuses that should
-// be excluded from scan assessments.
+// be excluded from scan assessments. "notselected" means the rule was
+// not selected for evaluation in the tailoring profile and carries no
+// compliance signal. "notapplicable" is NOT skippable — it indicates
+// the rule was evaluated but does not apply to the target, which is
+// meaningful compliance information reported as RESULT_SKIPPED.
 func IsSkippableResult(resultText string) bool {
-	return resultText == "notselected" || resultText == "notapplicable"
+	return resultText == "notselected"
 }
 
 // FindOVALCheckContentRef locates the check-content-ref element for the

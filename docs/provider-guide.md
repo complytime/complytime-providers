@@ -34,6 +34,35 @@ declared variable requirements. `Generate` converts the OSCAL assessment plan
 into provider-specific policy artifacts. `Scan` invokes the underlying policy
 engine and returns assessment results.
 
+### Result Semantics
+
+The `Scan` RPC returns assessment steps, each carrying a `Result` value.
+Providers MUST map their engine-specific outcomes to the correct `Result`
+constant so that complyctl can produce accurate Gemara and SARIF reports.
+
+| Result | Proto value | Meaning | Gemara mapping |
+|:---|:---|:---|:---|
+| `ResultPassed` | `RESULT_PASSED` | Control requirement satisfied | `Passed` |
+| `ResultFailed` | `RESULT_FAILED` | Control requirement violated | `Failed` |
+| `ResultSkipped` | `RESULT_SKIPPED` | Rule evaluated but does not apply to the target | `NotApplicable` |
+| `ResultError` | `RESULT_ERROR` | Evaluation could not complete (tool error, timeout) | `Unknown` |
+
+**NotApplicable vs NotRun** — `RESULT_SKIPPED` means the rule was evaluated
+and found not applicable to the target environment. It is distinct from a rule
+that was never evaluated at all. Rules that were not selected for evaluation
+(e.g. XCCDF `notselected`) should be omitted from scan results entirely, not
+reported as `RESULT_SKIPPED`.
+
+For XCCDF-based providers, the mapping from XCCDF result strings is:
+
+| XCCDF result | Provider Result | Notes |
+|:---|:---|:---|
+| `pass`, `fixed` | `ResultPassed` | Requirement met |
+| `fail` | `ResultFailed` | Requirement violated |
+| `notapplicable` | `ResultSkipped` | Rule does not apply to this target |
+| `error`, `unknown` | `ResultError` | Evaluation failure |
+| `notselected` | *(omit)* | Rule not selected in profile; no assessment emitted |
+
 ### GenerateRequest
 
 The `GenerateRequest` struct carries configuration from complyctl to your
