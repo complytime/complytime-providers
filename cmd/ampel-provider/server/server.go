@@ -20,6 +20,7 @@ import (
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/scan"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/targets"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/toolcheck"
+	"github.com/complytime/complytime-providers/internal/archive"
 	"github.com/complytime/complytime-providers/internal/version"
 )
 
@@ -334,7 +335,7 @@ func resolvePolicyDir(logger hclog.Logger, req *provider.GenerateRequest) (strin
 	if req.ComplypackContentPath != "" {
 		logger.Info("using complypack content path for generate",
 			"complypack_content_path", req.ComplypackContentPath)
-		resolved, err := resolveComplypackPath(req.ComplypackContentPath)
+		resolved, err := archive.ResolveComplypackPath(req.ComplypackContentPath)
 		if err != nil {
 			return "", fmt.Errorf("resolving complypack content path: %w", err)
 		}

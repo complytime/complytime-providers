@@ -3,14 +3,9 @@
 package server
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -24,6 +19,7 @@ import (
 	"github.com/complytime/complytime-providers/cmd/opa-provider/scan"
 	"github.com/complytime/complytime-providers/cmd/opa-provider/targets"
 	"github.com/complytime/complytime-providers/cmd/opa-provider/toolcheck"
+	"github.com/complytime/complytime-providers/internal/archive"
 	"github.com/complytime/complytime-providers/internal/version"
 )
 
@@ -188,7 +184,7 @@ func (s *ProviderServer) resolvePolicyDir(
 		logger.Info("using complypack content path for generate",
 			"complypack_content_path", contentPath)
 
-		resolved, err := resolveComplypackPath(contentPath)
+		resolved, err := archive.ResolveComplypackPath(contentPath)
 		if err != nil {
 			return "", fmt.Errorf(
 				"resolving complypack content path: %w", err)
@@ -209,149 +205,6 @@ func (s *ProviderServer) resolvePolicyDir(
 		return "", fmt.Errorf("pulling policy bundle: %s", err)
 	}
 	return policyDir, nil
-}
-
-// resolveComplypackPath returns a directory containing the complypack
-// content. If contentPath is already a directory it is returned as-is.
-// If it is a tar.gz archive it is extracted to a sibling "content"
-// directory (idempotent: skips extraction when the directory exists).
-func resolveComplypackPath(contentPath string) (string, error) {
-	info, err := os.Stat(contentPath)
-	if err != nil {
-		return "", fmt.Errorf("stat %s: %w", contentPath, err)
-	}
-
-	if info.IsDir() {
-		return contentPath, nil
-	}
-
-	// Archive file — extract next to the archive.
-	extractDir := filepath.Join(filepath.Dir(contentPath), "content")
-
-	// Idempotent: if a previous run already extracted, reuse it.
-	if fi, statErr := os.Stat(extractDir); statErr == nil && fi.IsDir() {
-		return extractDir, nil
-	}
-
-	if err := extractTarGz(contentPath, extractDir); err != nil {
-		return "", fmt.Errorf("extracting complypack archive: %w", err)
-	}
-	return extractDir, nil
-}
-
-// maxExtractedFileSize is the maximum size allowed for a single file
-// extracted from a complypack archive. Complypack content consists of
-// policy files (Rego, JSON mapping) which are small; this limit guards
-// against decompression bombs.
-const maxExtractedFileSize = 100 << 20 // 100 MB
-
-// extractTarGz extracts a gzip-compressed tar archive into dst.
-// It creates dst and all necessary parent directories. Symlinks,
-// hard links, and entries with path traversal components are rejected.
-// Individual files are capped at maxExtractedFileSize bytes.
-func extractTarGz(archive, dst string) error {
-	f, err := os.Open(archive)
-	if err != nil {
-		return fmt.Errorf("opening archive: %w", err)
-	}
-	defer f.Close()
-
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return fmt.Errorf("creating gzip reader: %w", err)
-	}
-	defer gz.Close()
-
-	if err := os.MkdirAll(dst, 0750); err != nil {
-		return fmt.Errorf("creating destination directory: %w", err)
-	}
-
-	tr := tar.NewReader(gz)
-	for {
-		hdr, readErr := tr.Next()
-		if readErr == io.EOF {
-			break
-		}
-		if readErr != nil {
-			return fmt.Errorf("reading tar entry: %w", readErr)
-		}
-
-		// Reject path traversal.
-		clean := filepath.Clean(hdr.Name)
-		if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
-			return fmt.Errorf(
-				"tar entry %q contains path traversal", hdr.Name)
-		}
-
-		// Skip the root directory entry produced by standard tar tools.
-		// The destination directory is already created by os.MkdirAll above.
-		if clean == "." {
-			continue
-		}
-
-		target := filepath.Join(dst, clean)
-
-		// Zip-slip guard: verify the resolved path is within dst.
-		if !strings.HasPrefix(target, filepath.Clean(dst)+string(os.PathSeparator)) {
-			return fmt.Errorf(
-				"tar entry %q resolves outside destination", hdr.Name)
-		}
-
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if mkErr := os.MkdirAll(target, 0750); mkErr != nil {
-				return fmt.Errorf(
-					"creating directory %s: %w", target, mkErr)
-			}
-		case tar.TypeReg:
-			if mkErr := os.MkdirAll(
-				filepath.Dir(target), 0750,
-			); mkErr != nil {
-				return fmt.Errorf(
-					"creating parent directory for %s: %w",
-					target, mkErr)
-			}
-			if writeErr := writeFileFromTar(
-				target, tr,
-			); writeErr != nil {
-				return writeErr
-			}
-		case tar.TypeSymlink, tar.TypeLink:
-			return fmt.Errorf(
-				"tar entry %q: symlinks and hard links "+
-					"are not permitted", hdr.Name)
-		default:
-			// Skip metadata-only entries (e.g., pax headers).
-			continue
-		}
-	}
-	return nil
-}
-
-// writeFileFromTar writes a single file from a tar reader. Files are
-// created with mode 0600 (owner read/write only) regardless of the
-// archive header to enforce the project's permission model. The write
-// is capped at maxExtractedFileSize to guard against decompression bombs.
-func writeFileFromTar(path string, r io.Reader) error {
-	out, err := os.OpenFile(
-		path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600,
-	)
-	if err != nil {
-		return fmt.Errorf("creating file %s: %w", path, err)
-	}
-	defer out.Close()
-
-	limited := io.LimitReader(r, maxExtractedFileSize+1)
-	n, copyErr := io.Copy(out, limited)
-	if copyErr != nil {
-		return fmt.Errorf("writing file %s: %w", path, copyErr)
-	}
-	if n > maxExtractedFileSize {
-		return fmt.Errorf(
-			"file %s exceeds maximum size of %d bytes",
-			path, maxExtractedFileSize)
-	}
-	return nil
 }
 
 // resolveScanPolicyDir determines the policy directory for Scan. It uses

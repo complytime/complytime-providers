@@ -84,6 +84,7 @@ complytime-providers/
 │       ├── targets/           #   Target resolution & URL parsing
 │       └── toolcheck/         #   Tool availability checking
 ├── internal/
+│   ├── archive/               # Shared tar.gz extraction with security constraints
 │   ├── complytime/
 │   │   └── testdata/openscap/ # XML test fixtures
 │   └── version/               # Build-time version injection
@@ -217,6 +218,9 @@ framework manages gRPC subprocess lifecycle via hashicorp/go-plugin.
 
 Each provider is self-contained under `cmd/<name>-provider/` with
 its own subpackage hierarchy (config, scan, server, plus
-domain-specific packages). The only shared code between providers is `internal/version/`,
-which provides build-time version injection via ldflags.
+domain-specific packages). Shared code between providers lives in
+`internal/`: `internal/version/` provides build-time version injection
+via ldflags, and `internal/archive/` provides secure tar.gz extraction
+with aggregate size limits, file count limits, and path traversal
+protection for complypack content.
 `internal/complytime/` contains only test fixtures.
