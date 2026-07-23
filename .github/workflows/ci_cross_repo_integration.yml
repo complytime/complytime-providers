@@ -57,11 +57,18 @@ jobs:
               run: make build
               working-directory: _complyctl
 
+            # Workaround: v1.2.3 writes unexpanded $HOME to GITHUB_PATH
+            # when using the default install-dir. Use an absolute path
+            # until upstream fix lands (carabiner-dev/actions).
             - name: Install snappy
-              uses: carabiner-dev/actions/install/snappy@94f29392187fe5082d1195a7d4cae3a7ddf09d9c # v1.2.1
+              uses: carabiner-dev/actions/install/snappy@2a4b2cd115ede14629b03ef7e77586d3269d4c72 # v1.2.3
+              with:
+                  install-dir: /home/runner/.carabiner
 
             - name: Install ampel
-              uses: carabiner-dev/actions/install/ampel@94f29392187fe5082d1195a7d4cae3a7ddf09d9c # v1.2.1
+              uses: carabiner-dev/actions/install/ampel@2a4b2cd115ede14629b03ef7e77586d3269d4c72 # v1.2.3
+              with:
+                  install-dir: /home/runner/.carabiner
 
             - name: Install conftest
               run: go install github.com/open-policy-agent/conftest@v0.68.2
