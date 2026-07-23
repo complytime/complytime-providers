@@ -835,3 +835,37 @@ func TestMapResult(t *testing.T) {
 	require.Equal(t, provider.ResultError, mapResult("unknown", "pass"))
 	require.Equal(t, provider.ResultSkipped, mapResult("skip", "pass"))
 }
+
+func TestToScanResponse_AllReposErroredEmitsErrorSteps(t *testing.T) {
+	repoResults := []*PerRepoResult{
+		{
+			Repository: "https://github.com/myorg/repo1",
+			Branch:     "main",
+			Status:     "error",
+			Error:      "GitHub API authentication failed",
+		},
+	}
+	allReqIDs := []string{"block-force-push"}
+
+	resp := ToScanResponse(repoResults, allReqIDs)
+	require.Len(t, resp.Assessments, 1)
+	assessment := resp.Assessments[0]
+	require.Equal(t, "block-force-push", assessment.RequirementID)
+	// The Gemara schema requires at least one step per assessment log, so
+	// the all-repos-errored case must not produce steps: [].
+	require.NotEmpty(t, assessment.Steps)
+	require.Equal(t, "myorg/repo1@main", assessment.Steps[0].Name)
+	require.Equal(t, provider.ResultError, assessment.Steps[0].Result)
+	require.Contains(t, assessment.Steps[0].Message, "Assessment skipped")
+	require.Contains(t, assessment.Steps[0].Message, "GitHub API authentication failed")
+	require.Contains(t, assessment.Message, "Assessment skipped")
+	// The operational error is still reported.
+	require.Len(t, resp.Errors, 1)
+}
+
+func TestToScanResponse_NoReposEmitsPlaceholderStep(t *testing.T) {
+	resp := ToScanResponse([]*PerRepoResult{}, []string{"block-force-push"})
+	require.Len(t, resp.Assessments, 1)
+	require.NotEmpty(t, resp.Assessments[0].Steps)
+	require.Equal(t, provider.ResultError, resp.Assessments[0].Steps[0].Result)
+}
