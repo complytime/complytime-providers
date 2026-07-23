@@ -179,7 +179,7 @@ func TestBuildAssessmentsFromARF_NotApplicable(t *testing.T) {
 	</root>`
 	node, err := xmlquery.Parse(strings.NewReader(xml))
 	require.NoError(t, err)
-	assessments, err := buildAssessmentsFromARF(node)
+	assessments, err := buildAssessmentsFromARF(node, nil)
 	require.NoError(t, err)
 	require.Len(t, assessments, 1, "notapplicable must produce an assessment, not be dropped")
 	assert.Equal(t, "test_na", assessments[0].RequirementID)
@@ -208,7 +208,7 @@ func TestBuildAssessmentsFromARF_NotSelected(t *testing.T) {
 	</root>`
 	node, err := xmlquery.Parse(strings.NewReader(xml))
 	require.NoError(t, err)
-	assessments, err := buildAssessmentsFromARF(node)
+	assessments, err := buildAssessmentsFromARF(node, nil)
 	require.NoError(t, err)
 	assert.Empty(t, assessments, "notselected must still be skipped")
 }
