@@ -9,7 +9,7 @@ gRPC plugin interface (hashicorp/go-plugin) with three core RPCs
 - **Binaries**: `complyctl-provider-openscap`, `complyctl-provider-ampel`,
   `complyctl-provider-opa`
 - **License**: Apache-2.0
-- **Go version**: 1.25.0
+- **Go version**: 1.26
 - **Key dependencies**: complyctl (plugin framework), hashicorp/go-plugin,
   stretchr/testify, antchfx/xmlquery
 

@@ -134,18 +134,18 @@ Produces two binaries:
 
 ## Step 2: Install the OpenSCAP Provider
 
-The provider discovery mechanism scans `~/.complytime/providers/` for executables matching `complyctl-provider-<evaluator-id>`. The build outputs `openscap-provider` — it must be copied with the correct name.
+The provider discovery mechanism scans `~/.local/share/complytime/providers/` for executables matching `complyctl-provider-<evaluator-id>`. The build outputs `openscap-provider` — it must be copied with the correct name.
 
 ```bash
-mkdir -p ~/.complytime/providers
-cp bin/openscap-provider ~/.complytime/providers/complyctl-provider-openscap
-chmod +x ~/.complytime/providers/complyctl-provider-openscap
+mkdir -p ~/.local/share/complytime/providers
+cp bin/openscap-provider ~/.local/share/complytime/providers/complyctl-provider-openscap
+chmod +x ~/.local/share/complytime/providers/complyctl-provider-openscap
 ```
 
 **Verify discovery works:**
 
 ```bash
-ls -la ~/.complytime/providers/complyctl-provider-openscap
+ls -la ~/.local/share/complytime/providers/complyctl-provider-openscap
 ```
 
 ## Step 3: Identify Available SSG Profile and Rules
@@ -316,8 +316,8 @@ bin/complyctl get
 **Verify:**
 
 ```bash
-ls ~/.complytime/policies/policies/cis-fedora-l1-workstation/
-cat ~/.complytime/state.json | python3 -m json.tool
+ls ~/.cache/complytime/policies/policies/cis-fedora-l1-workstation/
+cat ~/.local/share/complytime/state.json | python3 -m json.tool
 ```
 
 ## Step 8: Generate
@@ -369,7 +369,7 @@ sudo bin/complyctl scan --policy-id policies/cis-fedora-l1-workstation --format 
 
 | Symptom | Cause | Fix |
 |:---|:---|:---|
-| `plugin not found for evaluator ID: openscap` | Binary missing or wrong name in `~/.complytime/providers/` | Re-run Step 2; verify the file is named `complyctl-provider-openscap` and is executable |
+| `plugin not found for evaluator ID: openscap` | Binary missing or wrong name in `~/.local/share/complytime/providers/` | Re-run Step 2; verify the file is named `complyctl-provider-openscap` and is executable |
 | `could not determine a datastream file` | `scap-security-guide` not installed or `/etc/os-release` unrecognized | Install `scap-security-guide`; or set `datastream` parameter explicitly in the policy layer |
 | `profile not found: xccdf_org.ssgproject.content_profile_cis_workstation_l1` | Profile not available in the detected datastream | Run `oscap info <datastream>` to list available profiles; update the `profile` parameter in the policy seed data |
 | `rule(s) not found in datastream ... will be skipped` (WARN) | Rule short names in the policy layer don't exist in the installed datastream version | Informational only — skipped rules won't be evaluated. To resolve, update `scap-security-guide` or remove the rules from the policy layer |
@@ -414,7 +414,7 @@ Scan RPC
 
 ```bash
 rm -rf .complytime/scan complytime.yaml
-rm -rf ~/.complytime/policies/policies/cis-fedora-l1-workstation
-rm ~/.complytime/providers/complyctl-provider-openscap
+rm -rf ~/.cache/complytime/policies/policies/cis-fedora-l1-workstation
+rm ~/.local/share/complytime/providers/complyctl-provider-openscap
 # Kill mock registry (Ctrl+C in its terminal)
 ```

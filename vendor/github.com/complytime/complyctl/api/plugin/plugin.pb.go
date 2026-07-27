@@ -84,15 +84,41 @@ func (ConfidenceLevel) EnumDescriptor() ([]byte, []int) {
 	return file_plugin_proto_rawDescGZIP(), []int{0}
 }
 
-// Result represents the outcome of a check
+// Result represents the outcome of a single assessment step.
+// Each value maps to a specific Gemara result state used in
+// downstream report generation (OSCAL, SARIF, Markdown).
 type Result int32
 
 const (
+	// RESULT_UNSPECIFIED indicates the step was never executed.
+	// Use when a requirement exists in the assessment plan but
+	// the provider did not attempt evaluation (e.g., missing
+	// configuration, unsupported check type).
+	// Maps to Gemara NotRun.
 	Result_RESULT_UNSPECIFIED Result = 0
-	Result_RESULT_PASSED      Result = 1
-	Result_RESULT_FAILED      Result = 2
-	Result_RESULT_SKIPPED     Result = 3
-	Result_RESULT_ERROR       Result = 4
+	// RESULT_PASSED indicates the requirement was evaluated and met.
+	// The target satisfies the compliance requirement.
+	// Maps to Gemara Passed.
+	Result_RESULT_PASSED Result = 1
+	// RESULT_FAILED indicates the requirement was evaluated and not met.
+	// The target does not satisfy the compliance requirement.
+	// Maps to Gemara Failed.
+	Result_RESULT_FAILED Result = 2
+	// RESULT_SKIPPED indicates the requirement was evaluated but does
+	// not apply to the target (e.g., a server-only rule scanned against
+	// a container, or an OS-specific check on a different OS).
+	// Providers MUST report not-applicable results using this value
+	// with an AssessmentLog entry rather than silently omitting them.
+	// Omitting not-applicable results prevents complyctl from
+	// distinguishing "nothing ran" from "ran but did not apply."
+	// Maps to Gemara NotApplicable.
+	Result_RESULT_SKIPPED Result = 3
+	// RESULT_ERROR indicates the evaluation could not complete due to
+	// a tool or configuration error (e.g., scanner crash, missing
+	// binary, malformed policy). This is distinct from RESULT_FAILED:
+	// the compliance posture is unknown, not negative.
+	// Maps to Gemara Unknown.
+	Result_RESULT_ERROR Result = 4
 )
 
 // Enum value maps for Result.
@@ -931,13 +957,13 @@ const file_plugin_proto_rawDesc = "" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x12\x18\n" +
 	"\apayload\x18\x04 \x01(\fR\apayload\x12!\n" +
 	"\fcollected_at\x18\x05 \x01(\tR\vcollectedAt\"\x11\n" +
-	"\x0fDescribeRequest\"\xe3\x01\n" +
+	"\x0fDescribeRequest\"\xfa\x01\n" +
 	"\x10DescribeResponse\x12\x18\n" +
 	"\ahealthy\x18\x01 \x01(\bR\ahealthy\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12#\n" +
 	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage\x12:\n" +
 	"\x19required_global_variables\x18\x04 \x03(\tR\x17requiredGlobalVariables\x12:\n" +
-	"\x19required_target_variables\x18\x05 \x03(\tR\x17requiredTargetVariables*\xa4\x01\n" +
+	"\x19required_target_variables\x18\x05 \x03(\tR\x17requiredTargetVariablesJ\x04\b\x06\x10\aR\x0fsupports_export*\xa4\x01\n" +
 	"\x0fConfidenceLevel\x12\x1c\n" +
 	"\x18CONFIDENCE_LEVEL_NOT_SET\x10\x00\x12!\n" +
 	"\x1dCONFIDENCE_LEVEL_UNDETERMINED\x10\x01\x12\x18\n" +

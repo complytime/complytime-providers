@@ -11,7 +11,7 @@ Providers communicate with complyctl via gRPC using the
 [hashicorp/go-plugin](https://github.com/hashicorp/go-plugin) subprocess model.
 When a complyctl command runs, it:
 
-1. Discovers provider binaries in `~/.complytime/providers/` (prefix: `complyctl-provider-`)
+1. Discovers provider binaries in `~/.local/share/complytime/providers/` (prefix: `complyctl-provider-`)
 2. Reads each provider's manifest (`c2p-<name>-manifest.json`) for metadata
 3. Launches the provider binary as a subprocess
 4. Communicates via gRPC over a local socket managed by go-plugin
@@ -86,7 +86,7 @@ distributable archive.
 
 When a complypack exists for your provider's evaluator ID, complyctl sets
 `GenerateRequest.ComplypackContentPath` to the local cache path (typically
-`~/.complytime/complypacks/<evaluator-id>/<version>/content.tar.gz`). When no
+`~/.cache/complytime/complypacks/<evaluator-id>/<version>/content.tar.gz`). When no
 complypack is available the field is an empty string.
 
 ### Adoption pattern
