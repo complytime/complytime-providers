@@ -188,8 +188,8 @@ This produces `bin/complyctl-provider-opa`.
 After building, register the plugin with complyctl by placing the binary in the providers directory:
 
 ```bash
-mkdir -p ~/.complytime/providers
-cp bin/complyctl-provider-opa ~/.complytime/providers/
+mkdir -p ~/.local/share/complytime/providers
+cp bin/complyctl-provider-opa ~/.local/share/complytime/providers/
 ```
 
 The plugin is discovered automatically by complyctl — no manifest files or checksums are required. The evaluator ID is derived from the executable name by removing the `complyctl-provider-` prefix (e.g., `complyctl-provider-opa` becomes evaluator ID `opa`).

@@ -4,7 +4,6 @@ package config
 
 import (
 	"os"
-	"os/user"
 	"path/filepath"
 	"testing"
 
@@ -42,8 +41,8 @@ func TestSanitizeInput(t *testing.T) {
 }
 
 func TestSanitizePath(t *testing.T) {
-	usr, _ := user.Current()
-	homeDir := usr.HomeDir
+	homeDir, err := os.UserHomeDir()
+	require.NoError(t, err, "test requires $HOME to be set")
 
 	tests := []struct {
 		input       string
@@ -75,6 +74,42 @@ func TestSanitizePath(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExpandPath_UsesHOMEEnvVar(t *testing.T) {
+	t.Setenv("HOME", "/tmp/fakehome")
+
+	result, err := expandPath("~/foo")
+	require.NoError(t, err)
+	require.Equal(t, "/tmp/fakehome/foo", result)
+}
+
+func TestExpandPath_BareTilde(t *testing.T) {
+	t.Setenv("HOME", "/tmp/fakehome")
+
+	result, err := expandPath("~")
+	require.NoError(t, err)
+	require.Equal(t, "/tmp/fakehome", result)
+}
+
+func TestExpandPath_NoTildePrefix(t *testing.T) {
+	result, err := expandPath("/absolute/path")
+	require.NoError(t, err)
+	require.Equal(t, "/absolute/path", result)
+}
+
+func TestExpandPath_TildePrefixNotPath(t *testing.T) {
+	result, err := expandPath("~weird")
+	require.NoError(t, err)
+	require.Equal(t, "~weird", result)
+}
+
+func TestExpandPath_ErrorWhenHomeUnavailable(t *testing.T) {
+	t.Setenv("HOME", "")
+
+	_, err := expandPath("~/foo")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to determine home directory")
 }
 
 func setupTestFiles() error {

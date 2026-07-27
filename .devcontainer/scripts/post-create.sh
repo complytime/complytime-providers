@@ -84,12 +84,12 @@ echo "    Copied complyctl and mock-oci-registry to ./bin/"
 # Step 4: Install provider binaries and set up test workspace
 # ---------------------------------------------------------------------------
 echo ">>> Installing provider binaries..."
-mkdir -p "${HOME}/.complytime/providers"
+mkdir -p "${HOME}/.local/share/complytime/providers"
 for provider in openscap ampel opa; do
     binary="complyctl-provider-${provider}"
     src="./bin/${binary}"
     if [[ -f "${src}" ]]; then
-        cp "${src}" "${HOME}/.complytime/providers/"
+        cp "${src}" "${HOME}/.local/share/complytime/providers/"
         echo "    Installed ${binary}"
     else
         echo "    WARNING: ${binary} not found in build output, skipping."

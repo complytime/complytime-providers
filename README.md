@@ -12,7 +12,7 @@ Compliance-scanning provider plugins for the [complyctl](https://github.com/comp
 
 ## Build
 
-Requires Go 1.25.0 or higher.
+Requires Go 1.26 or higher.
 
 ```bash
 make build                    # Build all provider binaries to bin/
@@ -28,8 +28,8 @@ Binaries are output to `bin/`.
 Copy the built binary to the complyctl providers directory:
 
 ```bash
-mkdir -p ~/.complytime/providers
-cp bin/complyctl-provider-* ~/.complytime/providers/
+mkdir -p ~/.local/share/complytime/providers
+cp bin/complyctl-provider-* ~/.local/share/complytime/providers/
 ```
 
 Providers are discovered automatically by complyctl using the `complyctl-provider-` naming convention.

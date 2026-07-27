@@ -15,7 +15,7 @@ License:        Apache-2.0
 URL:            %{base_url}
 Source0:        %{base_url}/archive/refs/tags/v%{version}.tar.gz
 
-BuildRequires:  golang >= 1.25.0
+BuildRequires:  golang >= 1.26
 BuildRequires:  go-rpm-macros
 ExclusiveArch:  %{go_arches}
 

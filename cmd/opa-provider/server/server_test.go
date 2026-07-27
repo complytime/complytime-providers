@@ -482,7 +482,7 @@ func TestGenerate_WithComplypackContentPath_TarGz(t *testing.T) {
 	})
 
 	// Write the archive to a file, mimicking complyctl's cache layout:
-	// ~/.complytime/complypacks/opa/1.0.0/content.tar.gz
+	// ~/.cache/complytime/complypacks/opa/1.0.0/content.tar.gz
 	complypackCacheDir := filepath.Join(t.TempDir(), "opa", "1.0.0")
 	require.NoError(t, os.MkdirAll(complypackCacheDir, 0750))
 	archivePath := filepath.Join(complypackCacheDir, "content.tar.gz")

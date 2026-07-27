@@ -195,8 +195,8 @@ Note: The main `make build` target compiles complyctl and the openscap-plugin. T
 After building, register the plugin with complyctl by placing the binary in the providers directory with the required naming convention:
 
 ```bash
-mkdir -p ~/.complytime/providers
-cp bin/complyctl-provider-ampel ~/.complytime/providers/
+mkdir -p ~/.local/share/complytime/providers
+cp bin/complyctl-provider-ampel ~/.local/share/complytime/providers/
 ```
 
 The plugin is discovered automatically by complyctl — no manifest files or checksums are required. The evaluator ID is derived from the executable name by removing the `complyctl-provider-` prefix (e.g., `complyctl-provider-ampel` becomes evaluator ID `ampel`).

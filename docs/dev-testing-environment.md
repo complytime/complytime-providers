@@ -55,7 +55,7 @@ export GITHUB_TOKEN=<your-token>
   (not complyctl) via `make build`.
 - **OPA provider binary skipped if absent**: The setup
   loop copies openscap, ampel, and opa provider binaries
-  to `~/.complytime/providers/`, gracefully skipping any
+  to `~/.local/share/complytime/providers/`, gracefully skipping any
   that are not present. This is forward-compatible with
   providers added later.
 

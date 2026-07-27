@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/user"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -115,11 +114,11 @@ func IsXMLFile(filePath string) (bool, error) {
 
 func expandPath(path string) (string, error) {
 	if path == "~" || strings.HasPrefix(path, "~/") {
-		usr, err := user.Current()
+		homeDir, err := os.UserHomeDir()
 		if err != nil {
-			return "", fmt.Errorf("failed to identify current user: %w", err)
+			return "", fmt.Errorf("failed to determine home directory: %w", err)
 		}
-		return filepath.Join(usr.HomeDir, path[1:]), nil
+		return filepath.Join(homeDir, path[1:]), nil
 	}
 	return path, nil
 }
