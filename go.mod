@@ -1,6 +1,6 @@
 module github.com/complytime/complytime-providers
 
-go 1.26
+go 1.26.5
 
 require (
 	github.com/antchfx/xmlquery v1.5.1
