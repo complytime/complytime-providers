@@ -4,7 +4,7 @@ go 1.26.5
 
 require (
 	github.com/antchfx/xmlquery v1.5.1
-	github.com/complytime/complyctl v1.0.0-rc.0.0.20260723151125-ee50f3d5c79c
+	github.com/complytime/complyctl v1.0.0
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/stretchr/testify v1.11.1
 )
@@ -19,7 +19,7 @@ require (
 	github.com/hashicorp/go-plugin v1.8.0 // indirect
 	github.com/hashicorp/yamux v0.1.2 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
-	github.com/mattn/go-isatty v0.0.23 // indirect
+	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/oklog/run v1.1.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect

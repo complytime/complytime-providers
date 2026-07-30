@@ -4,8 +4,8 @@ github.com/antchfx/xmlquery
 # github.com/antchfx/xpath v1.3.6
 ## explicit; go 1.14
 github.com/antchfx/xpath
-# github.com/complytime/complyctl v1.0.0-rc.0.0.20260723151125-ee50f3d5c79c
-## explicit; go 1.26
+# github.com/complytime/complyctl v1.0.0
+## explicit; go 1.26.5
 github.com/complytime/complyctl/api/plugin
 github.com/complytime/complyctl/internal/complytime
 github.com/complytime/complyctl/pkg/provider
@@ -48,7 +48,7 @@ github.com/hashicorp/yamux
 # github.com/mattn/go-colorable v0.1.14
 ## explicit; go 1.18
 github.com/mattn/go-colorable
-# github.com/mattn/go-isatty v0.0.23
+# github.com/mattn/go-isatty v0.0.24
 ## explicit; go 1.20
 github.com/mattn/go-isatty
 # github.com/oklog/run v1.1.0
