@@ -76,10 +76,10 @@ func (s *ProviderServer) Describe(
 	}
 
 	return &provider.DescribeResponse{
-		Healthy:                 healthy,
-		Version:                 version.Version(),
-		ErrorMessage:            errMsg,
-		RequiredTargetVariables: []string{loader.VarURL, loader.VarInputPath},
+		Healthy:                      healthy,
+		Version:                      version.Version(),
+		ErrorMessage:                 errMsg,
+		OptionalTargetVariableGroups: []string{loader.VarURL + "|" + loader.VarInputPath},
 	}, nil
 }
 

@@ -234,8 +234,12 @@ func TestDescribe_Variables(t *testing.T) {
 		context.Background(), &provider.DescribeRequest{},
 	)
 	require.NoError(t, err)
-	assert.Contains(t, resp.RequiredTargetVariables, "url")
-	assert.Contains(t, resp.RequiredTargetVariables, "input_path")
+	assert.Empty(t, resp.RequiredGlobalVariables,
+		"no global variables should be required")
+	assert.Empty(t, resp.RequiredTargetVariables,
+		"url and input_path should not be in RequiredTargetVariables")
+	assert.Equal(t, []string{"url|input_path"}, resp.OptionalTargetVariableGroups,
+		"url and input_path should be declared as an optional group")
 }
 
 // --- Generate tests ---
