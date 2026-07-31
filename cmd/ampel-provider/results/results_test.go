@@ -867,5 +867,8 @@ func TestToScanResponse_NoReposEmitsPlaceholderStep(t *testing.T) {
 	resp := ToScanResponse([]*PerRepoResult{}, []string{"block-force-push"})
 	require.Len(t, resp.Assessments, 1)
 	require.NotEmpty(t, resp.Assessments[0].Steps)
+	require.Equal(t, "ampel", resp.Assessments[0].Steps[0].Name)
 	require.Equal(t, provider.ResultError, resp.Assessments[0].Steps[0].Result)
+	require.Equal(t, "Assessment skipped: no repositories were scanned",
+		resp.Assessments[0].Steps[0].Message)
 }
