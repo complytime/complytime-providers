@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- **opa-provider**: Moved `url` and `input_path` from `RequiredTargetVariables` to `OptionalTargetVariableGroups` in `Describe()` response. `complyctl doctor` no longer reports false "missing variable" errors for these mutually exclusive variables. (Fixes #145)
+
 ### Security
 
 - **ampel-provider**, **opa-provider**: Added aggregate extraction size limit (500 MB total) and file count limit (10,000 files) for complypack tar.gz archives. Previously, only individual files were capped at 100 MB. (Fixes #71)
