@@ -15,7 +15,7 @@ the system's SCAP datastream from `/usr/share/xml/scap/ssg/content/`.
 |-------------|---------|
 | `openscap-scanner` | Provides the `oscap` CLI |
 | `scap-security-guide` | Provides SCAP datastream XML files |
-| RHEL, CentOS, or Fedora | SSG datastreams are distribution-specific |
+| Supported Linux distribution | SSG datastreams are distribution-specific (RHEL, CentOS Stream, Fedora, SUSE, openSUSE, Amazon Linux) |
 
 ```bash
 sudo dnf install -y openscap-scanner scap-security-guide

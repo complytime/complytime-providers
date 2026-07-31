@@ -7,24 +7,86 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/antchfx/xmlquery"
 	"github.com/complytime/complyctl/pkg/provider"
 	"github.com/hashicorp/go-hclog"
 )
 
 const (
-	ProviderDir    string = "openscap"
-	PolicyDir      string = "policy"
-	ResultsDir     string = "results"
-	RemediationDir string = "remediations"
-	DatastreamsDir string = "/usr/share/xml/scap/ssg/content"
-	SystemInfoFile string = "/etc/os-release"
+	ProviderDir           string = "openscap"
+	PolicyDir             string = "policy"
+	ResultsDir            string = "results"
+	RemediationDir        string = "remediations"
+	DefaultDatastreamsDir string = "/usr/share/xml/scap/ssg/content"
+	DefaultSystemInfoFile string = "/etc/os-release"
+	DatastreamsDirEnvVar  string = "SSG_CONTENT_DIR"
+	SystemInfoFileEnvVar  string = "OS_RELEASE_FILE"
 )
+
+// getDatastreamsDir returns the directory containing SSG datastream files.
+// Checks SSG_CONTENT_DIR environment variable first, falls back to default.
+func getDatastreamsDir() string {
+	if dir := os.Getenv(DatastreamsDirEnvVar); dir != "" {
+		return filepath.Clean(dir)
+	}
+	return DefaultDatastreamsDir
+}
+
+// getSystemInfoFile returns the path to the os-release file.
+// Checks OS_RELEASE_FILE environment variable first, falls back to default.
+func getSystemInfoFile() string {
+	if file := os.Getenv(SystemInfoFileEnvVar); file != "" {
+		return filepath.Clean(file)
+	}
+	return DefaultSystemInfoFile
+}
+
+// normalizeCPE converts a CPE string to CPE 2.2 URI format for comparison.
+// CPE 2.3 formatted strings (cpe:2.3:part:vendor:...) are converted to
+// CPE 2.2 URI binding (cpe:/part:vendor:...) with trailing wildcards removed.
+// CPE 2.2 URIs are returned unchanged.
+func normalizeCPE(cpe string) string {
+	const cpe23Prefix = "cpe:2.3:"
+	if !strings.HasPrefix(cpe, cpe23Prefix) {
+		return cpe
+	}
+	parts := strings.Split(strings.TrimPrefix(cpe, cpe23Prefix), ":")
+	for len(parts) > 0 && parts[len(parts)-1] == "*" {
+		parts = parts[:len(parts)-1]
+	}
+	return "cpe:/" + strings.Join(parts, ":")
+}
+
+// cpeMatches reports whether systemCPE and datastreamCPE identify the same
+// platform. Both values are normalized to CPE 2.2 URI format, then compared
+// using case-insensitive component-prefix matching: the shorter CPE must be
+// a component-wise prefix of the longer one (components are colon-separated).
+func cpeMatches(systemCPE, datastreamCPE string) bool {
+	sys := strings.ToLower(normalizeCPE(systemCPE))
+	ds := strings.ToLower(normalizeCPE(datastreamCPE))
+	if sys == ds {
+		return true
+	}
+	sysParts := strings.Split(sys, ":")
+	dsParts := strings.Split(ds, ":")
+	shorter, longer := sysParts, dsParts
+	if len(sysParts) > len(dsParts) {
+		shorter, longer = dsParts, sysParts
+	}
+	for i, part := range shorter {
+		if part != longer[i] {
+			return false
+		}
+	}
+	return true
+}
 
 // Resolved convention-based file paths. These are constants — the provider
 // always reads/writes to these locations under the workspace directory.
@@ -152,82 +214,152 @@ func ensureDirectory(path string) error {
 	return nil
 }
 
-// getDistroIdsAndVersions returns distribution IDs and versions from SystemInfoFile.
-func getDistroIdsAndVersions() ([]string, []string, error) {
-	file, err := os.Open(SystemInfoFile)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer file.Close()
-
-	var ids []string
-	var versionID string
-
-	scanner := bufio.NewScanner(file)
+// extractCPEFromOsRelease parses CPE_NAME from an os-release formatted reader.
+// Returns an error if CPE_NAME is missing.
+func extractCPEFromOsRelease(r io.Reader) (string, error) {
+	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, "ID=") {
-			id := strings.Trim(strings.Split(line, "=")[1], `"`)
-			ids = append(ids, id)
-		} else if strings.HasPrefix(line, "VERSION_ID=") {
-			versionID = strings.Trim(strings.Split(line, "=")[1], `"`)
-		} else if strings.HasPrefix(line, "ID_LIKE=") {
-			altIdString := strings.Trim(strings.Split(line, "=")[1], `"`)
-			altIds := strings.Split(altIdString, " ")
-			ids = append(ids, altIds...)
+		if strings.HasPrefix(line, "CPE_NAME=") {
+			cpe := strings.Trim(strings.SplitN(line, "=", 2)[1], `"'`)
+			if cpe == "" {
+				return "", fmt.Errorf("CPE_NAME field is empty")
+			}
+			return cpe, nil
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, nil, err
+		return "", fmt.Errorf("reading os-release data: %w", err)
 	}
 
-	if ids != nil && versionID != "" {
-		majorVersion := strings.Split(versionID, ".")[0]
-		fullVersion := strings.ReplaceAll(versionID, ".", "")
-		return ids, []string{majorVersion, fullVersion}, nil
-	}
-
-	return nil, nil, fmt.Errorf("could not determine distribution and version based on %s", SystemInfoFile)
+	return "", fmt.Errorf("CPE_NAME not found in os-release")
 }
 
-func findMatchingDatastream() (string, error) {
-	distroIds, distroVersions, err := getDistroIdsAndVersions()
+// getSystemCPE returns the CPE_NAME from the system's os-release file.
+func getSystemCPE() (string, error) {
+	systemInfoFile := getSystemInfoFile()
+	file, err := os.Open(systemInfoFile)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to open %s: %w", systemInfoFile, err)
+	}
+	defer file.Close()
+	return extractCPEFromOsRelease(file)
+}
+
+// extractCPEFromDatastream parses a datastream XML file and extracts all CPE
+// names from cpe-dict:cpe-item elements.
+func extractCPEFromDatastream(fsys fs.FS, filename string) ([]string, error) {
+	file, err := fsys.Open(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open datastream %s: %w", filename, err)
+	}
+	defer file.Close()
+
+	doc, err := xmlquery.Parse(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse XML from %s: %w", filename, err)
 	}
 
-	var foundFile string
+	// Query for all cpe-item elements with name attributes.
+	// Use local-name() to ignore namespace prefixes (cpe-dict:cpe-item, etc.)
+	nodes := xmlquery.Find(doc, "//*[local-name()='cpe-item'][@name]")
+	if len(nodes) == 0 {
+		return nil, fmt.Errorf("no CPE entries found in %s", filename)
+	}
 
-	err = filepath.Walk(DatastreamsDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
+	var cpes []string
+	for _, node := range nodes {
+		if cpeName := node.SelectAttr("name"); cpeName != "" {
+			cpes = append(cpes, cpeName)
 		}
-		if !info.IsDir() {
-			for id := range distroIds {
-				for version := range distroVersions {
-					pattern := fmt.Sprintf("ssg-%s%s-ds.xml", distroIds[id], distroVersions[version])
-					if info.Name() == pattern {
-						foundFile = path
-						return filepath.SkipDir
-					}
-				}
-				pattern := fmt.Sprintf("ssg-%s-ds.xml", distroIds[id])
-				if info.Name() == pattern {
-					foundFile = path
-					return filepath.SkipDir
-				}
+	}
+
+	if len(cpes) == 0 {
+		return nil, fmt.Errorf(
+			"no valid CPE entries found in %s (all name attributes empty)",
+			filename,
+		)
+	}
+
+	return cpes, nil
+}
+
+// matchDatastreamByCPE searches fsys for an SSG datastream file whose CPE
+// dictionary matches the system's CPE. Returns the first matching filename.
+// The datastreamDir parameter is used only in error messages to help users
+// identify the directory that was searched.
+func matchDatastreamByCPE(fsys fs.FS, systemCPE, datastreamDir string) (string, error) {
+	entries, err := fs.ReadDir(fsys, ".")
+	if err != nil {
+		return "", fmt.Errorf("reading datastream directory: %w", err)
+	}
+
+	var checked []string
+	var skipped []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+		if !strings.HasPrefix(name, "ssg-") || !strings.HasSuffix(name, "-ds.xml") {
+			continue
+		}
+
+		cpes, err := extractCPEFromDatastream(fsys, name)
+		if err != nil {
+			hclog.Default().Debug("skipping datastream", "file", name, "error", err.Error())
+			skipped = append(skipped, name)
+			continue
+		}
+
+		checked = append(checked, name)
+		for _, cpe := range cpes {
+			if cpeMatches(systemCPE, cpe) {
+				return name, nil
 			}
 		}
-		return nil
-	})
+	}
 
+	if len(checked) == 0 && len(skipped) > 0 {
+		hclog.Default().Warn("all SSG datastream files failed CPE extraction", "files", skipped)
+		return "", fmt.Errorf("no valid SSG datastreams found in %s (%d files failed to parse). Verify file permissions and integrity, or set %s environment variable to the SSG content directory",
+			datastreamDir, len(skipped), DatastreamsDirEnvVar)
+	}
+
+	if len(checked) == 0 {
+		return "", fmt.Errorf("no valid SSG datastreams found in %s. Install scap-security-guide or set %s environment variable to the SSG content directory",
+			datastreamDir, DatastreamsDirEnvVar)
+	}
+
+	return "", fmt.Errorf("no datastream matches system CPE %s (checked: %v). Set variables.datastream explicitly to override auto-detection",
+		systemCPE, checked)
+}
+
+// findMatchingDatastream auto-detects the appropriate SSG datastream by
+// matching the system's CPE_NAME against CPE entries in datastream files.
+func findMatchingDatastream() (string, error) {
+	systemCPE, err := getSystemCPE()
+	if err != nil {
+		return "", fmt.Errorf("failed to determine system CPE: %w. Set variables.datastream explicitly to override auto-detection", err)
+	}
+
+	datastreamDir := getDatastreamsDir()
+
+	// Check if directory exists
+	if _, err := os.Stat(datastreamDir); err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("datastream directory %s does not exist. Install scap-security-guide or set %s environment variable to the SSG content directory. Alternatively, set variables.datastream explicitly",
+				datastreamDir, DatastreamsDirEnvVar)
+		}
+		return "", fmt.Errorf("cannot access datastream directory %s: %w", datastreamDir, err)
+	}
+
+	fsys := os.DirFS(datastreamDir)
+	name, err := matchDatastreamByCPE(fsys, systemCPE, datastreamDir)
 	if err != nil {
 		return "", err
 	}
-	if foundFile != "" {
-		return foundFile, nil
-	}
-
-	return "", fmt.Errorf("could not determine a datastream file for a system with ids: %v and versions: %v", distroIds, distroVersions)
+	return filepath.Join(datastreamDir, name), nil
 }
