@@ -96,6 +96,7 @@ complytime-providers/
 │   └── changes/               #   Active change specs
 ├── .opencode/                 # Agent definitions & convention packs
 ├── .goreleaser.yaml           # GoReleaser v2 release config
+├── go-vendor-tools.toml       # Vendored license detection config (Fedora RPM)
 └── complytime-providers.spec  # RPM packaging spec
 ```
 

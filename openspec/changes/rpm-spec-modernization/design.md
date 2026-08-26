@@ -17,20 +17,24 @@ Key constraints:
 - The `gopkg.in/yaml.v3` vendored license is a dual MIT+Apache-2.0
   file that `askalono` cannot auto-detect
 
-## Goals / Non-Goals
+### Goals
 
-**Goals:**
 - Pass Fedora package review for Go packaging compliance
 - Align with the modernized `complyctl` spec patterns
 - Ensure `complyctl` + `complytime-providers` install cleanly
   together on Fedora and provider discovery works end-to-end
 - Generate proper debuginfo packages (removing `%{nil}` override)
 
-**Non-Goals:**
+### Non-Goals
+
 - Packaging `snappy`, `ampel`, or `conftest` for Fedora (external
   runtime deps for ampel/opa providers remain user-managed)
 - Changing provider binary behavior or code
 - Creating man pages for providers (can be added later)
+- Adding `go_vendor_license` checks to GitHub Actions CI
+  (`go-vendor-tools` is Fedora-specific tooling not available in
+  standard GitHub Actions runners; license drift is caught at RPM
+  build time via `%go_vendor_license_check`)
 
 ## Decisions
 
@@ -116,11 +120,32 @@ Mitigation: Fedora build roots always have `gcc` available.
 command pattern-matches `go [0-9].*` in `go.mod`. If the format
 changes in future Go versions, it could silently fail.
 Mitigation: The block is conditional on `%{?fedora} == 43` only
-and has a documented EOL date for removal.
+and has a documented EOL date for removal. A `# TODO(2027-01):
+remove F43 workaround` comment should be added in the spec itself
+as a sunset trigger.
 
 **[Risk] License expression drift** If vendored dependencies
 change, the `License:` field and `go-vendor-tools.toml` overrides
 must be updated.
 Mitigation: `%go_vendor_license_check` in `%check` will fail the
 build if the license config is stale. The `go_vendor_license report
---verify-spec` workflow catches drift.
+--verify-spec` workflow catches drift. When vendored dependencies
+change, maintainers run `go_vendor_license --config
+go-vendor-tools.toml report expression` and update the spec's
+`License:` field accordingly.
+
+**[Risk] `go-vendor-tools` availability** This change makes RPM
+builds dependent on the Fedora-packaged `go-vendor-tools`. This
+tool is available in Fedora 43+ but is not available in CentOS
+Stream or RHEL build environments.
+Mitigation: The RPM spec targets Fedora submission specifically.
+Non-Fedora builds (e.g., GoReleaser releases) use a separate
+build pipeline that does not depend on `go-vendor-tools`.
+
+**[Note] Provider binary permissions** The `%attr(0755, root, root)`
+permission on provider binaries in `%{_libexecdir}` follows the
+standard Fedora convention for executable helper programs. While
+providers are invoked by `complyctl` via gRPC subprocess (not
+directly by users), 0755 is the expected permission for
+`%{_libexecdir}` binaries per Fedora packaging guidelines and
+enables direct invocation for debugging purposes.

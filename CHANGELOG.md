@@ -13,6 +13,7 @@
 
 ### Infrastructure
 
+- Modernized RPM spec for Fedora Go Packaging Guidelines: adopted `go-vendor-tools` for vendored license handling, replaced raw `go build` with `%gobuild` macro, switched to forge macros and `%autorelease`, added aggregated vendored license expression, and introduced main `complytime-providers` package for shared license files.
 - Consolidated duplicate tar.gz extraction code from ampel and OPA providers into shared `internal/archive/` package, eliminating code duplication and ensuring consistent security behavior across providers.
 
 ### Breaking Changes

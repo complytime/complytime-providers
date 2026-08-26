@@ -50,6 +50,10 @@ None. No spec-level behavior changes. The `skip_specs: true` marker
 is set in `.openspec.yaml` because this is a pure packaging/tooling
 change with no behavioral impact.
 
+### Removed Capabilities
+
+None.
+
 ## Impact
 
 - **Files modified**: `complytime-providers.spec`
@@ -64,3 +68,15 @@ change with no behavioral impact.
   targets v1.0.0). The `complyctl` RPM owns
   `/usr/libexec/complytime/` and `/usr/libexec/complytime/providers/`;
   provider sub-packages install binaries into that directory.
+
+## Constitution Alignment
+
+| Principle | Alignment |
+|-----------|-----------|
+| I. Single Source of Truth | License expression computed from `go-vendor-tools.toml` config, not hardcoded. Version injected via single `GO_LDFLAGS` variable. |
+| II. Simplicity & Isolation | Replaces manual build/install logic with standard Fedora macros (`%gobuild`, `%gocheck2`). |
+| III. Incremental Improvement | Focused on a single concern: RPM packaging modernization for Fedora. No code changes. |
+| IV. Readability First | Fedora Go packaging macros are well-documented community conventions that reduce spec complexity. |
+| V. Don't Reinvent | Adopts the established Fedora Go packaging ecosystem (`go-vendor-tools`, `go-rpm-macros`) rather than custom tooling. |
+| VI. Composability | N/A — packaging artifact, not application code. |
+| VII. Convention Over Configuration | Directly embraces Fedora Go packaging conventions (`%gobuild`, `%autorelease`, forge macros). |
