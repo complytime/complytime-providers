@@ -45,7 +45,7 @@ make test-devcontainer
 | Workflow | File | Triggers | Jobs |
 |----------|------|----------|------|
 | ci | `.github/workflows/ci_local.yml` | push to main, PRs | build-and-test |
-| release | `.github/workflows/release.yml` | workflow_dispatch | preflight, release |
+| release | `.github/workflows/release.yml` | workflow_dispatch | preflight (org-infra reusable), release (org-infra reusable) |
 
 ## Project Structure
 

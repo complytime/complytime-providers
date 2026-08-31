@@ -1,8 +1,15 @@
-# Release workflow for complytime-providers.
-# Validates pre-flight conditions (semver format, tag uniqueness,
-# CI status, unreleased commits), creates an annotated tag, then
-# builds provider binaries via GoReleaser with cosign signatures
-# and SBOMs.
+# Release
+# =======
+# Release pipeline triggered via workflow_dispatch.
+# Delegates to org-infra reusable workflows for preflight
+# validation and GoReleaser execution with supply chain
+# artifacts (cosign signatures and SBOMs).
+#
+# Preflight validates semver format, tag uniqueness (with
+# re-run resilience), semver ordering, CI check status,
+# and unreleased commits before creating an annotated tag.
+#
+# See: https://github.com/complytime/complytime-providers/issues/158
 
 name: Release
 
@@ -13,177 +20,44 @@ on:
                 description: 'The tag to release (e.g., v0.1.0)'
                 required: true
                 type: string
+            skip_semver_check:
+                description: 'Skip semver ordering verification'
+                type: boolean
+                default: false
+            skip_ci_checks:
+                description: 'Skip CI check verification on HEAD'
+                type: boolean
+                default: false
+            skip_unreleased_check:
+                description: 'Skip unreleased commits verification'
+                type: boolean
+                default: false
 
-permissions: {}
-
-concurrency:
-    group: release-${{ github.ref }}
-    cancel-in-progress: false
+permissions:
+    contents: none
+    id-token: none
 
 jobs:
     preflight:
-        runs-on: ubuntu-latest
+        name: Preflight
+        uses: complytime/org-infra/.github/workflows/reusable_release_preflight.yml@0c784711926c9864f027ec565fd7c06a382d80f8 # v0.7.1
+        with:
+            tag: ${{ inputs.tag }}
+            ci_checks: '["Build and test", "Standardized CI / Run linters"]'
+            skip_semver_check: ${{ inputs.skip_semver_check }}
+            skip_ci_checks: ${{ inputs.skip_ci_checks }}
+            skip_unreleased_check: ${{ inputs.skip_unreleased_check }}
         permissions:
-            contents: write   # push annotated tag
-            checks: read      # query CI status via Checks API
-        timeout-minutes: 10
-        env:
-            RELEASE_TAG: ${{ inputs.tag }}
-
-        steps:
-            - name: Checkout
-              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-              with:
-                  fetch-depth: 0
-                  persist-credentials: false
-
-            - name: Validate tag format
-              run: |
-                  if ! echo "$RELEASE_TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-                      echo "::error::Invalid tag format: '$RELEASE_TAG'. Must match vMAJOR.MINOR.PATCH (e.g., v0.1.0)."
-                      exit 1
-                  fi
-                  echo "Tag format valid: $RELEASE_TAG"
-
-            - name: Check tag uniqueness
-              id: tag-check
-              run: |
-                  TAG_EXISTS_AT_HEAD="false"
-                  REMOTE_REF=$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}" | awk '{print $1}')
-                  if [ -n "$REMOTE_REF" ]; then
-                      # Tag exists on remote. For annotated tags, dereference
-                      # to get the underlying commit object.
-                      DEREF=$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}^{}" | awk '{print $1}')
-                      TAG_COMMIT="${DEREF:-$REMOTE_REF}"
-                      HEAD_SHA=$(git rev-parse HEAD)
-                      if [ "$TAG_COMMIT" = "$HEAD_SHA" ]; then
-                          echo "Tag '$RELEASE_TAG' already exists at HEAD ($HEAD_SHA). Proceeding (re-run)."
-                          TAG_EXISTS_AT_HEAD="true"
-                      else
-                          echo "::error::Tag '$RELEASE_TAG' already exists at commit $TAG_COMMIT, but HEAD is $HEAD_SHA. Cannot re-tag a different commit."
-                          exit 1
-                      fi
-                  else
-                      echo "Tag '$RELEASE_TAG' does not exist yet."
-                  fi
-                  echo "tag_exists_at_head=$TAG_EXISTS_AT_HEAD" >> "$GITHUB_OUTPUT"
-
-            - name: Verify semver ordering
-              if: steps.tag-check.outputs.tag_exists_at_head != 'true'
-              run: |
-                  LATEST=$(git tag -l 'v[0-9]*' --sort=-v:refname | head -1)
-                  if [ -z "$LATEST" ]; then
-                      echo "No existing tags found. First release."
-                      exit 0
-                  fi
-                  echo "Latest existing tag: $LATEST"
-                  # Compare using sort -V: if RELEASE_TAG sorts after LATEST, it is greater.
-                  HIGHER=$(printf '%s\n%s' "$LATEST" "$RELEASE_TAG" | sort -V | tail -1)
-                  if [ "$HIGHER" = "$LATEST" ]; then
-                      echo "::error::Tag '$RELEASE_TAG' is not greater than latest release '$LATEST'."
-                      exit 1
-                  fi
-                  echo "Version ordering valid: $RELEASE_TAG > $LATEST"
-
-            # Check names are derived from the name: fields in ci_local.yml
-            # ("Build and test") and ci_checks.yml calling reusable_ci.yml
-            # ("Standardized CI / Run linters"). If those workflow job names
-            # change, update the REQUIRED_CHECKS array below to match.
-            - name: Verify CI passed on HEAD
-              env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-                  GH_REPO: ${{ github.repository }}
-              run: |
-                  HEAD_SHA=$(git rev-parse HEAD)
-                  echo "Checking CI status for commit $HEAD_SHA"
-
-                  REQUIRED_CHECKS=(
-                      "Build and test"
-                      "Standardized CI / Run linters"
-                  )
-
-                  for CHECK_NAME in "${REQUIRED_CHECKS[@]}"; do
-                      STATUS=$(gh api "repos/${GH_REPO}/commits/${HEAD_SHA}/check-runs" \
-                          --jq ".check_runs[] | select(.name == \"${CHECK_NAME}\") | .conclusion" \
-                          2>/dev/null | head -1)
-                      if [ "$STATUS" != "success" ]; then
-                          echo "::error::Required check '${CHECK_NAME}' has not passed (status: ${STATUS:-not found}). Push to main and wait for CI before releasing."
-                          exit 1
-                      fi
-                      echo "  Check passed — ${CHECK_NAME}: success"
-                  done
-
-                  echo "All required CI checks passed."
-
-            - name: Verify unreleased commits
-              if: steps.tag-check.outputs.tag_exists_at_head != 'true'
-              run: |
-                  LATEST=$(git tag -l 'v[0-9]*' --sort=-v:refname | head -1)
-                  if [ -z "$LATEST" ]; then
-                      COUNT=$(git rev-list --count HEAD)
-                  else
-                      COUNT=$(git rev-list --count "${LATEST}..HEAD")
-                  fi
-                  if [ "$COUNT" -eq 0 ]; then
-                      echo "::error::No unreleased commits since ${LATEST:-initial commit}. Nothing to release."
-                      exit 1
-                  fi
-                  echo "$COUNT commit(s) since ${LATEST:-initial commit}."
-
-            - name: Create and push tag
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              run: |
-                  # Idempotent: skip if tag was already created (re-run
-                  # after partial failure).
-                  if git ls-remote --tags origin | grep -q "refs/tags/${RELEASE_TAG}$"; then
-                      echo "Tag $RELEASE_TAG already exists, skipping creation."
-                      exit 0
-                  fi
-                  # Annotated tags require a committer identity on the
-                  # CI runner (git tag -a uses GIT_COMMITTER_NAME/EMAIL).
-                  git config user.name "github-actions[bot]"
-                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-                  git tag -a "$RELEASE_TAG" -m "$RELEASE_TAG"
-                  # Push with explicit token (checkout uses persist-credentials: false).
-                  PUSH_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-                  git push "${PUSH_URL}" "$RELEASE_TAG"
-                  echo "Created and pushed tag: $RELEASE_TAG"
+            contents: write
+            checks: read
 
     release:
+        name: Release
         needs: preflight
-        runs-on: ubuntu-latest
+        if: needs.preflight.outputs.tag != ''
+        uses: complytime/org-infra/.github/workflows/reusable_release_goreleaser.yml@0c784711926c9864f027ec565fd7c06a382d80f8 # v0.7.1
+        with:
+            tag: ${{ needs.preflight.outputs.tag }}
         permissions:
-            contents: write   # create GitHub Release and upload assets
-            id-token: write   # Sigstore keyless signing via OIDC
-        timeout-minutes: 30
-
-        steps:
-            - name: Checkout
-              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-              with:
-                  fetch-depth: 0
-                  ref: ${{ inputs.tag }}
-                  persist-credentials: false
-
-            - name: Setup Go
-              uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-              with:
-                  go-version-file: go.mod
-                  cache: false
-
-            - name: Install cosign
-              uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-
-            - name: Install syft
-              uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
-
-            - name: Run GoReleaser
-              uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
-              with:
-                  version: '~> v2'
-                  args: --verbose release --clean
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-                  GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
-              continue-on-error: false
+            contents: write
+            id-token: write

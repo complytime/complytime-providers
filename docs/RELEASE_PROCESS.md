@@ -23,6 +23,21 @@ The workflow performs automated preflight validation before releasing:
 - **Unreleased commits**: ensures there are changes to release
 - **Tag creation**: creates an annotated tag automatically (no manual tagging needed)
 
+#### Override Inputs
+
+For exceptional situations (e.g., hotfix releases), the workflow supports skip overrides:
+
+```bash
+# Skip semver ordering check (e.g., backport release)
+gh workflow run release.yml -f tag=v0.1.1 -f skip_semver_check=true
+
+# Skip CI verification (e.g., CI infrastructure outage)
+gh workflow run release.yml -f tag=v0.1.0 -f skip_ci_checks=true
+
+# Skip unreleased commits check
+gh workflow run release.yml -f tag=v0.1.0 -f skip_unreleased_check=true
+```
+
 If preflight passes, GoReleaser builds all three provider binaries, generates per-provider archives, signs checksums with [cosign](https://github.com/sigstore/cosign) (Sigstore keyless), and produces [SPDX](https://spdx.dev/) SBOMs via [syft](https://github.com/anchore/syft).
 
 Once the workflow completes, the release is available on the [releases page](https://github.com/complytime/complytime-providers/releases)

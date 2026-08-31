@@ -13,6 +13,7 @@
 
 ### Infrastructure
 
+- Replaced inline release preflight and GoReleaser logic with org-infra reusable workflow calls (`reusable_release_preflight.yml`, `reusable_release_goreleaser.yml`), reducing `release.yml` from ~189 to ~63 lines. Adds `skip_semver_check`, `skip_ci_checks`, and `skip_unreleased_check` override inputs. Fixes semver ordering (`sort -V` → proper semver comparison) and adds smart re-run detection. Pinned to org-infra v0.7.1. (Fixes #158)
 - Modernized RPM spec for Fedora Go Packaging Guidelines: adopted `go-vendor-tools` for vendored license handling, replaced raw `go build` with `%gobuild` macro, switched to forge macros and `%autorelease`, added aggregated vendored license expression, and introduced main `complytime-providers` package for shared license files.
 - Consolidated duplicate tar.gz extraction code from ampel and OPA providers into shared `internal/archive/` package, eliminating code duplication and ensuring consistent security behavior across providers.
 
