@@ -116,6 +116,11 @@ install -p -m 0755 %{gobuilddir}/bin/complyctl-provider-openscap %{buildroot}%{_
 install -p -m 0755 %{gobuilddir}/bin/complyctl-provider-ampel %{buildroot}%{_libexecdir}/%{app_dir}/providers/complyctl-provider-ampel
 install -p -m 0755 %{gobuilddir}/bin/complyctl-provider-opa %{buildroot}%{_libexecdir}/%{app_dir}/providers/complyctl-provider-opa
 
+install -d %{buildroot}%{_mandir}/man1
+install -p -m 0644 docs/man/complyctl-provider-openscap.1 %{buildroot}%{_mandir}/man1/complyctl-provider-openscap.1
+install -p -m 0644 docs/man/complyctl-provider-ampel.1 %{buildroot}%{_mandir}/man1/complyctl-provider-ampel.1
+install -p -m 0644 docs/man/complyctl-provider-opa.1 %{buildroot}%{_mandir}/man1/complyctl-provider-opa.1
+
 %check
 %go_vendor_license_check -c %{S:2}
 %if %{with check}
@@ -128,12 +133,15 @@ install -p -m 0755 %{gobuilddir}/bin/complyctl-provider-opa %{buildroot}%{_libex
 
 %files          openscap
 %attr(0755, root, root) %{_libexecdir}/%{app_dir}/providers/complyctl-provider-openscap
+%{_mandir}/man1/complyctl-provider-openscap.1*
 
 %files          ampel
 %attr(0755, root, root) %{_libexecdir}/%{app_dir}/providers/complyctl-provider-ampel
+%{_mandir}/man1/complyctl-provider-ampel.1*
 
 %files          opa
 %attr(0755, root, root) %{_libexecdir}/%{app_dir}/providers/complyctl-provider-opa
+%{_mandir}/man1/complyctl-provider-opa.1*
 
 %changelog
 * Wed Aug 26 2026 Marcus Burghardt <maburgha@redhat.com> - 0.1.0-1

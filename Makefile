@@ -4,7 +4,7 @@ GIT_TAG ?= $(or $(GIT_TAG_RAW),v0.0.0)
 VERSION ?= $(shell echo "$(GIT_TAG)" | sed 's/^v//')
 GO_LD_FLAGS := -X github.com/complytime/complytime-providers/internal/version.version=$(VERSION)
 
-.PHONY: build build-openscap-provider build-ampel-provider build-opa-provider test test-cross-repo test-devcontainer vendor lint
+.PHONY: build build-openscap-provider build-ampel-provider build-opa-provider test test-cross-repo test-devcontainer vendor lint man
 
 build: build-openscap-provider build-ampel-provider build-opa-provider
 
@@ -35,3 +35,10 @@ vendor:
 
 lint:
 	golangci-lint run ./...
+
+man: ## generate man pages from docs/man/*.md (requires pandoc)
+	@for md in docs/man/*.md; do \
+		out="$${md%.md}.1"; \
+		pandoc -s -t man "$$md" -o "$$out"; \
+		echo "Generated $$out"; \
+	done
