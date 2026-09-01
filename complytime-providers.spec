@@ -6,7 +6,7 @@
 
 # https://github.com/complytime/complytime-providers
 %global goipath         github.com/complytime/complytime-providers
-Version:                0.1.0
+Version:                0.2.0
 
 %gometa -f
 
@@ -136,6 +136,16 @@ install -p -m 0755 %{gobuilddir}/bin/complyctl-provider-opa %{buildroot}%{_libex
 %attr(0755, root, root) %{_libexecdir}/%{app_dir}/providers/complyctl-provider-opa
 
 %changelog
+* Tue Sep 01 2026 Marcus Burghardt <maburgha@redhat.com> - 0.2.0-1
+- Bump to upstream version v0.2.0
+- XDG Base Directory paths for provider discovery
+- CPE-based datastream auto-detection for OpenSCAP
+- Aggregate extraction limits for complypack archives
+- Shared archive extraction in internal/archive package
+- Ampel tenet message and guidance surfacing
+- OPA complypack content path and mapping requirement
+- Remove Export RPC (upstream complyctl removed Exporter interface)
+
 * Wed Aug 26 2026 Marcus Burghardt <maburgha@redhat.com> - 0.1.0-1
 - Modernize spec for Fedora Go packaging guidelines
 - Adopt go-vendor-tools for vendored license verification
