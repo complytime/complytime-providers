@@ -11,6 +11,10 @@
 - **ampel-provider**, **opa-provider**: Added aggregate extraction size limit (500 MB total) and file count limit (10,000 files) for complypack tar.gz archives. Previously, only individual files were capped at 100 MB. (Fixes #71)
 - **opa-provider**: Fixed missing cleanup of partial extractions on error. Previously, a failed extraction left corrupted content that would be silently reused on subsequent attempts.
 
+### Documentation
+
+- Added man pages for all three provider binaries (`complyctl-provider-openscap`, `complyctl-provider-ampel`, `complyctl-provider-opa`) documenting configuration variables, environment variables, required external tools, and workspace paths. Man pages are maintained as Pandoc markdown in `docs/man/` and rendered via `make man`.
+
 ### Infrastructure
 
 - Replaced inline release preflight and GoReleaser logic with org-infra reusable workflow calls (`reusable_release_preflight.yml`, `reusable_release_goreleaser.yml`), reducing `release.yml` from ~189 to ~63 lines. Adds `skip_semver_check`, `skip_ci_checks`, and `skip_unreleased_check` override inputs. Fixes semver ordering (`sort -V` → proper semver comparison) and adds smart re-run detection. Pinned to org-infra v0.7.1. (Fixes #158)
