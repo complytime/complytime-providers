@@ -89,6 +89,7 @@ complytime-providers/
 │   │   └── testdata/openscap/ # XML test fixtures
 │   └── version/               # Build-time version injection
 ├── docs/                      # Provider development guide
+│   └── man/                   #   Man page sources (Pandoc markdown) and generated .1 files
 ├── plans/                     # TMT/FMF RPM validation tests
 ├── .github/workflows/         # CI configuration
 ├── openspec/                  # OpenSpec change workflow
