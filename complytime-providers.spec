@@ -6,7 +6,7 @@
 
 # https://github.com/complytime/complytime-providers
 %global goipath         github.com/complytime/complytime-providers
-Version:                0.2.0
+Version:                0.2.1
 
 %gometa -f
 
@@ -142,6 +142,11 @@ install -p -m 0644 docs/man/complyctl-provider-opa.1 %{buildroot}%{_mandir}/man1
 %{_mandir}/man1/complyctl-provider-opa.1*
 
 %changelog
+* Tue Sep 01 2026 Marcus Burghardt <maburgha@redhat.com> - 0.2.1-1
+- Bump to upstream version v0.2.1
+- Fix go-vendor-tools.toml license override path for go.yaml.in/yaml/v3
+- Add local RPM build and test documentation to RELEASE_PROCESS.md
+
 * Tue Sep 01 2026 Marcus Burghardt <maburgha@redhat.com> - 0.2.0-1
 - Bump to upstream version v0.2.0
 - XDG Base Directory paths for provider discovery
