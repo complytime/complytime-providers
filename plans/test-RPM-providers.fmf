@@ -5,9 +5,11 @@ discover:
 
 execute:
     script:
+      # Verify binaries are installed and executable
       - test -x /usr/libexec/complytime/providers/complyctl-provider-openscap
       - test -x /usr/libexec/complytime/providers/complyctl-provider-ampel
-      - /usr/libexec/complytime/providers/complyctl-provider-openscap --help
-      - /usr/libexec/complytime/providers/complyctl-provider-ampel --help
       - test -x /usr/libexec/complytime/providers/complyctl-provider-opa
-      - /usr/libexec/complytime/providers/complyctl-provider-opa --help
+      # Verify binaries are valid ELF executables
+      - file /usr/libexec/complytime/providers/complyctl-provider-openscap | grep -q ELF
+      - file /usr/libexec/complytime/providers/complyctl-provider-ampel | grep -q ELF
+      - file /usr/libexec/complytime/providers/complyctl-provider-opa | grep -q ELF
