@@ -86,16 +86,14 @@ currently packaged in Fedora and must be installed separately.
 %setup -q -T -D -a1 %{forgesetupargs}
 %autopatch -p1
 
-# TODO(2027-01): remove F43 workaround
-# Fedora 43 ships Go 1.25 but go.mod may require Go 1.26+ due to
-# transitive dependency requirements. Lower the directive to the
-# system Go major.minor so rpmbuild succeeds with GOTOOLCHAIN=local.
-# Fedora 43 EOL: 2026-12-09 — remove this block after EOL.
+# Lower the go.mod directive to match the system Go version so
+# rpmbuild succeeds with GOTOOLCHAIN=local. This handles cases where
+# the system Go has the same major.minor but an older patch version
+# than what go.mod requires (e.g., system Go 1.26.7 vs go.mod 1.26.8).
 # Reference: https://packages.fedoraproject.org/pkgs/golang/golang/
-%if 0%{?fedora} == 43
-sed -i 's/^go [0-9].*/go 1.25/' go.mod
-sed -i '/^## explicit; go /s/go [0-9]\..*/go 1.25/' vendor/modules.txt
-%endif
+SYSTEM_GO_VERSION=$(go version | grep -oP 'go\K[0-9]+\.[0-9]+\.[0-9]+')
+sed -i "s/^go [0-9].*/go ${SYSTEM_GO_VERSION}/" go.mod
+sed -i "/^## explicit; go /s/go [0-9]\..*/go ${SYSTEM_GO_VERSION}/" vendor/modules.txt
 
 %generate_buildrequires
 %go_vendor_license_buildrequires -c %{S:2}

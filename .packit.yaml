@@ -5,50 +5,73 @@ downstream_package_name: complytime-providers
 
 specfile_path: complytime-providers.spec
 
+srpm_build_deps:
+    - go-vendor-tools
+    - golang
+    - askalono-cli
+
+create_sync_note: false
+
 files_to_sync:
     - complytime-providers.spec
     - .packit.yaml
+    - go-vendor-tools.toml
+
+actions:
+    post-modifications:
+        - bash -c "set -xeuo pipefail; export GOTOOLCHAIN=local; if [ -n \"${PACKIT_DOWNSTREAM_REPO:-}\" ]; then cd \"$PACKIT_DOWNSTREAM_REPO\"; fi; go_vendor_archive create --config go-vendor-tools.toml complytime-providers.spec; go_vendor_license --config go-vendor-tools.toml --path complytime-providers.spec report --verify-spec --autofill=auto"
 
 jobs:
     - job: copr_build
       trigger: pull_request
       targets:
-          - fedora-rawhide-x86_64
-          - fedora-43-x86_64
-          - fedora-44-x86_64
-          - centos-stream-9-x86_64
-          - centos-stream-10-x86_64
+          fedora-rawhide-x86_64: {}
+          fedora-45-x86_64: {}
+          fedora-44-x86_64: {}
+          fedora-43-x86_64: {}
+          centos-stream-10-x86_64:
+              additional_repos:
+                  - https://dl.fedoraproject.org/pub/epel/10/Everything/x86_64/
+          centos-stream-9-x86_64:
+              additional_repos:
+                  - https://dl.fedoraproject.org/pub/epel/9/Everything/x86_64/
 
-# Running tests using testing farm https://packit.dev/docs/configuration/upstream/tests
+    # Running tests using testing farm https://packit.dev/docs/configuration/upstream/tests
+    # CentOS Stream excluded: complyctl is not available in CentOS Stream
+    # or EPEL repos, so provider RPMs cannot be installed
+    # (Requires: complyctl >= 1.0.0). COPR builds still validate
+    # compilation on CentOS Stream.
     - job: tests
       trigger: pull_request
       targets:
           - fedora-rawhide-x86_64
-          - fedora-43-x86_64
+          - fedora-45-x86_64
           - fedora-44-x86_64
-          - centos-stream-9-x86_64
-          - centos-stream-10-x86_64
+          - fedora-43-x86_64
 
-# https://packit.dev/docs/fedora-releases-guide
-# Propose Downstream PRs once an upstream release is out
+    # https://packit.dev/docs/fedora-releases-guide
+    # Propose Downstream PRs once an upstream release is out
     - job: propose_downstream
       trigger: release
       dist_git_branches:
           - rawhide
-          - f43
+          - f45
           - f44
+          - f43
 
-# Automatically submit builds to Koji after PR is merged into dist-git
+    # Automatically submit builds to Koji after PR is merged into dist-git
     - job: koji_build
       trigger: commit
       dist_git_branches:
           - rawhide
-          - f43
+          - f45
           - f44
+          - f43
 
-# Trigger Bodhi update for released Fedora versions
+    # Trigger Bodhi update for released Fedora versions
     - job: bodhi_update
       trigger: commit
       dist_git_branches:
-          - f43
+          - f45
           - f44
+          - f43
