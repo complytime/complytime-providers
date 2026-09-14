@@ -45,10 +45,10 @@ Requires:       scap-security-guide
 
 %description    openscap
 OpenSCAP scanning provider that extends complyctl with OpenSCAP evaluation
-capabilities. It converts OSCAL assessment plans into SCAP policies,
-executes scans via the OpenSCAP engine, and returns structured results
-to complyctl. Communicates via gRPC (Describe, Generate, Scan RPCs)
-and follows the complyctl-provider-* discovery convention.
+capabilities. It receives assessment configurations from complyctl,
+generates XCCDF tailoring files, executes scans via the OpenSCAP engine,
+and returns structured results. Communicates via gRPC (Describe, Generate,
+Scan RPCs) and follows the complyctl-provider-* discovery convention.
 
 # --- Ampel provider sub-package ---
 
