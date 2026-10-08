@@ -29,9 +29,13 @@ const (
 	OutputFormatOSCAL  = "oscal"
 	OutputFormatPretty = "pretty"
 	OutputFormatSARIF  = "sarif"
-	OutputFormatText   = "text"
-	OutputFormatJSON   = "json"
-	OutputFormatHuman  = "human"
+	// OutputFormatAll is a scan-only convenience value that expands to all
+	// secondary report formats (OSCAL, Pretty, SARIF). It is not valid for
+	// doctor --format, which uses mutually exclusive rendering modes.
+	OutputFormatAll   = "all"
+	OutputFormatText  = "text"
+	OutputFormatJSON  = "json"
+	OutputFormatHuman = "human"
 )
 
 // ShowPassingEnvVar is the environment variable that controls whether
@@ -39,6 +43,20 @@ const (
 // overrides the default (true) unless --show-passing is explicitly
 // provided on the command line.
 const ShowPassingEnvVar = "COMPLYTIME_SHOW_PASSING"
+
+// EvalLogFormatEnvVar is the environment variable that selects the
+// EvaluationLog serialization format ("yaml" or "json"). When set, it
+// overrides the default ("yaml") unless --log-format is explicitly
+// provided on the command line.
+const EvalLogFormatEnvVar = "COMPLYTIME_LOG_FORMAT"
+
+// EvalLogFormat constants define the valid serialization formats for
+// EvaluationLog output. These are distinct from OutputFormat* constants
+// which control secondary report formats (OSCAL, SARIF, Markdown).
+const (
+	EvalLogFormatYAML = "yaml"
+	EvalLogFormatJSON = "json"
+)
 
 const ScanOutputDir = "scan"
 
@@ -55,7 +73,24 @@ const ProviderExecutablePrefix = "complyctl-provider-"
 // SystemProviderDir is the system-wide provider directory where
 // package managers (e.g., RPM) install provider binaries.
 // Discovery checks this path as a fallback after the user directory.
+// Use ResolveSystemProviderDir to honor SystemProviderDirEnvVar.
 const SystemProviderDir = "/usr/libexec/complytime/providers"
+
+// SystemProviderDirEnvVar is the environment variable that overrides
+// SystemProviderDir. It lets tests isolate discovery from providers
+// installed on the host, and lets packagers or users point discovery
+// at a different system-wide location.
+const SystemProviderDirEnvVar = "COMPLYTIME_SYSTEM_PROVIDER_DIR"
+
+// ResolveSystemProviderDir returns the system-wide provider directory:
+// the value of SystemProviderDirEnvVar when it is set to an absolute path,
+// SystemProviderDir otherwise (matching ResolveDataDir's XDG_DATA_HOME check).
+func ResolveSystemProviderDir() string {
+	if dir := os.Getenv(SystemProviderDirEnvVar); dir != "" && filepath.IsAbs(dir) {
+		return dir
+	}
+	return SystemProviderDir
+}
 
 // Gemara OCI layer media types for identifying layer content within multi-layer OCI manifests.
 const (
