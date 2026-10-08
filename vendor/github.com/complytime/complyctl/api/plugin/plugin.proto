@@ -107,6 +107,35 @@ message ScanResponse {
   // SHOULD continue scanning remaining targets and report partial
   // results in assessments alongside errors for failed targets.
   repeated string errors = 2;
+
+  // References to external documents discovered during scanning.
+  // Providers MAY populate this when they encounter mapping references
+  // not present in the policy metadata (e.g., from complypack content
+  // or provider-specific knowledge). These are merged with policy-level
+  // mapping references by complyctl, with policy entries taking priority
+  // on id collisions.
+  repeated MappingReference mapping_references = 3;
+}
+
+// MappingReference represents a reference to an external document
+// with full metadata. Mirrors go-gemara MappingReference.
+message MappingReference {
+  // id identifies this mapping reference within the artifact and,
+  // when url is absent, the referenced artifact's metadata.id.
+  string id = 1;
+
+  // title describes the purpose of this mapping reference at a glance
+  string title = 2;
+
+  // version is the version identifier of the artifact being mapped to
+  string version = 3;
+
+  // description is prose regarding the artifact's purpose or content
+  string description = 4;
+
+  // url is the path where the artifact may be retrieved; preferably
+  // responds with Gemara-compatible YAML/JSON
+  string url = 5;
 }
 
 // AssessmentLog contains results for a single requirement evaluation
@@ -142,9 +171,29 @@ message Step {
   string message = 3;
 }
 
+// EvidenceMapping identifies the artifact or system from which
+// evidence was collected. Mirrors go-gemara EvidenceMapping.
+message EvidenceMapping {
+  // Ties this evidence to a mapping-reference in the artifact's metadata
+  string reference_id = 1;
+
+  // Precise location within the referenced artifact (e.g. file path,
+  // API path, JSON path)
+  string coordinate = 2;
+
+  // Specific entry within a referenced Gemara artifact
+  string entry_id = 3;
+
+  // Cryptographic hash of observed content; format: algorithm:hex
+  // (e.g. sha256:abc123...)
+  string digest = 4;
+
+  // Prose regarding this evidence reference
+  string remarks = 5;
+}
+
 // Evidence records a piece of data collected during assessment.
-// Mirrors go-gemara Evidence with minimal fields; extensible for
-// ADR 0023 EvidenceMapping origin fields in a future revision.
+// Mirrors go-gemara Evidence; see Gemara #Evidence schema.
 message Evidence {
   // Unique identifier for this evidence entry
   string id = 1;
@@ -160,6 +209,9 @@ message Evidence {
 
   // Timestamp when the evidence was gathered (RFC 3339)
   string collected_at = 5;
+
+  // Identifies the artifact or system from which this evidence was collected
+  EvidenceMapping source = 6;
 }
 
 // ConfidenceLevel indicates the evaluator's confidence in an assessment result.
