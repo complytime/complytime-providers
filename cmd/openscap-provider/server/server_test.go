@@ -15,7 +15,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/complytime/complyctl/pkg/provider"
+	"github.com/complytime/complytime-providers/cmd/openscap-provider/config"
 	"github.com/complytime/complytime-providers/cmd/openscap-provider/xccdf"
+	"github.com/complytime/complytime-providers/internal/evidence"
 )
 
 func TestMapResultStatus(t *testing.T) {
@@ -305,6 +307,81 @@ func TestBuildRuleToMatchIDMap_Empty(t *testing.T) {
 	m := buildRuleToMatchIDMap(nil)
 	assert.NotNil(t, m)
 	assert.Empty(t, m)
+}
+
+func TestAttachARFEvidence(t *testing.T) {
+	// Build assessments from a known ARF XML fragment with two
+	// passing rules to verify evidence is attached to every entry.
+	arfXML := `<root xmlns:ds="http://scap.nist.gov/schema/scap/source/1.2"
+	                  xmlns:xccdf-1.2="http://checklists.nist.gov/xccdf/1.2">
+		<target>host1</target>
+		<ds:component>
+			<xccdf-1.2:Benchmark>
+				<xccdf-1.2:Rule id="xccdf_org.ssgproject.content_rule_rule_a">
+					<xccdf-1.2:title>Rule A</xccdf-1.2:title>
+					<xccdf-1.2:check system="http://oval.mitre.org/XMLSchema/oval-definitions-5">
+						<xccdf-1.2:check-content-ref name="oval:ssg-rule_a:def:1"/>
+					</xccdf-1.2:check>
+				</xccdf-1.2:Rule>
+				<xccdf-1.2:Rule id="xccdf_org.ssgproject.content_rule_rule_b">
+					<xccdf-1.2:title>Rule B</xccdf-1.2:title>
+					<xccdf-1.2:check system="http://oval.mitre.org/XMLSchema/oval-definitions-5">
+						<xccdf-1.2:check-content-ref name="oval:ssg-rule_b:def:1"/>
+					</xccdf-1.2:check>
+				</xccdf-1.2:Rule>
+			</xccdf-1.2:Benchmark>
+		</ds:component>
+		<rule-result idref="xccdf_org.ssgproject.content_rule_rule_a">
+			<result>pass</result>
+		</rule-result>
+		<rule-result idref="xccdf_org.ssgproject.content_rule_rule_b">
+			<result>fail</result>
+		</rule-result>
+	</root>`
+
+	node, err := xmlquery.Parse(strings.NewReader(arfXML))
+	require.NoError(t, err)
+	assessments, err := buildAssessmentsFromARF(node, nil)
+	require.NoError(t, err)
+	require.Len(t, assessments, 2, "expected two assessments")
+
+	collectedAt := "2026-10-09T12:00:00Z"
+	digest := "sha256:abc123def456"
+	remarks := "Collected on host \"testhost\" (machine-id: abc123)"
+	attachARFEvidence(assessments, collectedAt, digest, remarks)
+
+	for i, a := range assessments {
+		require.Len(t, a.Evidence, 1,
+			"assessment %d must have exactly one evidence entry", i)
+		ev := a.Evidence[0]
+		assert.Equal(t, evidence.IDOpenSCAPARF, ev.ID)
+		assert.Equal(t, evidence.TypeARF, ev.Type)
+		assert.Equal(t, collectedAt, ev.CollectedAt)
+		require.NotNil(t, ev.Source,
+			"assessment %d evidence must have a Source", i)
+		assert.Equal(t, evidence.RefOpenSCAPARF,
+			ev.Source.ReferenceID)
+		assert.Equal(t, config.ARFPath, ev.Source.Coordinate)
+		assert.Equal(t, digest, ev.Source.Digest)
+		assert.Equal(t, remarks, ev.Source.Remarks)
+	}
+}
+
+func TestAttachARFEvidence_Empty(t *testing.T) {
+	// Attaching evidence to an empty slice must not panic.
+	var assessments []provider.AssessmentLog
+	attachARFEvidence(assessments, "2026-10-09T00:00:00Z", "sha256:000", "remark")
+	assert.Empty(t, assessments)
+}
+
+func TestBuildMappingReferences(t *testing.T) {
+	refs := buildMappingReferences()
+	require.Len(t, refs, 1)
+	ref := refs[0]
+	assert.Equal(t, evidence.RefOpenSCAPARF, ref.ID)
+	assert.Equal(t, "OpenSCAP ARF scan result", ref.Title)
+	assert.NotEmpty(t, ref.Description)
+	assert.Equal(t, "file://"+config.ARFPath, ref.URL)
 }
 
 func TestRuleResultMessage(t *testing.T) {

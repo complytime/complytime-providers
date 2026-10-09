@@ -62,7 +62,12 @@ are not set manually by the user.
 
 # ENVIRONMENT
 
-No environment variables are read directly by this provider.
+**COMPLYTIME_MACHINE_ID_FILE**
+:   Path to the machine-id file used for host identification in
+    evidence remarks. The file content is included in each
+    Evidence.Source.Remarks field alongside the hostname so auditors
+    can identify the host where the scan was executed.
+    Default: **/etc/machine-id**
 
 # EXTERNAL TOOLS
 
@@ -73,8 +78,61 @@ the Carabiner project for installation instructions:
 
 # FILES
 
-*~/.local/share/complytime/ampel/*
-:   Provider workspace directory for scan configuration and policy files.
+*.complytime/ampel/*
+:   Provider workspace directory. All paths below are relative to the
+    current working directory.
+
+*.complytime/ampel/results/\<repo\>-\<branch\>-\<spec\>-snappy.intoto.json*
+:   In-toto attestation produced by **snappy snap**. Contains raw API data
+    collected from the repository (e.g., branch protection rules). The
+    filename encodes the sanitized repository URL, branch, and spec label.
+
+*.complytime/ampel/results/\<repo\>-\<branch\>-\<spec\>-ampel.intoto.json*
+:   In-toto attestation produced by **ampel verify**. Contains the policy
+    evaluation results against the snappy-collected data. The filename
+    follows the same pattern as the snappy attestation.
+
+*.complytime/ampel/results/\<repo\>-\<branch\>.json*
+:   Per-repository result JSON summarizing findings for a single
+    repository and branch combination.
+
+*.complytime/ampel/policy/scan-config.json*
+:   Scan configuration written by the **Generate** RPC. Records the
+    matched requirement IDs so the **Scan** RPC can synthesize passing
+    assessments for requirements with no findings.
+
+*.complytime/ampel/policy/*
+:   Merged AMPEL policy bundle generated from granular policy files.
+
+*.complytime/ampel/granular-policies/*
+:   Default directory for granular AMPEL policy source files. Overridden
+    by **ampel_policy_dir** or complypack content.
+
+# EVIDENCE
+
+The provider records **Evidence** entries on each **AssessmentLog**
+returned by the **Scan** RPC. Two attestation types are produced per
+repository/branch/spec combination:
+
+**Snappy attestation** (type: **IntotoAttestation**)
+:   The **snappy** tool collects raw API data from the repository platform
+    (e.g., GitHub branch protection settings) and produces an in-toto
+    attestation. This attestation captures the observed state of the
+    repository at scan time.
+
+    - **Source.Coordinate**: path to the snappy attestation file
+    - **Source.Digest**: **sha256:\<hex\>** digest of the attestation file
+    - **Source.ReferenceID**: **snappy-\<spec-label\>**
+
+**Ampel attestation** (type: **IntotoAttestation**)
+:   The **ampel** tool evaluates granular security policies against the
+    snappy-collected data and produces an in-toto attestation containing
+    the evaluation results. A non-zero exit code indicates policy
+    failures, not tool errors.
+
+    - **Source.Coordinate**: path to the ampel result attestation file
+    - **Source.Digest**: **sha256:\<hex\>** digest of the attestation file
+    - **Source.ReferenceID**: **ampel-\<spec-label\>**
 
 # EXIT CODES
 

@@ -15,6 +15,7 @@ import (
 	"github.com/complytime/complyctl/pkg/provider"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/intoto"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/targets"
+	"github.com/complytime/complytime-providers/internal/evidence"
 )
 
 const maxFieldSize = 10 * 1024 // 10KB per field
@@ -71,12 +72,17 @@ type ampelResultMeta struct {
 
 // PerRepoResult holds scan findings for a single repository.
 type PerRepoResult struct {
-	Repository string    `json:"repository"`
-	Branch     string    `json:"branch"`
-	ScannedAt  time.Time `json:"scanned_at"`
-	Findings   []Finding `json:"findings"`
-	Status     string    `json:"status"`
-	Error      string    `json:"error,omitempty"`
+	Repository            string    `json:"repository"`
+	Branch                string    `json:"branch"`
+	ScannedAt             time.Time `json:"scanned_at"`
+	Findings              []Finding `json:"findings"`
+	Status                string    `json:"status"`
+	Error                 string    `json:"error,omitempty"`
+	AmpelAttestationPath  string    `json:"ampel_attestation_path,omitempty"`
+	SnappyAttestationPath string    `json:"snappy_attestation_path,omitempty"`
+	AmpelDigest           string    `json:"ampel_digest,omitempty"`
+	SnappyDigest          string    `json:"snappy_digest,omitempty"`
+	Remarks               string    `json:"remarks,omitempty"`
 }
 
 // Finding represents an individual rule evaluation result.
@@ -221,6 +227,7 @@ func ToScanResponse(repoResults []*PerRepoResult, allRequirementIDs []string) *p
 		guidances     []string
 		passCount     int
 		totalCount    int
+		firstRepo     *PerRepoResult
 	}
 
 	groups := make(map[string]*reqGroup)
@@ -237,7 +244,7 @@ func ToScanResponse(repoResults []*PerRepoResult, allRequirementIDs []string) *p
 
 			g, ok := groups[reqID]
 			if !ok {
-				g = &reqGroup{requirementID: reqID}
+				g = &reqGroup{requirementID: reqID, firstRepo: rr}
 				groups[reqID] = g
 				order = append(order, reqID)
 			}
@@ -286,6 +293,7 @@ func ToScanResponse(repoResults []*PerRepoResult, allRequirementIDs []string) *p
 					guidances:     syntheticGuidances,
 					passCount:     syntheticPass,
 					totalCount:    len(syntheticSteps),
+					firstRepo:     firstScannedRepo(repoResults),
 				}
 				order = append(order, reqID)
 			}
@@ -321,16 +329,121 @@ func ToScanResponse(repoResults []*PerRepoResult, allRequirementIDs []string) *p
 			)
 		}
 
-		assessments = append(assessments, provider.AssessmentLog{
+		assessment := provider.AssessmentLog{
 			RequirementID:  g.requirementID,
 			Steps:          g.steps,
 			Message:        msg,
 			Recommendation: recommendation,
 			Confidence:     provider.ConfidenceLevelHigh,
-		})
+		}
+		if g.firstRepo != nil {
+			assessment.Evidence = buildRepoEvidence(g.firstRepo)
+		}
+		assessments = append(assessments, assessment)
 	}
 
-	return &provider.ScanResponse{Assessments: assessments, Errors: opErrors}
+	return &provider.ScanResponse{
+		Assessments:       assessments,
+		Errors:            opErrors,
+		MappingReferences: buildMappingReferences(repoResults),
+	}
+}
+
+// firstScannedRepo returns the first non-error PerRepoResult, or nil
+// if all repos errored.
+func firstScannedRepo(repoResults []*PerRepoResult) *PerRepoResult {
+	for _, rr := range repoResults {
+		if rr.Status != "error" {
+			return rr
+		}
+	}
+	return nil
+}
+
+// buildRepoEvidence constructs two provider.Evidence entries for a
+// repo result: one for the ampel attestation and one for the snappy
+// attestation. Both paths and digests are pre-computed by the caller
+// (server.go) to keep this function pure.
+func buildRepoEvidence(rr *PerRepoResult) []provider.Evidence {
+	if rr.AmpelAttestationPath == "" && rr.SnappyAttestationPath == "" {
+		return nil
+	}
+
+	prefix := targets.SanitizeRepoURL(rr.Repository) + "-" + rr.Branch
+	collectedAt := rr.ScannedAt.UTC().Format(time.RFC3339)
+
+	var evs []provider.Evidence
+	if rr.AmpelAttestationPath != "" {
+		evs = append(evs, provider.Evidence{
+			ID:          evidence.IDPrefixAmpel + prefix,
+			Type:        evidence.TypeIntotoAttestation,
+			CollectedAt: collectedAt,
+			Source: &provider.EvidenceSource{
+				ReferenceID: evidence.RefPrefixAmpel + prefix,
+				Coordinate:  rr.AmpelAttestationPath,
+				Digest:      rr.AmpelDigest,
+				Remarks:     rr.Remarks,
+			},
+		})
+	}
+	if rr.SnappyAttestationPath != "" {
+		evs = append(evs, provider.Evidence{
+			ID:          evidence.IDPrefixSnappy + prefix,
+			Type:        evidence.TypeIntotoAttestation,
+			CollectedAt: collectedAt,
+			Source: &provider.EvidenceSource{
+				ReferenceID: evidence.RefPrefixSnappy + prefix,
+				Coordinate:  rr.SnappyAttestationPath,
+				Digest:      rr.SnappyDigest,
+				Remarks:     rr.Remarks,
+			},
+		})
+	}
+	return evs
+}
+
+// buildMappingReferences constructs MappingReference entries from the
+// unique attestation paths across all repo results. Error repos are
+// excluded.
+func buildMappingReferences(repoResults []*PerRepoResult) []provider.MappingReference {
+	seen := make(map[string]bool)
+	var refs []provider.MappingReference
+
+	for _, rr := range repoResults {
+		if rr.Status == "error" {
+			continue
+		}
+		prefix := targets.SanitizeRepoURL(rr.Repository) + "-" + rr.Branch
+		repoName := targets.RepoDisplayName(rr.Repository)
+		label := repoName + "@" + rr.Branch
+
+		ampelID := evidence.RefPrefixAmpel + prefix
+		if rr.AmpelAttestationPath != "" && !seen[ampelID] {
+			seen[ampelID] = true
+			refs = append(refs, provider.MappingReference{
+				ID:          ampelID,
+				Title:       "Ampel policy attestation for " + label,
+				Description: "In-toto attestation from ampel policy evaluation",
+				URL:         "file://" + rr.AmpelAttestationPath,
+			})
+		}
+
+		snappyID := evidence.RefPrefixSnappy + prefix
+		if rr.SnappyAttestationPath != "" && !seen[snappyID] {
+			seen[snappyID] = true
+			refs = append(refs, provider.MappingReference{
+				ID:          snappyID,
+				Title:       "Snappy observation for " + label,
+				Description: "In-toto attestation from snappy data collection",
+				URL:         "file://" + rr.SnappyAttestationPath,
+			})
+		}
+	}
+
+	sort.Slice(refs, func(i, j int) bool {
+		return refs[i].ID < refs[j].ID
+	})
+	return refs
 }
 
 // buildSyntheticSteps builds per-repository steps so that synthetic

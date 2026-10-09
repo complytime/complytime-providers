@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package scan
 
 import (
@@ -37,7 +39,9 @@ type ScanConfig struct {
 
 // RawScanResult holds the raw output from an AMPEL verify operation.
 type RawScanResult struct {
-	Output []byte
+	Output                []byte
+	AmpelAttestationPath  string
+	SnappyAttestationPath string
 }
 
 // CommandRunner abstracts command execution for testing.
@@ -321,5 +325,9 @@ func ScanRepository(repo RepoTarget, branch, specPath string, cfg ScanConfig, ru
 		return nil, fmt.Errorf("reading ampel results for %s branch %s: %w (ampel output: %s)", repo.URL, branch, err, string(ampelCmdOutput))
 	}
 
-	return &RawScanResult{Output: ampelOut}, nil
+	return &RawScanResult{
+		Output:                ampelOut,
+		AmpelAttestationPath:  ampelResultFile,
+		SnappyAttestationPath: attestationFile,
+	}, nil
 }

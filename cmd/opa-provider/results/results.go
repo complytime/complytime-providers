@@ -13,6 +13,8 @@ import (
 	"unicode"
 
 	"github.com/complytime/complyctl/pkg/provider"
+
+	"github.com/complytime/complytime-providers/internal/evidence"
 )
 
 const maxFieldSize = 10 * 1024 // 10KB per field
@@ -37,11 +39,13 @@ type conftestResult struct {
 type PerTargetResult struct {
 	Target       string    `json:"target"`
 	Branch       string    `json:"branch,omitempty"`
+	InputPath    string    `json:"input_path,omitempty"`
 	ScannedAt    time.Time `json:"scanned_at"`
 	Findings     []Finding `json:"findings"`
 	SuccessCount int       `json:"success_count"`
 	Status       string    `json:"status"`
 	Error        string    `json:"error,omitempty"`
+	Remarks      string    `json:"remarks,omitempty"`
 }
 
 // Finding represents an individual policy violation.
@@ -187,13 +191,20 @@ func ResolveRequirementID(derivedID string, reverseMap map[string]string) string
 // errors (targets with Status "error" and no findings) are placed into
 // resp.Errors. When reverseMap is non-nil, Rego-derived IDs (e.g.,
 // "kubernetes.run_as_root") are resolved to Gemara requirement IDs (e.g.,
-// "CIS-K8S-5.2.6") before grouping.
-func ToScanResponse(targetResults []*PerTargetResult, reverseMap map[string]string) *provider.ScanResponse {
+// "CIS-K8S-5.2.6") before grouping. Each assessment log includes one
+// Evidence entry linking back to the conftest input path that produced it.
+// MappingReferences are built from unique target/branch combinations.
+func ToScanResponse(
+	targetResults []*PerTargetResult, reverseMap map[string]string,
+) *provider.ScanResponse {
 	type reqGroup struct {
 		requirementID string
 		steps         []provider.Step
 		passCount     int
 		totalCount    int
+		// firstTarget captures the first contributing target's identity
+		// for building the per-assessment evidence entry.
+		firstTarget *PerTargetResult
 	}
 
 	groups := make(map[string]*reqGroup)
@@ -210,7 +221,7 @@ func ToScanResponse(targetResults []*PerTargetResult, reverseMap map[string]stri
 			reqID := ResolveRequirementID(f.RequirementID, reverseMap)
 			g, ok := groups[reqID]
 			if !ok {
-				g = &reqGroup{requirementID: reqID}
+				g = &reqGroup{requirementID: reqID, firstTarget: tr}
 				groups[reqID] = g
 				order = append(order, reqID)
 			}
@@ -238,6 +249,7 @@ func ToScanResponse(targetResults []*PerTargetResult, reverseMap map[string]stri
 	// assessment includes a passing step with the target name so evaluation
 	// logs show a meaningful step identity.
 	syntheticSteps := buildSyntheticSteps(targetResults)
+	firstScanned := firstScannedTarget(targetResults)
 	for _, reqID := range reverseMap {
 		if _, exists := groups[reqID]; !exists {
 			groups[reqID] = &reqGroup{
@@ -245,6 +257,7 @@ func ToScanResponse(targetResults []*PerTargetResult, reverseMap map[string]stri
 				steps:         syntheticSteps,
 				passCount:     len(syntheticSteps),
 				totalCount:    len(syntheticSteps),
+				firstTarget:   firstScanned,
 			}
 			order = append(order, reqID)
 		}
@@ -252,7 +265,8 @@ func ToScanResponse(targetResults []*PerTargetResult, reverseMap map[string]stri
 
 	// Sort for deterministic output
 	sort.Strings(order)
-	// Deduplicate after sorting (order may have duplicates if same reqID from multiple targets)
+	// Deduplicate after sorting (order may have duplicates if same reqID
+	// from multiple targets)
 	seen := make(map[string]bool, len(order))
 	dedupOrder := make([]string, 0, len(order))
 	for _, id := range order {
@@ -269,7 +283,9 @@ func ToScanResponse(targetResults []*PerTargetResult, reverseMap map[string]stri
 		if g.totalCount == 0 {
 			msg = "all checks passed"
 		} else {
-			msg = fmt.Sprintf("%d of %d targets passed", g.passCount, g.totalCount)
+			msg = fmt.Sprintf(
+				"%d of %d targets passed", g.passCount, g.totalCount,
+			)
 			for _, s := range g.steps {
 				if s.Result != provider.ResultPassed {
 					msg = s.Message
@@ -277,15 +293,105 @@ func ToScanResponse(targetResults []*PerTargetResult, reverseMap map[string]stri
 				}
 			}
 		}
-		assessments = append(assessments, provider.AssessmentLog{
+		al := provider.AssessmentLog{
 			RequirementID: g.requirementID,
 			Steps:         g.steps,
 			Message:       msg,
 			Confidence:    provider.ConfidenceLevelHigh,
+		}
+		if g.firstTarget != nil {
+			al.Evidence = buildEvidence(g.firstTarget)
+		}
+		assessments = append(assessments, al)
+	}
+
+	mappingRefs := buildMappingReferences(targetResults)
+
+	return &provider.ScanResponse{
+		Assessments:       assessments,
+		Errors:            opErrors,
+		MappingReferences: mappingRefs,
+	}
+}
+
+// buildEvidence creates a single Evidence entry for a target result.
+// OPA evaluates directories rather than individual files, so Digest
+// is left empty. The CollectedAt timestamp comes from the target's
+// ScannedAt field to maintain consistency with the scan timeline.
+func buildEvidence(tr *PerTargetResult) []provider.Evidence {
+	suffix := sanitizeName(tr.Target)
+	if tr.Branch != "" {
+		suffix += "-" + tr.Branch
+	}
+	return []provider.Evidence{{
+		ID:          evidence.IDPrefixConftest + suffix,
+		Type:        evidence.TypeConftestResult,
+		CollectedAt: tr.ScannedAt.UTC().Format(time.RFC3339),
+		Source: &provider.EvidenceSource{
+			ReferenceID: evidence.RefPrefixConftest + suffix,
+			Coordinate:  tr.InputPath,
+			Digest:      "",
+			Remarks:     tr.Remarks,
+		},
+	}}
+}
+
+// buildMappingReferences creates one MappingReference per unique
+// target/branch combination from successfully scanned targets.
+func buildMappingReferences(
+	targetResults []*PerTargetResult,
+) []provider.MappingReference {
+	type refKey struct {
+		target string
+		branch string
+	}
+	seen := make(map[refKey]bool)
+	var refs []provider.MappingReference
+
+	for _, tr := range targetResults {
+		if tr.Status == "error" {
+			continue
+		}
+		key := refKey{target: tr.Target, branch: tr.Branch}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+
+		suffix := sanitizeName(tr.Target)
+		if tr.Branch != "" {
+			suffix += "-" + tr.Branch
+		}
+		title := "Conftest input: " + tr.Target
+		if tr.Branch != "" {
+			title += "@" + tr.Branch
+		}
+		refs = append(refs, provider.MappingReference{
+			ID:          evidence.RefPrefixConftest + suffix,
+			Title:       title,
+			Description: "Input path evaluated by conftest",
 		})
 	}
 
-	return &provider.ScanResponse{Assessments: assessments, Errors: opErrors}
+	sort.Slice(refs, func(i, j int) bool {
+		return refs[i].ID < refs[j].ID
+	})
+
+	return refs
+}
+
+// firstScannedTarget returns the first non-error target result, or
+// nil if none exist. Used to associate synthetic assessments
+// (requirement IDs with no findings) with an evidence source.
+func firstScannedTarget(
+	targetResults []*PerTargetResult,
+) *PerTargetResult {
+	for _, tr := range targetResults {
+		if tr.Status != "error" {
+			return tr
+		}
+	}
+	return nil
 }
 
 // buildSyntheticSteps creates a passing step for each scanned target so that

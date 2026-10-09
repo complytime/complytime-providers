@@ -74,7 +74,14 @@ The OCI policy bundle must include a \f[B]complytime\-mapping.json\f[R]
 file that maps requirement IDs to Rego namespaces.
 The provider returns an error if this file is missing.
 .SH ENVIRONMENT
-No environment variables are read directly by this provider.
+.TP
+\f[B]COMPLYTIME_MACHINE_ID_FILE\f[R]
+Path to the machine\-id file used for host identification in evidence
+remarks.
+The file content is included in each Evidence.Source.Remarks field
+alongside the hostname so auditors can identify the host where the scan
+was executed.
+Default: \f[B]/etc/machine\-id\f[R]
 .SH EXTERNAL TOOLS
 Requires the following tools at runtime:
 .TP
@@ -91,9 +98,61 @@ specified.
 Provided by the \f[B]git\f[R] Fedora package.
 .SH FILES
 .TP
-\f[I]\(ti/.local/share/complytime/opa/\f[R]
-Provider workspace directory for cloned repositories, policy bundles,
-and scan configuration.
+\f[I].complytime/opa/\f[R]
+Provider workspace directory.
+All paths below are relative to the current working directory.
+.TP
+\f[I].complytime/opa/results/<target>\-<branch>.json\f[R]
+Per\-target result JSON summarizing conftest findings for a single
+target and branch combination.
+For local targets, the branch component is omitted.
+.TP
+\f[I].complytime/opa/generated/scan\-config.json\f[R]
+Scan configuration written by the \f[B]Generate\f[R] RPC.
+Records matched requirement IDs, the Rego\-to\-Gemara reverse mapping,
+and the resolved policy directory path.
+.TP
+\f[I].complytime/opa/generated/complytime\-mapping.json\f[R]
+Mapping file shipped in the OCI policy bundle or complypack.
+Maps Gemara requirement IDs to Rego policy namespaces.
+Required for requirement\-scoped evaluation.
+.TP
+\f[I].complytime/opa/repos/\f[R]
+Directory for cloned git repositories when \f[B]url\f[R] targets are
+used.
+Each repository is cloned into a subdirectory named by the sanitized URL
+and branch.
+.TP
+\f[I].complytime/opa/policy/\f[R]
+Directory for downloaded OPA policy bundles (from OCI registries or
+complypack content).
+.SH EVIDENCE
+The provider records an \f[B]Evidence\f[R] entry on each
+\f[B]AssessmentLog\f[R] returned by the \f[B]Scan\f[R] RPC:
+.TP
+\f[B]Type\f[R]
+\f[B]ConftestResult\f[R] \(em the conftest evaluation output for the
+target input path.
+.TP
+\f[B]Production\f[R]
+The provider invokes \f[B]conftest test\f[R] with namespace\-scoped
+policies against the input path (a cloned repository directory or a
+local filesystem path).
+The conftest JSON output is parsed into per\-target result files.
+.TP
+\f[B]EvaluationLog representation\f[R]
+Each assessment log carries an Evidence entry with:
+.RS
+.IP \(bu 2
+\f[B]Source.Coordinate\f[R]: the input path evaluated by conftest (e.g.,
+\f[I].complytime/opa/repos/<repo>/<branch>\f[R] or a local filesystem
+path)
+.IP \(bu 2
+\f[B]Source.ReferenceID\f[R]: \f[B]conftest\-input\-<target>\f[R]
+.PP
+No digest is recorded because the input is a directory, not a single
+file.
+.RE
 .SH EXIT CODES
 This provider is a gRPC subprocess managed by \f[B]complyctl\f[R].
 Exit codes follow the hashicorp/go\-plugin protocol and are not
