@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/antchfx/xmlquery"
 	"github.com/hashicorp/go-hclog"
@@ -17,6 +18,7 @@ import (
 	"github.com/complytime/complytime-providers/cmd/openscap-provider/oscap"
 	"github.com/complytime/complytime-providers/cmd/openscap-provider/scan"
 	"github.com/complytime/complytime-providers/cmd/openscap-provider/xccdf"
+	"github.com/complytime/complytime-providers/internal/evidence"
 	"github.com/complytime/complytime-providers/internal/version"
 )
 
@@ -120,16 +122,65 @@ func (s *ProviderServer) Scan(ctx context.Context, req *provider.ScanRequest) (*
 		return nil, fmt.Errorf("no targets provided")
 	}
 
+	collectedAt := time.Now().UTC().Format(time.RFC3339)
+
 	xmlnode, err := runScanAndParseARF(ctx, req.Targets[0].Variables)
 	if err != nil {
 		return nil, err
+	}
+
+	digest, err := evidence.FileDigest(config.ARFPath)
+	if err != nil {
+		return nil, fmt.Errorf("evidence digest failed: %w", err)
 	}
 
 	assessments, err := buildAssessmentsFromARF(xmlnode, s.ruleToMatchID)
 	if err != nil {
 		return nil, err
 	}
-	return &provider.ScanResponse{Assessments: assessments}, nil
+
+	attachARFEvidence(assessments, collectedAt, digest)
+
+	return &provider.ScanResponse{
+		Assessments:       assessments,
+		MappingReferences: buildMappingReferences(),
+	}, nil
+}
+
+// attachARFEvidence adds a single ARF evidence entry to each assessment
+// log, linking every assessment result to the OpenSCAP ARF source artifact.
+func attachARFEvidence(
+	assessments []provider.AssessmentLog,
+	collectedAt, digest string,
+) {
+	for i := range assessments {
+		assessments[i].Evidence = []provider.Evidence{
+			{
+				ID:          evidence.IDOpenSCAPARF,
+				Type:        evidence.TypeARF,
+				CollectedAt: collectedAt,
+				Source: &provider.EvidenceSource{
+					ReferenceID: evidence.RefOpenSCAPARF,
+					Coordinate:  config.ARFPath,
+					Digest:      digest,
+				},
+			},
+		}
+	}
+}
+
+// buildMappingReferences returns the mapping references for the scan
+// response, identifying the OpenSCAP ARF artifact as an evidence source.
+func buildMappingReferences() []provider.MappingReference {
+	return []provider.MappingReference{
+		{
+			ID:    evidence.RefOpenSCAPARF,
+			Title: "OpenSCAP ARF scan result",
+			Description: "Asset Reporting Format result " +
+				"from OpenSCAP evaluation",
+			URL: "file://" + config.ARFPath,
+		},
+	}
 }
 
 func runScanAndParseARF(ctx context.Context, vars map[string]string) (*xmlquery.Node, error) {

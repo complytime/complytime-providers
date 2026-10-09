@@ -8,11 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/complytime/complyctl/pkg/provider"
+
+	"github.com/complytime/complytime-providers/internal/evidence"
 )
 
 var happyPathFixture = `[
@@ -482,4 +485,228 @@ func TestToScanResponse_MessageFallsBackWhenAllPass(t *testing.T) {
 	require.Len(t, resp.Assessments, 1)
 	assert.Equal(t, "1 of 1 targets passed", resp.Assessments[0].Message,
 		"passing assessments should use the pass-count summary")
+}
+
+func TestToScanResponse_EvidencePerAssessment(t *testing.T) {
+	now := time.Now()
+	results := []*PerTargetResult{
+		{
+			Target:    "org/repo",
+			Branch:    "main",
+			InputPath: "/tmp/workspace/repos/org-repo/main",
+			ScannedAt: now,
+			Status:    "scanned",
+			Findings: []Finding{
+				{
+					RequirementID: "kubernetes.run_as_root",
+					Result:        "fail",
+					Reason:        "violation",
+				},
+			},
+		},
+	}
+
+	resp := ToScanResponse(results, nil)
+	require.Len(t, resp.Assessments, 1)
+
+	al := resp.Assessments[0]
+	require.Len(t, al.Evidence, 1,
+		"each assessment log should have one evidence entry")
+
+	ev := al.Evidence[0]
+	assert.Equal(t, evidence.TypeConftestResult, ev.Type)
+	assert.NotEmpty(t, ev.CollectedAt)
+	require.NotNil(t, ev.Source)
+	assert.NotEmpty(t, ev.Source.Coordinate,
+		"coordinate must carry the input path")
+	assert.Equal(t,
+		"/tmp/workspace/repos/org-repo/main", ev.Source.Coordinate)
+	assert.Empty(t, ev.Source.Digest,
+		"OPA evaluates directories; digest should be empty")
+	assert.True(t,
+		strings.HasPrefix(ev.ID, evidence.IDPrefixConftest),
+		"evidence ID should start with conftest prefix")
+	assert.True(t,
+		strings.HasPrefix(ev.Source.ReferenceID, evidence.RefPrefixConftest),
+		"reference ID should start with conftest-input- prefix")
+}
+
+func TestToScanResponse_EvidenceWithBranch(t *testing.T) {
+	now := time.Now()
+	results := []*PerTargetResult{
+		{
+			Target:    "org/repo",
+			Branch:    "develop",
+			InputPath: "/workspace/repos/org-repo/develop",
+			ScannedAt: now,
+			Status:    "scanned",
+			Findings: []Finding{
+				{
+					RequirementID: "ci.action_pinning",
+					Result:        "fail",
+					Reason:        "unpinned",
+				},
+			},
+		},
+	}
+
+	resp := ToScanResponse(results, nil)
+	require.Len(t, resp.Assessments, 1)
+	require.Len(t, resp.Assessments[0].Evidence, 1)
+
+	ev := resp.Assessments[0].Evidence[0]
+	assert.Equal(t, "conftest-org-repo-develop", ev.ID)
+	assert.Equal(t, "conftest-input-org-repo-develop", ev.Source.ReferenceID)
+}
+
+func TestToScanResponse_EvidenceOnSyntheticAssessment(t *testing.T) {
+	// Synthetic assessments (all checks passed) should also carry evidence.
+	now := time.Now()
+	results := []*PerTargetResult{
+		{
+			Target:       "target1",
+			Branch:       "main",
+			InputPath:    "/workspace/repos/target1/main",
+			ScannedAt:    now,
+			Status:       "scanned",
+			SuccessCount: 3,
+		},
+	}
+	reverseMap := map[string]string{
+		"kubernetes.run_as_root": "CIS-K8S-5.2.6",
+	}
+
+	resp := ToScanResponse(results, reverseMap)
+	require.Len(t, resp.Assessments, 1)
+	require.Len(t, resp.Assessments[0].Evidence, 1,
+		"synthetic assessments should carry evidence")
+
+	ev := resp.Assessments[0].Evidence[0]
+	assert.Equal(t, evidence.TypeConftestResult, ev.Type)
+	assert.NotEmpty(t, ev.Source.Coordinate)
+}
+
+func TestToScanResponse_ErrorTargetNoEvidence(t *testing.T) {
+	results := []*PerTargetResult{
+		{
+			Target: "org/repo",
+			Branch: "main",
+			Status: "error",
+			Error:  "clone failed",
+		},
+	}
+
+	resp := ToScanResponse(results, nil)
+	assert.Empty(t, resp.Assessments,
+		"error-only targets produce no assessments and no evidence")
+}
+
+func TestToScanResponse_MappingReferences(t *testing.T) {
+	now := time.Now()
+	results := []*PerTargetResult{
+		{
+			Target:    "org/repo",
+			Branch:    "main",
+			InputPath: "/workspace/repos/org-repo/main",
+			ScannedAt: now,
+			Status:    "scanned",
+			Findings: []Finding{
+				{
+					RequirementID: "ci.action_pinning",
+					Result:        "fail",
+					Reason:        "violation",
+				},
+			},
+		},
+		{
+			Target:    "org/repo2",
+			Branch:    "develop",
+			InputPath: "/workspace/repos/org-repo2/develop",
+			ScannedAt: now,
+			Status:    "scanned",
+			Findings: []Finding{
+				{
+					RequirementID: "ci.action_pinning",
+					Result:        "fail",
+					Reason:        "unpinned",
+				},
+			},
+		},
+	}
+
+	resp := ToScanResponse(results, nil)
+
+	require.Len(t, resp.MappingReferences, 2,
+		"each unique target/branch should produce one MappingReference")
+
+	refIDs := make(map[string]bool)
+	for _, mr := range resp.MappingReferences {
+		refIDs[mr.ID] = true
+		assert.True(t,
+			strings.HasPrefix(mr.ID, evidence.RefPrefixConftest),
+			"MappingReference ID should start with conftest-input- prefix")
+		assert.NotEmpty(t, mr.Title)
+	}
+
+	// Verify each evidence source reference matches a MappingReference.
+	for _, al := range resp.Assessments {
+		for _, ev := range al.Evidence {
+			assert.True(t, refIDs[ev.Source.ReferenceID],
+				"Evidence.Source.ReferenceID %q should match a MappingReference.ID",
+				ev.Source.ReferenceID)
+		}
+	}
+}
+
+func TestToScanResponse_MappingReferencesSkipErrors(t *testing.T) {
+	results := []*PerTargetResult{
+		{
+			Target:    "org/repo",
+			Branch:    "main",
+			InputPath: "/workspace/repos/org-repo/main",
+			ScannedAt: time.Now(),
+			Status:    "scanned",
+			Findings: []Finding{
+				{
+					RequirementID: "ci.rule",
+					Result:        "fail",
+					Reason:        "bad",
+				},
+			},
+		},
+		{
+			Target: "org/broken",
+			Branch: "main",
+			Status: "error",
+			Error:  "clone failed",
+		},
+	}
+
+	resp := ToScanResponse(results, nil)
+	require.Len(t, resp.MappingReferences, 1,
+		"error targets should not produce MappingReferences")
+	assert.Contains(t, resp.MappingReferences[0].ID, "org-repo")
+}
+
+func TestToScanResponse_MappingReferencesDeduplication(t *testing.T) {
+	now := time.Now()
+	// Same target/branch appearing in multiple findings should
+	// produce only one MappingReference.
+	results := []*PerTargetResult{
+		{
+			Target:    "org/repo",
+			Branch:    "main",
+			InputPath: "/workspace/repos/org-repo/main",
+			ScannedAt: now,
+			Status:    "scanned",
+			Findings: []Finding{
+				{RequirementID: "rule.a", Result: "fail", Reason: "a"},
+				{RequirementID: "rule.b", Result: "fail", Reason: "b"},
+			},
+		},
+	}
+
+	resp := ToScanResponse(results, nil)
+	require.Len(t, resp.MappingReferences, 1,
+		"duplicate target/branch should produce only one MappingReference")
 }

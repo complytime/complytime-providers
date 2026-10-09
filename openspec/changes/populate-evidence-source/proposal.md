@@ -61,3 +61,24 @@ exist, how they are created, or how they appear in the EvaluationLog.
   types.
 - **Documentation**: three man page markdown sources updated, `.1`
   files regenerated via `make man`.
+
+## Constitution Alignment
+
+- **I. Single Source of Truth**: The shared `internal/evidence/`
+  package centralizes digest computation and evidence constants,
+  avoiding three copies of identical logic across providers.
+- **II. Simplicity & Isolation**: Each provider's evidence population
+  is self-contained. The shared utility has a single responsibility
+  (file digest computation). Struct additions are minimal and
+  internal.
+- **III. Incremental Improvement**: This change is focused on a single
+  concern (evidence population). No unrelated refactoring.
+- **IV. Readability First**: Field names are explicit and descriptive
+  (`AmpelAttestationPath`, `SnappyAttestationPath`, `InputPath`,
+  `FileDigest`).
+- **V. Do Not Reinvent the Wheel**: Uses standard library
+  `crypto/sha256`. No new external dependencies.
+- **VI. Composability**: Evidence flows through the existing complyctl
+  pipeline. `MappingReferences` compose with complyctl's merge logic.
+- **VII. Convention Over Configuration**: No new configuration
+  introduced. Evidence is populated automatically during scan.

@@ -95,9 +95,59 @@ Requires the following tools at runtime:
 
 # FILES
 
-*~/.local/share/complytime/opa/*
-:   Provider workspace directory for cloned repositories, policy bundles,
-    and scan configuration.
+*.complytime/opa/*
+:   Provider workspace directory. All paths below are relative to the
+    current working directory.
+
+*.complytime/opa/results/\<target\>-\<branch\>.json*
+:   Per-target result JSON summarizing conftest findings for a single
+    target and branch combination. For local targets, the branch
+    component is omitted.
+
+*.complytime/opa/generated/scan-config.json*
+:   Scan configuration written by the **Generate** RPC. Records matched
+    requirement IDs, the Rego-to-Gemara reverse mapping, and the
+    resolved policy directory path.
+
+*.complytime/opa/generated/complytime-mapping.json*
+:   Mapping file shipped in the OCI policy bundle or complypack. Maps
+    Gemara requirement IDs to Rego policy namespaces. Required for
+    requirement-scoped evaluation.
+
+*.complytime/opa/repos/*
+:   Directory for cloned git repositories when **url** targets are used.
+    Each repository is cloned into a subdirectory named by the sanitized
+    URL and branch.
+
+*.complytime/opa/policy/*
+:   Directory for downloaded OPA policy bundles (from OCI registries
+    or complypack content).
+
+# EVIDENCE
+
+The provider records an **Evidence** entry on each **AssessmentLog**
+returned by the **Scan** RPC:
+
+**Type**
+:   **ConftestResult** — the conftest evaluation output for the target
+    input path.
+
+**Production**
+:   The provider invokes **conftest test** with namespace-scoped policies
+    against the input path (a cloned repository directory or a local
+    filesystem path). The conftest JSON output is parsed into per-target
+    result files.
+
+**EvaluationLog representation**
+:   Each assessment log carries an Evidence entry with:
+
+    - **Source.Coordinate**: the input path evaluated by conftest
+      (e.g., *.complytime/opa/repos/\<repo\>/\<branch\>* or a local
+      filesystem path)
+    - **Source.ReferenceID**: **conftest-input-\<target\>**
+
+    No digest is recorded because the input is a directory, not a
+    single file.
 
 # EXIT CODES
 

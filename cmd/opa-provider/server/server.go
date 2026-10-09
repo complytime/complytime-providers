@@ -500,6 +500,7 @@ func (s *ProviderServer) evalAndParse(
 	if err != nil {
 		return nil, fmt.Errorf("parsing conftest output: %w", err)
 	}
+	result.InputPath = inputPath
 
 	if writeErr := results.WritePerTargetResult(
 		result, cfg.ResultsDirPath(),

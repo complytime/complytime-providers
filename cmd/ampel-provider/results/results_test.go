@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -871,4 +872,95 @@ func TestToScanResponse_NoReposEmitsPlaceholderStep(t *testing.T) {
 	require.Equal(t, provider.ResultError, resp.Assessments[0].Steps[0].Result)
 	require.Equal(t, "Assessment skipped: no repositories were scanned",
 		resp.Assessments[0].Steps[0].Message)
+}
+
+func TestToScanResponse_EvidencePerAssessment(t *testing.T) {
+	repoResults := []*PerRepoResult{
+		{
+			Repository:            "https://github.com/myorg/repo1",
+			Branch:                "main",
+			ScannedAt:             time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC),
+			Status:                "pass",
+			AmpelAttestationPath:  "/out/myorg-repo1-main-rules-ampel.intoto.json",
+			SnappyAttestationPath: "/out/myorg-repo1-main-rules-snappy.intoto.json",
+			AmpelDigest:           "sha256:aaa111",
+			SnappyDigest:          "sha256:bbb222",
+			Findings: []Finding{
+				{TenetID: "check-BP-1.01", Title: "Check", Result: "pass", Reason: "OK"},
+			},
+		},
+	}
+
+	resp := ToScanResponse(repoResults, nil)
+	require.Len(t, resp.Assessments, 1)
+	ev := resp.Assessments[0].Evidence
+	require.Len(t, ev, 2, "expected two evidence entries per assessment")
+
+	// Ampel evidence
+	require.True(t, strings.HasPrefix(ev[0].ID, "ampel-"))
+	require.Equal(t, "IntotoAttestation", ev[0].Type)
+	require.NotEmpty(t, ev[0].CollectedAt)
+	require.NotNil(t, ev[0].Source)
+	require.True(t, strings.HasPrefix(ev[0].Source.ReferenceID, "ampel-"))
+	require.Equal(t, "/out/myorg-repo1-main-rules-ampel.intoto.json", ev[0].Source.Coordinate)
+	require.Equal(t, "sha256:aaa111", ev[0].Source.Digest)
+
+	// Snappy evidence
+	require.True(t, strings.HasPrefix(ev[1].ID, "snappy-"))
+	require.Equal(t, "IntotoAttestation", ev[1].Type)
+	require.NotEmpty(t, ev[1].CollectedAt)
+	require.NotNil(t, ev[1].Source)
+	require.True(t, strings.HasPrefix(ev[1].Source.ReferenceID, "snappy-"))
+	require.Equal(t, "/out/myorg-repo1-main-rules-snappy.intoto.json", ev[1].Source.Coordinate)
+	require.Equal(t, "sha256:bbb222", ev[1].Source.Digest)
+}
+
+func TestToScanResponse_MappingReferences(t *testing.T) {
+	repoResults := []*PerRepoResult{
+		{
+			Repository:            "https://github.com/myorg/repo1",
+			Branch:                "main",
+			ScannedAt:             time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC),
+			Status:                "pass",
+			AmpelAttestationPath:  "/out/ampel.intoto.json",
+			SnappyAttestationPath: "/out/snappy.intoto.json",
+			AmpelDigest:           "sha256:aaa",
+			SnappyDigest:          "sha256:bbb",
+			Findings: []Finding{
+				{TenetID: "check-BP-1.01", Title: "Check", Result: "pass", Reason: "OK"},
+			},
+		},
+	}
+
+	resp := ToScanResponse(repoResults, nil)
+	require.Len(t, resp.MappingReferences, 2)
+
+	// Check that every Evidence.Source.ReferenceID matches a MappingReference.ID
+	refIDs := make(map[string]bool)
+	for _, mr := range resp.MappingReferences {
+		refIDs[mr.ID] = true
+	}
+	for _, a := range resp.Assessments {
+		for _, ev := range a.Evidence {
+			require.True(t, refIDs[ev.Source.ReferenceID],
+				"evidence ReferenceID %q should match a MappingReference.ID", ev.Source.ReferenceID)
+		}
+	}
+}
+
+func TestToScanResponse_ErrorRepoNoEvidence(t *testing.T) {
+	repoResults := []*PerRepoResult{
+		{
+			Repository: "https://github.com/myorg/repo1",
+			Branch:     "main",
+			Status:     "error",
+			Error:      "API unavailable",
+		},
+	}
+
+	resp := ToScanResponse(repoResults, nil)
+	require.Empty(t, resp.MappingReferences)
+	for _, a := range resp.Assessments {
+		require.Empty(t, a.Evidence)
+	}
 }

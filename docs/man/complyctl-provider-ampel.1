@@ -69,8 +69,74 @@ See the Carabiner project for installation instructions: \c
 .UE \c
 .SH FILES
 .TP
-\f[I]\(ti/.local/share/complytime/ampel/\f[R]
-Provider workspace directory for scan configuration and policy files.
+\f[I].complytime/ampel/\f[R]
+Provider workspace directory.
+All paths below are relative to the current working directory.
+.TP
+\f[I].complytime/ampel/results/<repo>\-<branch>\-<spec>\-snappy.intoto.json\f[R]
+In\-toto attestation produced by \f[B]snappy snap\f[R].
+Contains raw API data collected from the repository (e.g., branch
+protection rules).
+The filename encodes the sanitized repository URL, branch, and spec
+label.
+.TP
+\f[I].complytime/ampel/results/<repo>\-<branch>\-<spec>\-ampel.intoto.json\f[R]
+In\-toto attestation produced by \f[B]ampel verify\f[R].
+Contains the policy evaluation results against the snappy\-collected
+data.
+The filename follows the same pattern as the snappy attestation.
+.TP
+\f[I].complytime/ampel/results/<repo>\-<branch>.json\f[R]
+Per\-repository result JSON summarizing findings for a single repository
+and branch combination.
+.TP
+\f[I].complytime/ampel/policy/scan\-config.json\f[R]
+Scan configuration written by the \f[B]Generate\f[R] RPC.
+Records the matched requirement IDs so the \f[B]Scan\f[R] RPC can
+synthesize passing assessments for requirements with no findings.
+.TP
+\f[I].complytime/ampel/policy/\f[R]
+Merged AMPEL policy bundle generated from granular policy files.
+.TP
+\f[I].complytime/ampel/granular\-policies/\f[R]
+Default directory for granular AMPEL policy source files.
+Overridden by \f[B]ampel_policy_dir\f[R] or complypack content.
+.SH EVIDENCE
+The provider records \f[B]Evidence\f[R] entries on each
+\f[B]AssessmentLog\f[R] returned by the \f[B]Scan\f[R] RPC.
+Two attestation types are produced per repository/branch/spec
+combination:
+.TP
+\f[B]Snappy attestation\f[R] (type: \f[B]IntotoAttestation\f[R])
+The \f[B]snappy\f[R] tool collects raw API data from the repository
+platform (e.g., GitHub branch protection settings) and produces an
+in\-toto attestation.
+This attestation captures the observed state of the repository at scan
+time.
+.RS
+.IP \(bu 2
+\f[B]Source.Coordinate\f[R]: path to the snappy attestation file
+.IP \(bu 2
+\f[B]Source.Digest\f[R]: \f[B]sha256:<hex>\f[R] digest of the
+attestation file
+.IP \(bu 2
+\f[B]Source.ReferenceID\f[R]: \f[B]snappy\-<spec\-label>\f[R]
+.RE
+.TP
+\f[B]Ampel attestation\f[R] (type: \f[B]IntotoAttestation\f[R])
+The \f[B]ampel\f[R] tool evaluates granular security policies against
+the snappy\-collected data and produces an in\-toto attestation
+containing the evaluation results.
+A non\-zero exit code indicates policy failures, not tool errors.
+.RS
+.IP \(bu 2
+\f[B]Source.Coordinate\f[R]: path to the ampel result attestation file
+.IP \(bu 2
+\f[B]Source.Digest\f[R]: \f[B]sha256:<hex>\f[R] digest of the
+attestation file
+.IP \(bu 2
+\f[B]Source.ReferenceID\f[R]: \f[B]ampel\-<spec\-label>\f[R]
+.RE
 .SH EXIT CODES
 This provider is a gRPC subprocess managed by \f[B]complyctl\f[R].
 Exit codes follow the hashicorp/go\-plugin protocol and are not

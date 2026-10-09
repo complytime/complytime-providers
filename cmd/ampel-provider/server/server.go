@@ -21,6 +21,7 @@ import (
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/targets"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/toolcheck"
 	"github.com/complytime/complytime-providers/internal/archive"
+	"github.com/complytime/complytime-providers/internal/evidence"
 	"github.com/complytime/complytime-providers/internal/version"
 )
 
@@ -243,6 +244,32 @@ func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*pr
 						logger.Error("failed to write error result", "error", writeErr)
 					}
 					continue
+				}
+
+				// Thread attestation paths from scan result to parsed result
+				parsed.AmpelAttestationPath = rawResult.AmpelAttestationPath
+				parsed.SnappyAttestationPath = rawResult.SnappyAttestationPath
+
+				// Pre-compute digests for evidence (keeps ToScanResponse pure)
+				if rawResult.AmpelAttestationPath != "" {
+					d, digestErr := evidence.FileDigest(rawResult.AmpelAttestationPath)
+					if digestErr != nil {
+						return nil, fmt.Errorf(
+							"evidence digest failed for %s: %w",
+							rawResult.AmpelAttestationPath, digestErr,
+						)
+					}
+					parsed.AmpelDigest = d
+				}
+				if rawResult.SnappyAttestationPath != "" {
+					d, digestErr := evidence.FileDigest(rawResult.SnappyAttestationPath)
+					if digestErr != nil {
+						return nil, fmt.Errorf(
+							"evidence digest failed for %s: %w",
+							rawResult.SnappyAttestationPath, digestErr,
+						)
+					}
+					parsed.SnappyDigest = d
 				}
 
 				repoResults = append(repoResults, parsed)
