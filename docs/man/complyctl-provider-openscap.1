@@ -51,6 +51,14 @@ Default: \f[B]/usr/share/xml/scap/ssg/content\f[R]
 Path to the os\-release file used for CPE extraction during datastream
 auto\-detection.
 Default: \f[B]/etc/os\-release\f[R]
+.TP
+\f[B]COMPLYTIME_MACHINE_ID_FILE\f[R]
+Path to the machine\-id file used for host identification in evidence
+remarks.
+The file content is included in each Evidence.Source.Remarks field
+alongside the hostname so auditors can identify the host where the scan
+was executed.
+Default: \f[B]/etc/machine\-id\f[R]
 .SH EXTERNAL TOOLS
 Requires \f[B]oscap\f[R] (provided by the \f[B]openscap\-scanner\f[R]
 package) at runtime.

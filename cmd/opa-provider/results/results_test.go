@@ -496,6 +496,7 @@ func TestToScanResponse_EvidencePerAssessment(t *testing.T) {
 			InputPath: "/tmp/workspace/repos/org-repo/main",
 			ScannedAt: now,
 			Status:    "scanned",
+			Remarks:   "Collected on host \"testhost\" (machine-id: abc123)",
 			Findings: []Finding{
 				{
 					RequirementID: "kubernetes.run_as_root",
@@ -529,6 +530,7 @@ func TestToScanResponse_EvidencePerAssessment(t *testing.T) {
 	assert.True(t,
 		strings.HasPrefix(ev.Source.ReferenceID, evidence.RefPrefixConftest),
 		"reference ID should start with conftest-input- prefix")
+	assert.Contains(t, ev.Source.Remarks, "Collected on host")
 }
 
 func TestToScanResponse_EvidenceWithBranch(t *testing.T) {

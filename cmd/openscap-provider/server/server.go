@@ -139,7 +139,8 @@ func (s *ProviderServer) Scan(ctx context.Context, req *provider.ScanRequest) (*
 		return nil, err
 	}
 
-	attachARFEvidence(assessments, collectedAt, digest)
+	hostRemark := evidence.HostRemark()
+	attachARFEvidence(assessments, collectedAt, digest, hostRemark)
 
 	return &provider.ScanResponse{
 		Assessments:       assessments,
@@ -151,7 +152,7 @@ func (s *ProviderServer) Scan(ctx context.Context, req *provider.ScanRequest) (*
 // log, linking every assessment result to the OpenSCAP ARF source artifact.
 func attachARFEvidence(
 	assessments []provider.AssessmentLog,
-	collectedAt, digest string,
+	collectedAt, digest, remarks string,
 ) {
 	for i := range assessments {
 		assessments[i].Evidence = []provider.Evidence{
@@ -163,6 +164,7 @@ func attachARFEvidence(
 					ReferenceID: evidence.RefOpenSCAPARF,
 					Coordinate:  config.ARFPath,
 					Digest:      digest,
+					Remarks:     remarks,
 				},
 			},
 		}

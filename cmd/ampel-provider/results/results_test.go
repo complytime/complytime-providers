@@ -885,6 +885,7 @@ func TestToScanResponse_EvidencePerAssessment(t *testing.T) {
 			SnappyAttestationPath: "/out/myorg-repo1-main-rules-snappy.intoto.json",
 			AmpelDigest:           "sha256:aaa111",
 			SnappyDigest:          "sha256:bbb222",
+			Remarks:               "Collected on host \"scanhost\" (machine-id: abc123)",
 			Findings: []Finding{
 				{TenetID: "check-BP-1.01", Title: "Check", Result: "pass", Reason: "OK"},
 			},
@@ -904,6 +905,7 @@ func TestToScanResponse_EvidencePerAssessment(t *testing.T) {
 	require.True(t, strings.HasPrefix(ev[0].Source.ReferenceID, "ampel-"))
 	require.Equal(t, "/out/myorg-repo1-main-rules-ampel.intoto.json", ev[0].Source.Coordinate)
 	require.Equal(t, "sha256:aaa111", ev[0].Source.Digest)
+	require.Contains(t, ev[0].Source.Remarks, "Collected on host")
 
 	// Snappy evidence
 	require.True(t, strings.HasPrefix(ev[1].ID, "snappy-"))
@@ -913,6 +915,7 @@ func TestToScanResponse_EvidencePerAssessment(t *testing.T) {
 	require.True(t, strings.HasPrefix(ev[1].Source.ReferenceID, "snappy-"))
 	require.Equal(t, "/out/myorg-repo1-main-rules-snappy.intoto.json", ev[1].Source.Coordinate)
 	require.Equal(t, "sha256:bbb222", ev[1].Source.Digest)
+	require.Contains(t, ev[1].Source.Remarks, "Collected on host")
 }
 
 func TestToScanResponse_MappingReferences(t *testing.T) {

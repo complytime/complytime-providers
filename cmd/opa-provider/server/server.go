@@ -20,6 +20,7 @@ import (
 	"github.com/complytime/complytime-providers/cmd/opa-provider/targets"
 	"github.com/complytime/complytime-providers/cmd/opa-provider/toolcheck"
 	"github.com/complytime/complytime-providers/internal/archive"
+	"github.com/complytime/complytime-providers/internal/evidence"
 	"github.com/complytime/complytime-providers/internal/version"
 )
 
@@ -292,6 +293,7 @@ func (s *ProviderServer) Scan(
 	bundleCache := map[string]string{}
 	var allResults []*results.PerTargetResult
 	var writeErrs []error
+	hostRemark := evidence.HostRemark()
 
 	for _, target := range req.Targets {
 		targetResults, writeErr := s.processTarget(
@@ -299,6 +301,9 @@ func (s *ProviderServer) Scan(
 		)
 		if writeErr != nil {
 			writeErrs = append(writeErrs, writeErr)
+		}
+		for _, tr := range targetResults {
+			tr.Remarks = hostRemark
 		}
 		allResults = append(allResults, targetResults...)
 	}

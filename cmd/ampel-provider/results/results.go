@@ -82,6 +82,7 @@ type PerRepoResult struct {
 	SnappyAttestationPath string    `json:"snappy_attestation_path,omitempty"`
 	AmpelDigest           string    `json:"ampel_digest,omitempty"`
 	SnappyDigest          string    `json:"snappy_digest,omitempty"`
+	Remarks               string    `json:"remarks,omitempty"`
 }
 
 // Finding represents an individual rule evaluation result.
@@ -381,6 +382,7 @@ func buildRepoEvidence(rr *PerRepoResult) []provider.Evidence {
 				ReferenceID: evidence.RefPrefixAmpel + prefix,
 				Coordinate:  rr.AmpelAttestationPath,
 				Digest:      rr.AmpelDigest,
+				Remarks:     rr.Remarks,
 			},
 		})
 	}
@@ -393,6 +395,7 @@ func buildRepoEvidence(rr *PerRepoResult) []provider.Evidence {
 				ReferenceID: evidence.RefPrefixSnappy + prefix,
 				Coordinate:  rr.SnappyAttestationPath,
 				Digest:      rr.SnappyDigest,
+				Remarks:     rr.Remarks,
 			},
 		})
 	}

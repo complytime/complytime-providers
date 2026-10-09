@@ -59,7 +59,14 @@ Custom directory containing granular Ampel policy source files.
 Takes second priority after complypack content.
 Default: \f[B].complytime/ampel/granular\-policies/\f[R]
 .SH ENVIRONMENT
-No environment variables are read directly by this provider.
+.TP
+\f[B]COMPLYTIME_MACHINE_ID_FILE\f[R]
+Path to the machine\-id file used for host identification in evidence
+remarks.
+The file content is included in each Evidence.Source.Remarks field
+alongside the hostname so auditors can identify the host where the scan
+was executed.
+Default: \f[B]/etc/machine\-id\f[R]
 .SH EXTERNAL TOOLS
 Requires \f[B]snappy\f[R] and \f[B]ampel\f[R] CLI tools at runtime.
 These tools are not currently packaged in Fedora and must be installed

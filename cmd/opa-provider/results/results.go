@@ -45,6 +45,7 @@ type PerTargetResult struct {
 	SuccessCount int       `json:"success_count"`
 	Status       string    `json:"status"`
 	Error        string    `json:"error,omitempty"`
+	Remarks      string    `json:"remarks,omitempty"`
 }
 
 // Finding represents an individual policy violation.
@@ -330,6 +331,7 @@ func buildEvidence(tr *PerTargetResult) []provider.Evidence {
 			ReferenceID: evidence.RefPrefixConftest + suffix,
 			Coordinate:  tr.InputPath,
 			Digest:      "",
+			Remarks:     tr.Remarks,
 		},
 	}}
 }

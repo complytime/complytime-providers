@@ -169,6 +169,7 @@ func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*pr
 	}
 
 	var repoResults []*results.PerRepoResult
+	hostRemark := evidence.HostRemark()
 
 	for _, target := range req.Targets {
 		repoURL := target.Variables["url"]
@@ -246,9 +247,10 @@ func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*pr
 					continue
 				}
 
-				// Thread attestation paths from scan result to parsed result
+				// Thread attestation paths and host remark from scan result
 				parsed.AmpelAttestationPath = rawResult.AmpelAttestationPath
 				parsed.SnappyAttestationPath = rawResult.SnappyAttestationPath
+				parsed.Remarks = hostRemark
 
 				// Pre-compute digests for evidence (keeps ToScanResponse pure)
 				if rawResult.AmpelAttestationPath != "" {

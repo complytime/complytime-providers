@@ -62,7 +62,12 @@ are not set manually by the user.
 
 # ENVIRONMENT
 
-No environment variables are read directly by this provider.
+**COMPLYTIME_MACHINE_ID_FILE**
+:   Path to the machine-id file used for host identification in
+    evidence remarks. The file content is included in each
+    Evidence.Source.Remarks field alongside the hostname so auditors
+    can identify the host where the scan was executed.
+    Default: **/etc/machine-id**
 
 # EXTERNAL TOOLS
 

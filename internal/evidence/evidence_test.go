@@ -51,3 +51,60 @@ func TestFileDigest_DirectoryPath(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "is a directory")
 }
+
+func TestHostRemark_BothAvailable(t *testing.T) {
+	dir := t.TempDir()
+	idFile := filepath.Join(dir, "machine-id")
+	require.NoError(t, os.WriteFile(idFile, []byte("abc123def456\n"), 0o600))
+
+	original := MachineIDPath
+	MachineIDPath = idFile
+	defer func() { MachineIDPath = original }()
+
+	remark := HostRemark()
+	assert.Contains(t, remark, "Collected on host")
+	assert.Contains(t, remark, "(machine-id: abc123def456)")
+	assert.NotContains(t, remark, "\n")
+}
+
+func TestHostRemark_NoMachineID(t *testing.T) {
+	original := MachineIDPath
+	MachineIDPath = "/nonexistent/machine-id"
+	defer func() { MachineIDPath = original }()
+
+	remark := HostRemark()
+	assert.Contains(t, remark, "Collected on host")
+	assert.NotContains(t, remark, "machine-id")
+}
+
+func TestHostRemark_EnvOverride(t *testing.T) {
+	dir := t.TempDir()
+	idFile := filepath.Join(dir, "custom-machine-id")
+	require.NoError(t, os.WriteFile(idFile, []byte("custom789\n"), 0o600))
+
+	// Set MachineIDPath to nonexistent so only the env var works
+	original := MachineIDPath
+	MachineIDPath = "/nonexistent/machine-id"
+	defer func() { MachineIDPath = original }()
+
+	t.Setenv(EnvMachineIDFile, idFile)
+
+	remark := HostRemark()
+	assert.Contains(t, remark, "(machine-id: custom789)")
+}
+
+func TestHostRemark_MachineIDTrimmed(t *testing.T) {
+	dir := t.TempDir()
+	idFile := filepath.Join(dir, "machine-id")
+	require.NoError(t, os.WriteFile(
+		idFile, []byte("  abc123  \n\n"), 0o600,
+	))
+
+	original := MachineIDPath
+	MachineIDPath = idFile
+	defer func() { MachineIDPath = original }()
+
+	remark := HostRemark()
+	assert.Contains(t, remark, "(machine-id: abc123)")
+	assert.NotContains(t, remark, " abc123 ")
+}

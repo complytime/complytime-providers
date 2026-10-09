@@ -5,7 +5,7 @@
 ### Added
 
 - **all providers**: Populated `Evidence` entries on every `AssessmentLog` returned in `ScanResponse`, enabling auditors to trace each compliance assessment result back to the artifact that produced it. OpenSCAP attaches ARF file evidence with SHA256 digest, Ampel attaches both snappy and ampel in-toto attestation evidence with digests, and OPA attaches conftest input path evidence. Each provider now also declares `MappingReferences` on `ScanResponse` linking evidence to their source artifacts.
-- **internal/evidence**: New shared package providing `FileDigest()` for SHA256 file hashing and centralized evidence type/ID constants used across all three providers.
+- **internal/evidence**: New shared package providing `FileDigest()` for SHA256 file hashing, `HostRemark()` for host identification in evidence remarks (using hostname and `/etc/machine-id`), and centralized evidence type/ID constants used across all three providers. The machine-id file path is configurable via the `COMPLYTIME_MACHINE_ID_FILE` environment variable.
 
 ### Fixed
 

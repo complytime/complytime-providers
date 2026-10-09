@@ -347,7 +347,8 @@ func TestAttachARFEvidence(t *testing.T) {
 
 	collectedAt := "2026-10-09T12:00:00Z"
 	digest := "sha256:abc123def456"
-	attachARFEvidence(assessments, collectedAt, digest)
+	remarks := "Collected on host \"testhost\" (machine-id: abc123)"
+	attachARFEvidence(assessments, collectedAt, digest, remarks)
 
 	for i, a := range assessments {
 		require.Len(t, a.Evidence, 1,
@@ -362,13 +363,14 @@ func TestAttachARFEvidence(t *testing.T) {
 			ev.Source.ReferenceID)
 		assert.Equal(t, config.ARFPath, ev.Source.Coordinate)
 		assert.Equal(t, digest, ev.Source.Digest)
+		assert.Equal(t, remarks, ev.Source.Remarks)
 	}
 }
 
 func TestAttachARFEvidence_Empty(t *testing.T) {
 	// Attaching evidence to an empty slice must not panic.
 	var assessments []provider.AssessmentLog
-	attachARFEvidence(assessments, "2026-10-09T00:00:00Z", "sha256:000")
+	attachARFEvidence(assessments, "2026-10-09T00:00:00Z", "sha256:000", "remark")
 	assert.Empty(t, assessments)
 }
 
