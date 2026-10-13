@@ -93,9 +93,8 @@ the content key. The index bridges this gap without requiring
 changes to `ScanRequest`.
 
 **File location**: In the provider's generated directory
-(`GeneratedDirPath()` for OPA, `ScanConfigDirPath()` for Ampel).
-This keeps the index alongside the content directories it
-references.
+(`GeneratedDirPath()` for both OPA and Ampel). This keeps the
+index alongside the content directories it references.
 
 **Schema**:
 ```json
@@ -112,12 +111,16 @@ The `version` field enables future schema evolution without breaking
 existing workspaces.
 
 **URL sanitization**: Index keys are derived from target URLs using
-the existing `SanitizeRepoURL` algorithm (strip `https://`/`http://`
-scheme, replace `/`, `.`, `:` with hyphens). Both providers already
-implement identical copies of this function in their respective
-`targets` packages. This change extracts it into the shared
-`internal/genindex` package to eliminate the duplication (see
-task 1.4).
+an improved `SanitizeURL` algorithm extracted into the shared
+`internal/genindex` package (see task 1.4). The algorithm strips
+the `https://`/`http://` scheme, strips any `userinfo@` component
+(credentials) from the authority, and replaces `/`, `.`, `:` with
+hyphens. Credential stripping prevents leaking tokens or passwords
+into directory names and index keys, and ensures URLs with and
+without embedded credentials produce the same key. Both providers
+currently implement identical copies of the base algorithm
+(`SanitizeRepoURL`) in their respective `targets` packages; this
+change centralizes and extends it.
 
 **Concurrency note**: The read-modify-write cycle on
 `generate-index.json` is safe for sequential Generate calls (the
@@ -144,24 +147,38 @@ source files; the merged bundle and scan-config live in
 `generated/<content-key>/`.
 
 **Change for Ampel**: Ampel currently has no `generated/` directory.
-This design adds one (via `EnsureDirectories`), mirroring OPA's
-structure. The existing `policy/` directory that served as Ampel's
-output path is repurposed to hold only the `generate-index.json`
-and content-keyed subdirectories, or a new `generated/` sibling is
-introduced.
+This design adds a new `generated/` sibling directory (via
+`EnsureDirectories`), mirroring OPA's structure. The existing
+`policy/` directory (`GeneratedPolicyDirPath()`) retains its
+current role as the legacy output path; the new `generated/`
+directory holds the `generate-index.json` and content-keyed
+subdirectories.
 
-### Decision 4: OPA scan-config stores policyDir in BundleDir field
+### Decision 4: OPA scan-config stores policyDir in PolicyDir field
 
-**Choice**: The OPA `ScanConfig.BundleDir` field continues to store
-the resolved policy directory path (whether from
-`PolicyDirForBundle` or complypack extraction). This is the only
-mechanism for Scan to locate the Rego files — especially for
-complypacks, where the path cannot be re-derived from
-`ScanRequest`.
+**Choice**: Rename `ScanConfig.BundleDir` to `ScanConfig.PolicyDir`
+(JSON tag `"policy_dir"`). The field stores the resolved policy
+directory path regardless of source type (OCI bundle via
+`PolicyDirForBundle`, complypack extraction, or custom directory).
+This is the only mechanism for Scan to locate the Rego files —
+especially for complypacks, where the path cannot be re-derived
+from `ScanRequest`.
 
-**Why**: `BundleDir` is what bridges the Generate-time policy
-resolution to Scan-time policy location. Moving scan-config into a
-content-keyed directory does not eliminate the need for this field.
+**Why rename**: The field has always stored a general policy
+directory path, not specifically a bundle directory. Since this
+change already restructures how scan-config is written and read
+(moving it into content-keyed directories), the JSON schema is
+effectively evolving — this is the natural time to fix the
+misleading name. The rename is contained within `cmd/opa-provider/`
+(Ampel has no equivalent field). Old workspaces with `"bundle_dir"`
+in their scan-config hit the Decision 5 fallback path (no index →
+legacy behavior), so backward compatibility is preserved without
+a JSON alias.
+
+**Why the field is still needed**: `PolicyDir` bridges the
+Generate-time policy resolution to Scan-time policy location.
+Moving scan-config into a content-keyed directory does not
+eliminate the need for this field.
 
 ### Decision 5: Graceful fallback for missing index
 
