@@ -12,8 +12,9 @@ independent compliance results per target.
 
 The provider SHALL write Generate-phase artifacts (scan-config and, for
 Ampel, the merged policy bundle) into a content-keyed subdirectory
-derived from a deterministic hash of the sorted matched requirement IDs,
-rather than a single shared path.
+derived from a deterministic hash of the sorted matched requirement IDs
+and the resolved policy source identifier, rather than a single shared
+path.
 
 #### Scenario: Two targets with different requirement sets
 
@@ -23,10 +24,21 @@ rather than a single shared path.
   content-keyed subdirectory and neither call overwrites the other's
   artifacts
 
-#### Scenario: Two targets with identical requirement sets
+#### Scenario: Two targets with identical requirement sets but different policy sources
 
 - **WHEN** a policy defines two targets that resolve to the same
-  requirement set and Generate is called once per target
+  requirement set but different policy sources (e.g., different
+  `opa_bundle_ref` values or different complypack content) and Generate
+  is called once per target
+- **THEN** each Generate call writes its artifacts into a distinct
+  content-keyed subdirectory because the policy source identifier
+  differs, and neither call overwrites the other's artifacts
+
+#### Scenario: Two targets with identical requirement sets and identical policy sources
+
+- **WHEN** a policy defines two targets that resolve to the same
+  requirement set and the same policy source and Generate is called once
+  per target
 - **THEN** both Generate calls write to the same content-keyed
   subdirectory and the second write is an idempotent overwrite of
   identical content
@@ -34,35 +46,48 @@ rather than a single shared path.
 #### Scenario: Deterministic content key
 
 - **WHEN** Generate computes the content key from a set of matched
-  requirement IDs
+  requirement IDs and a policy source identifier
 - **THEN** the key is the lowercase hex-encoded SHA-256 prefix (first 16
-  characters) of the sorted, newline-joined requirement IDs, and the same
-  input always produces the same key
+  characters) of the sorted, newline-joined requirement IDs followed by a
+  newline and the policy source identifier, and the same input always
+  produces the same key
 
 ### Requirement: Generate index maps targets to content directories
 
 The provider SHALL maintain a `generate-index.json` file that maps each
-target's sanitized URL to its content-key directory, enabling Scan to
+target's identifier to its content-key directory, enabling Scan to
 locate the correct artifacts per target.
+
+The target identifier SHALL be derived from the target URL when present,
+or from the `input_path` value for OPA targets that use local filesystem
+paths. The identifier derivation SHALL be collision-resistant: distinct
+target identifiers MUST NOT produce the same index key.
 
 #### Scenario: Index created on first Generate call
 
 - **WHEN** Generate is called and no `generate-index.json` exists
 - **THEN** Generate creates the file with a single entry mapping the
-  current target's sanitized URL to its content key
+  current target's identifier to its content key
 
 #### Scenario: Index updated on subsequent Generate calls
 
 - **WHEN** Generate is called and `generate-index.json` already exists
 - **THEN** Generate reads the existing index, adds or updates the entry
-  for the current target's sanitized URL, and writes the file back
+  for the current target's identifier, and writes the file back
 
 #### Scenario: Index entry updated when target's policy assignment changes
 
 - **WHEN** a target's policy assignment changes between runs and Generate
   is called with the new requirement set
-- **THEN** the index entry for that target's URL is updated to point to
-  the new content-key directory
+- **THEN** the index entry for that target's identifier is updated to
+  point to the new content-key directory
+
+#### Scenario: OPA target with input_path instead of URL
+
+- **WHEN** Generate is called for an OPA target that uses `input_path`
+  instead of a URL
+- **THEN** the index entry uses a key derived from the `input_path` value
+  and the content-key directory is correctly recorded
 
 ### Requirement: Scan reads per-target artifacts via the index
 
@@ -82,16 +107,73 @@ directory.
 #### Scenario: Scan graceful degradation without index
 
 - **WHEN** Scan is called and `generate-index.json` does not exist
-- **THEN** the provider falls back to the current behavior (reading from
-  the shared legacy path or pulling bundles directly) and logs a warning
+- **THEN** the provider falls back to the current behavior: OPA first
+  tries the legacy shared scan-config.json, then falls back to pulling
+  via `opa_bundle_ref`; Ampel reads from the legacy shared path; both
+  log a warning
 
 #### Scenario: Scan with unknown target in index
 
-- **WHEN** Scan receives a target whose sanitized URL is not present in
+- **WHEN** Scan receives a target whose identifier is not present in
   `generate-index.json`
-- **THEN** the provider falls back to pulling the bundle directly (OPA)
-  or logs a warning and skips passing-assessment synthesis (Ampel), and
-  does not return an error for the entire Scan call
+- **THEN** OPA first tries the legacy shared scan-config.json, then falls
+  back to pulling the bundle via `opa_bundle_ref`; Ampel logs a warning
+  and skips passing-assessment synthesis; neither returns an error for the
+  entire Scan call
+
+#### Scenario: OPA target with input_path in Scan
+
+- **WHEN** Scan receives an OPA target that uses `input_path` instead of
+  a URL
+- **THEN** the provider looks up the target's index key using the
+  `input_path` value (the same derivation used during Generate) and
+  resolves the content-key directory for that target
+
+### Requirement: Content key validation on read
+
+Content keys read from `generate-index.json` SHALL be validated before
+use as directory names. The provider SHALL reject content keys that do
+not match the expected hex format and SHALL verify that the resolved
+path is contained within the generated directory.
+
+#### Scenario: Valid content key from index
+
+- **WHEN** Scan reads a content key from `generate-index.json` that
+  matches the expected lowercase hex format (`^[0-9a-f]{16}$`)
+- **THEN** the provider resolves the content-key directory path and
+  verifies it is within the generated directory before reading artifacts
+
+#### Scenario: Malformed content key in index
+
+- **WHEN** Scan reads a content key from `generate-index.json` that does
+  not match the expected hex format or that resolves to a path outside the
+  generated directory (e.g., path traversal via `../`)
+- **THEN** the provider logs a warning and falls back to the no-index
+  behavior for that target, without returning an error for the entire
+  Scan call
+
+### Requirement: Per-target result aggregation
+
+The provider SHALL associate each target's scan results with the reverse
+mapping (OPA) or requirement-ID list (Ampel) from that target's own
+scan-config, rather than using a single provider-wide mapping for all
+targets.
+
+#### Scenario: OPA multi-target result aggregation
+
+- **WHEN** Scan processes two OPA targets with different reverse mappings
+  (because their scan-configs contain different `reverse_mapping` values)
+- **THEN** each target's conftest results are resolved using only that
+  target's reverse mapping, and synthetic passing assessments are
+  generated per target using only that target's mapping values
+
+#### Scenario: Ampel multi-target result aggregation
+
+- **WHEN** Scan processes two Ampel targets with different requirement-ID
+  lists (because their scan-configs contain different `requirement_ids`)
+- **THEN** each target's scan results are matched only against that
+  target's requirement-ID list, and synthetic passing assessments are not
+  generated for requirement IDs that do not apply to a given target
 
 ### Requirement: Uniform approach across policy source types
 

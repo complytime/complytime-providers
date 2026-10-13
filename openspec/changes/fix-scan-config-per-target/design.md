@@ -49,18 +49,38 @@ Key constraints:
 
 ## Decisions
 
-### Decision 1: Content-addressed directories keyed by requirement hash
+### Decision 1: Content-addressed directories keyed by requirement + policy source hash
 
 **Choice**: Derive a content key from a SHA-256 hash of sorted
-matched requirement IDs. Write all Generate artifacts into a
-subdirectory named by that key.
+matched requirement IDs and the resolved policy source identifier.
+Write all Generate artifacts into a subdirectory named by that key.
+
+**Why policy source is included in the hash**: Requirement IDs alone
+do not fully identify the generated artifacts. OPA artifacts also
+depend on the reverse mapping and the policy directory (different
+`opa_bundle_ref` values or complypack content produce different Rego
+files). Ampel bundles depend on the granular policy source content.
+Two targets with identical requirement IDs but different policy
+sources would produce different artifacts. Hashing only requirement
+IDs would assign them the same content key, causing one to overwrite
+the other — reproducing the exact bug this change fixes.
+
+**Policy source identifier by provider**:
+- **OPA**: the resolved policy directory path (the absolute path
+  after `resolvePolicyDir` — whether from `ComplypackContentPath`,
+  `opa_bundle_ref` via `PolicyDirForBundle`, or custom directory).
+  This captures the actual policy content location regardless of
+  source type.
+- **Ampel**: the resolved granular policy source directory path
+  (from `ComplypackContentPath`, `ampel_policy_dir`, or the default
+  `GranularPolicyDirPath()`).
 
 **Why over per-target-URL directories**: With hundreds of targets
 sharing the same policy, per-URL directories would duplicate
 identical artifacts hundreds of times (up to ~50 MB for 500 targets
 with a 100 KB merged bundle). Content-addressing deduplicates
-naturally — targets with identical requirement sets share one
-directory.
+naturally — targets with identical requirement sets and policy
+sources share one directory.
 
 **Why over per-bundle-ref directories (OPA's PolicyDirForBundle)**:
 `PolicyDirForBundle` only works for the `opa_bundle_ref` path. The
@@ -69,23 +89,27 @@ A unified content-addressed approach handles all source types with
 one mechanism.
 
 **Key derivation**: Sort requirement IDs lexicographically, join
-with newlines, SHA-256 hash, take the first 16 hex characters. This
+with newlines, append a newline and the policy source identifier,
+SHA-256 hash the result, take the first 16 hex characters. This
 provides sufficient collision resistance for the expected namespace
-(hundreds to low thousands of distinct requirement sets) while
-keeping directory names readable in logs.
+(hundreds to low thousands of distinct requirement-and-source
+combinations) while keeping directory names readable in logs.
 
 **Alternatives rejected**:
 - Full SHA-256 (64 chars): unnecessarily long directory names.
 - Hash of entire ScanConfig JSON: sensitive to non-semantic
   differences (timestamps, field ordering).
 - Sequential numbering: not deterministic across runs.
+- Hash of requirement IDs only: does not distinguish different
+  policy sources with the same requirement set (see above).
 
 ### Decision 2: generate-index.json maps targets to content keys
 
-**Choice**: Maintain a JSON file mapping sanitized target URLs to
-content-key directories. Generate reads, updates, and writes this
-file on each call. Scan reads it once at the start and uses it to
-resolve per-target artifact directories.
+**Choice**: Maintain a JSON file mapping target keys
+(collision-resistant hashes derived from target URLs or input paths)
+to content-key directories. Generate reads, updates, and writes
+this file on each call. Scan reads it once at the start and uses it
+to resolve per-target artifact directories.
 
 **Why a mapping file**: At Scan time, the provider has
 `target.Variables["url"]` but not the requirement IDs that determine
@@ -101,26 +125,37 @@ index alongside the content directories it references.
 {
   "version": 1,
   "targets": {
-    "<sanitized-url>": "<content-key>",
+    "<target-key>": "<content-key>",
     ...
   }
 }
 ```
 
 The `version` field enables future schema evolution without breaking
-existing workspaces.
+existing workspaces. When Scan reads an index with a `version` value
+other than `1`, it SHALL log a warning and fall back to the no-index
+behavior.
 
-**URL sanitization**: Index keys are derived from target URLs using
-an improved `SanitizeURL` algorithm extracted into the shared
-`internal/genindex` package (see task 1.4). The algorithm strips
-the `https://`/`http://` scheme, strips any `userinfo@` component
-(credentials) from the authority, and replaces `/`, `.`, `:` with
-hyphens. Credential stripping prevents leaking tokens or passwords
-into directory names and index keys, and ensures URLs with and
-without embedded credentials produce the same key. Both providers
-currently implement identical copies of the base algorithm
-(`SanitizeRepoURL`) in their respective `targets` packages; this
-change centralizes and extends it.
+**Target identifier derivation**: Index keys are derived from
+target identifiers using a `TargetKey` function in the shared
+`internal/genindex` package (see task 1.4). The function accepts
+either a URL or an `input_path` value and produces a
+collision-resistant key:
+- For URL targets: parse with `net/url.Parse`, strip scheme, strip
+  `userinfo@` (credentials), then hash the normalized result
+  (SHA-256 prefix, 16 hex chars). This prevents credential leakage
+  and ensures URLs with and without embedded credentials produce the
+  same key. Hashing instead of character replacement avoids the
+  lossy sanitization problem where distinct URLs (e.g.,
+  `github.com/org/repo` and `github.com:org/repo`) could collide.
+- For `input_path` targets (OPA only): `filepath.Clean` the path,
+  then hash it with the same SHA-256 prefix approach.
+Both providers currently implement identical copies of a lossy
+`SanitizeRepoURL` in their respective `targets` packages; this
+change replaces those with the collision-resistant `TargetKey`.
+The existing `SanitizeRepoURL` functions are retained for their
+current non-index uses (result file naming) where human readability
+matters and collisions are acceptable.
 
 **Concurrency note**: The read-modify-write cycle on
 `generate-index.json` is safe for sequential Generate calls (the
@@ -182,15 +217,72 @@ eliminate the need for this field.
 
 ### Decision 5: Graceful fallback for missing index
 
-**Choice**: When `generate-index.json` is missing or a target's URL
-is not found in the index, Scan falls back to current behavior:
-- OPA: pulls the bundle via `opa_bundle_ref` from
-  `target.Variables` (the existing no-scan-config fallback).
-- Ampel: skips passing-assessment synthesis and logs a warning (the
-  existing no-scan-config fallback).
+**Choice**: When `generate-index.json` is missing or a target's
+identifier is not found in the index, Scan falls back with a
+two-step chain:
+- OPA: (1) try reading the legacy shared `scan-config.json` from
+  the flat `GeneratedDirPath()` — this covers complypack workspaces
+  where the policy came from `ComplypackContentPath` and has no
+  `opa_bundle_ref` to fall back to; (2) if not found, pull the
+  bundle via `opa_bundle_ref` from `target.Variables` (the existing
+  no-scan-config fallback). Pulling via `opa_bundle_ref` alone is
+  insufficient for complypack workspaces because `ScanRequest` does
+  not carry `ComplypackContentPath` — the resolved policy directory
+  is only available in the scan-config written by Generate.
+- Ampel: reads from the legacy shared path
+  (`ScanConfigDirPath()`), logs a warning, and skips
+  passing-assessment synthesis if scan-config is not found.
 
 **Why**: This preserves backward compatibility with workspaces
-created before this change and with Scan-without-Generate workflows.
+created before this change, with Scan-without-Generate workflows,
+and critically with legacy complypack workspaces where no
+`opa_bundle_ref` exists.
+
+### Decision 6: Content key validation on read
+
+**Choice**: When Scan reads a content key from `generate-index.json`,
+validate that it matches the expected hex format (`^[0-9a-f]{16}$`)
+and that the resolved absolute path is contained within the generated
+directory (no path traversal). Invalid keys trigger a fallback to the
+no-index behavior for that target.
+
+**Why**: A modified or corrupted `generate-index.json` could contain
+a content key with path traversal components (e.g., `../../etc`).
+The project already establishes path traversal protection as a
+pattern in `internal/archive/` (aggregate size limits, file count
+limits, and `filepath.Rel` containment checks). Applying the same
+defense to content keys maintains consistent security posture.
+
+### Decision 7: Per-target result aggregation
+
+**Choice**: Thread per-target scan-config data through to the
+result aggregation step so each target's results use only that
+target's reverse mapping (OPA) or requirement-ID list (Ampel).
+
+**OPA**: Currently `ToScanResponse(allResults, reverseMap)` receives
+a single `reverseMap` from the one shared scan-config. With
+per-target scan-configs, each target may have a different
+`ReverseMapping`. The change associates each `PerTargetResult` with
+the reverse mapping from its own scan-config. `ToScanResponse` (or
+a restructured equivalent) uses the per-result mapping for ID
+resolution and per-target mappings for synthetic passing assessment
+generation.
+
+**Ampel**: Currently `ToScanResponse(repoResults, allRequirementIDs)`
+receives a single `allRequirementIDs` list from the one shared
+scan-config. With per-target scan-configs, each target may have a
+different `requirement_ids` list. The change associates each
+`PerRepoResult` with the requirement-ID list from its own
+scan-config. The response builder uses per-result requirement IDs
+so that synthetic passing assessments are not generated for
+requirement IDs that do not apply to a given target.
+
+**Why**: Without this change, reading per-target scan-configs in the
+Scan loop solves the artifact location problem but not the result
+correctness problem. The last target's reverse mapping or
+requirement-ID list would still overwrite earlier ones, producing
+incorrect synthetic passing assessments for targets whose
+requirements differ.
 
 ## Risks / Trade-offs
 
@@ -208,8 +300,8 @@ today, so this is not a regression.
 
 **[Hash collision]** → 16 hex characters = 64 bits of entropy. The
 birthday bound for 50% collision probability is ~2^32 distinct
-requirement sets (~4 billion). This is far beyond realistic usage.
-Not a practical risk.
+requirement-set-and-source combinations (~4 billion). This is far
+beyond realistic usage. Not a practical risk.
 
 **[Ampel generated directory is new]** → Adding `generated/` to
 Ampel's `EnsureDirectories` is a visible filesystem change. Users
