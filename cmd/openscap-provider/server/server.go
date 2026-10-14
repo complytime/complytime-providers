@@ -180,7 +180,7 @@ func buildMappingReferences() []provider.MappingReference {
 			Title: "OpenSCAP ARF scan result",
 			Description: "Asset Reporting Format result " +
 				"from OpenSCAP evaluation",
-			URL: "file://" + config.ARFPath,
+			URL: evidence.FileURL(config.ARFPath),
 		},
 	}
 }

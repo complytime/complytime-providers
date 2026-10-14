@@ -235,16 +235,38 @@ func TestSanitizeSpecName(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"github/branch-rules.yaml", "branch-rules"},
-		{"/opt/specs/custom-check.yaml", "custom-check"},
+		{"github/branch-rules.yaml", "github_2fbranch-rules"},
+		{"/opt/specs/custom-check.yaml", "_2fopt_2fspecs_2fcustom-check"},
 		{"branch-rules.yml", "branch-rules"},
 		{"builtin-name", "builtin-name"},
-		{"builtin:github/branch-rules.yaml", "branch-rules"},
+		{"builtin:github/branch-rules.yaml", "github_2fbranch-rules"},
 	}
 	for _, tc := range tests {
-		got := sanitizeSpecName(tc.input)
+		got := SanitizeSpecName(tc.input)
 		require.Equal(t, tc.expected, got, "input: %s", tc.input)
 	}
+}
+
+func TestSanitizeSpecName_SameBasenameDifferentDirs(t *testing.T) {
+	// Specs with the same basename in different directories must
+	// produce distinct labels (prevents evidence ID collisions).
+	a := SanitizeSpecName("team-a/check.yaml")
+	b := SanitizeSpecName("team-b/check.yaml")
+	require.NotEqual(t, a, b,
+		"same-basename specs in different dirs must produce distinct labels")
+	require.Equal(t, "team-a_2fcheck", a)
+	require.Equal(t, "team-b_2fcheck", b)
+}
+
+func TestSanitizeSpecName_DeepNestedPaths(t *testing.T) {
+	// Specs sharing the same immediate parent and basename but
+	// differing in ancestry must produce distinct labels.
+	a := SanitizeSpecName("dept-a/team/check.yaml")
+	b := SanitizeSpecName("dept-b/team/check.yaml")
+	require.NotEqual(t, a, b,
+		"deep-nested specs with same parent/base must produce distinct labels")
+	require.Equal(t, "dept-a_2fteam_2fcheck", a)
+	require.Equal(t, "dept-b_2fteam_2fcheck", b)
 }
 
 func writeTempPolicy(t *testing.T, dir string) string {
@@ -293,14 +315,16 @@ func TestScanRepository_MockSuccess(t *testing.T) {
 	require.NotNil(t, result)
 	require.Equal(t, ampelOutput, result.Output)
 
-	// Verify snappy attestation was saved with spec label in filename
-	attestationFile := filepath.Join(tmpDir, targets.SanitizeRepoURL(repo.URL)+"-main-branch-rules-snappy.intoto.json")
+	// Verify snappy attestation was saved with spec label in filename.
+	// SanitizeSpecName now includes the parent directory ("github-branch-rules").
+	specLabel := SanitizeSpecName(specPath)
+	attestationFile := filepath.Join(tmpDir, targets.SanitizeRepoURL(repo.URL)+"-main-"+specLabel+"-snappy.intoto.json")
 	saved, err := os.ReadFile(attestationFile)
 	require.NoError(t, err)
 	require.Equal(t, attestation, saved)
 
 	// Verify ampel verify result was saved with spec label in filename
-	ampelResultFile := filepath.Join(tmpDir, targets.SanitizeRepoURL(repo.URL)+"-main-branch-rules-ampel.intoto.json")
+	ampelResultFile := filepath.Join(tmpDir, targets.SanitizeRepoURL(repo.URL)+"-main-"+specLabel+"-ampel.intoto.json")
 	savedAmpel, err := os.ReadFile(ampelResultFile)
 	require.NoError(t, err)
 	require.Equal(t, ampelOutput, savedAmpel)
@@ -371,7 +395,8 @@ func TestScanRepository_AmpelExitError_SavesResult(t *testing.T) {
 	require.Equal(t, ampelOutput, result.Output)
 
 	// Verify ampel intoto file was saved despite non-zero exit
-	ampelResultFile := filepath.Join(tmpDir, targets.SanitizeRepoURL(repo.URL)+"-main-branch-rules-ampel.intoto.json")
+	specLabel := SanitizeSpecName(specPath)
+	ampelResultFile := filepath.Join(tmpDir, targets.SanitizeRepoURL(repo.URL)+"-main-"+specLabel+"-ampel.intoto.json")
 	saved, err := os.ReadFile(ampelResultFile)
 	require.NoError(t, err)
 	require.Equal(t, ampelOutput, saved)

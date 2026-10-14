@@ -5,8 +5,11 @@ package evidence
 import (
 	"crypto/sha256"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -52,6 +55,18 @@ func TestFileDigest_DirectoryPath(t *testing.T) {
 	assert.Contains(t, err.Error(), "is a directory")
 }
 
+func TestFileDigest_UnreadableFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "unreadable.txt")
+	require.NoError(t, os.WriteFile(path, []byte("secret"), 0o600))
+	require.NoError(t, os.Chmod(path, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+
+	_, err := FileDigest(path)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "evidence digest")
+}
+
 func TestHostRemark_BothAvailable(t *testing.T) {
 	dir := t.TempDir()
 	idFile := filepath.Join(dir, "machine-id")
@@ -76,12 +91,12 @@ func TestHostRemark_NoMachineID(t *testing.T) {
 func TestHostRemark_EnvOverride(t *testing.T) {
 	dir := t.TempDir()
 	idFile := filepath.Join(dir, "custom-machine-id")
-	require.NoError(t, os.WriteFile(idFile, []byte("custom789\n"), 0o600))
+	require.NoError(t, os.WriteFile(idFile, []byte("caf3babe00112233\n"), 0o600))
 
 	t.Setenv(EnvMachineIDFile, idFile)
 
 	remark := HostRemark()
-	assert.Contains(t, remark, "(machine-id: custom789)")
+	assert.Contains(t, remark, "(machine-id: caf3babe00112233)")
 }
 
 func TestHostRemark_MachineIDTrimmed(t *testing.T) {
@@ -96,4 +111,166 @@ func TestHostRemark_MachineIDTrimmed(t *testing.T) {
 	remark := HostRemark()
 	assert.Contains(t, remark, "(machine-id: abc123)")
 	assert.NotContains(t, remark, " abc123 ")
+}
+
+func TestHostRemark_OversizedMachineIDIgnored(t *testing.T) {
+	dir := t.TempDir()
+	idFile := filepath.Join(dir, "machine-id")
+	// Write a file larger than maxMachineIDSize (1KB)
+	largeContent := make([]byte, maxMachineIDSize+1)
+	for i := range largeContent {
+		largeContent[i] = 'a'
+	}
+	require.NoError(t, os.WriteFile(idFile, largeContent, 0o600))
+
+	t.Setenv(EnvMachineIDFile, idFile)
+
+	remark := HostRemark()
+	assert.NotContains(t, remark, "machine-id",
+		"oversized machine-id files should be silently ignored")
+}
+
+func TestHostRemark_NonHexMachineIDIgnored(t *testing.T) {
+	dir := t.TempDir()
+	idFile := filepath.Join(dir, "machine-id")
+	require.NoError(t, os.WriteFile(
+		idFile, []byte("not-a-hex-string!\n"), 0o600,
+	))
+
+	t.Setenv(EnvMachineIDFile, idFile)
+
+	remark := HostRemark()
+	assert.NotContains(t, remark, "machine-id",
+		"non-hex machine-id content should be silently ignored")
+}
+
+func TestSanitizeForID_Collision(t *testing.T) {
+	// Inputs that were previously conflated by lossy sanitization
+	// must produce distinct IDs.
+	pairs := [][2]string{
+		{"a/b", "a-b"},
+		{"a.b", "a-b"},
+		{"a:b", "a-b"},
+		{"a b", "a-b"},
+		{"org/repo", "org-repo"},
+		{"./path", "_2fpath"},
+	}
+	for _, pair := range pairs {
+		a := SanitizeForID(pair[0])
+		b := SanitizeForID(pair[1])
+		assert.NotEqual(t, a, b,
+			"SanitizeForID(%q) == SanitizeForID(%q) == %q",
+			pair[0], pair[1], a)
+	}
+}
+
+func TestSanitizeForID_Passthrough(t *testing.T) {
+	// Alphanumeric and hyphens pass through unchanged.
+	input := "abc-DEF-123"
+	assert.Equal(t, input, SanitizeForID(input))
+}
+
+func TestSanitizeForID_SpecialChars(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"/", "_2f"},
+		{".", "_2e"},
+		{":", "_3a"},
+		{" ", "_20"},
+		{"_", "_5f"},
+		{"a/b.c:d", "a_2fb_2ec_3ad"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			assert.Equal(t, tc.expected, SanitizeForID(tc.input))
+		})
+	}
+}
+
+func TestFileURL_AbsolutePath(t *testing.T) {
+	got := FileURL("/opt/results/arf.xml")
+	parsed, err := url.Parse(got)
+	require.NoError(t, err)
+	assert.Equal(t, "file", parsed.Scheme)
+	assert.Empty(t, parsed.Host, "file URL must have empty host")
+	assert.Equal(t, "/opt/results/arf.xml", parsed.Path)
+}
+
+func TestFileURL_RelativePath(t *testing.T) {
+	got := FileURL(".complytime/results/arf.xml")
+	parsed, err := url.Parse(got)
+	require.NoError(t, err)
+	assert.Equal(t, "file", parsed.Scheme)
+	assert.Empty(t, parsed.Host,
+		"relative paths must not produce a host component")
+
+	if runtime.GOOS != "windows" {
+		assert.True(t, strings.HasPrefix(parsed.Path, "/"),
+			"resolved path must be absolute: %s", parsed.Path)
+	}
+	assert.True(t, strings.HasSuffix(parsed.Path,
+		".complytime/results/arf.xml"),
+		"resolved path must end with the original relative path")
+}
+
+func TestFileURL_SpacesAndSpecialChars(t *testing.T) {
+	got := FileURL("/path/with spaces/file#1.xml")
+	parsed, err := url.Parse(got)
+	require.NoError(t, err)
+	assert.Empty(t, parsed.Host)
+	assert.Equal(t, "/path/with spaces/file#1.xml", parsed.Path,
+		"url.Parse should decode percent-encoded path back correctly")
+}
+
+func TestJoinForID_CollisionResistance(t *testing.T) {
+	// ("a/b", "c") and ("a", "b/c") must produce distinct IDs
+	id1 := JoinForID("a/b", "c")
+	id2 := JoinForID("a", "b/c")
+	assert.NotEqual(t, id1, id2,
+		"JoinForID must distinguish components with slashes")
+
+	// Same components produce same result
+	assert.Equal(t, JoinForID("x", "y"), JoinForID("x", "y"))
+
+	// Single component equals SanitizeForID
+	assert.Equal(t, SanitizeForID("hello"), JoinForID("hello"))
+}
+
+func TestStripURLScheme(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"https://github.com/org/repo", "github.com/org/repo"},
+		{"http://gitlab.com/group/proj", "gitlab.com/group/proj"},
+		{"github.com/org/repo", "github.com/org/repo"},
+		{"/local/path", "/local/path"},
+		{"", ""},
+	}
+	for _, tc := range tests {
+		assert.Equal(t, tc.want, StripURLScheme(tc.input),
+			"input: %s", tc.input)
+	}
+}
+
+func TestIsHexString(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"abc123def456", true},
+		{"ABCDEF012345", true},
+		{"0123456789abcdef", true},
+		{"", false},
+		{"not-hex", false},
+		{"abc 123", false},
+		{"abc\n123", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			assert.Equal(t, tc.want, isHexString(tc.input))
+		})
+	}
 }

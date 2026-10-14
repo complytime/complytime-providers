@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,17 +109,105 @@ func HostRemark() string {
 	}
 }
 
+// maxMachineIDSize is the upper bound for the machine-id file.
+// A standard /etc/machine-id is 33 bytes (32 hex + newline). The
+// generous limit prevents accidental reads of arbitrarily large files
+// when COMPLYTIME_MACHINE_ID_FILE is misconfigured.
+const maxMachineIDSize = 1024
+
 // readMachineID reads the machine-id file and returns its content
 // trimmed of whitespace. Returns an empty string if the file cannot
-// be read.
+// be read, exceeds maxMachineIDSize, or does not contain a valid
+// hex string.
 func readMachineID() string {
 	path := os.Getenv(EnvMachineIDFile)
 	if path == "" {
 		path = defaultMachineIDPath
 	}
-	data, err := os.ReadFile(filepath.Clean(path))
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(data))
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxMachineIDSize+1))
+	if err != nil || len(data) > maxMachineIDSize {
+		return ""
+	}
+	trimmed := strings.TrimSpace(string(data))
+	if !isHexString(trimmed) {
+		return ""
+	}
+	return trimmed
+}
+
+// SanitizeForID encodes a string into an ID-safe form where distinct
+// inputs always produce distinct outputs. Alphanumeric characters and
+// hyphens pass through unchanged. All other characters are encoded as
+// _XX where XX is the lowercase hex code point. This prevents
+// collisions such as "a/b" and "a-b" producing the same ID.
+func SanitizeForID(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9',
+			r == '-':
+			b.WriteRune(r)
+		default:
+			fmt.Fprintf(&b, "_%02x", r)
+		}
+	}
+	return b.String()
+}
+
+// JoinForID encodes multiple identity components into a single
+// collision-resistant ID string. Components are joined with a NULL
+// byte separator before encoding via SanitizeForID. NULL bytes
+// cannot appear in URLs, file paths, or branch names, so the
+// separator is unambiguous. This guarantees that ("a/b", "c") and
+// ("a", "b/c") always produce distinct IDs.
+func JoinForID(components ...string) string {
+	return SanitizeForID(strings.Join(components, "\x00"))
+}
+
+// StripURLScheme removes the URL scheme prefix (e.g., "https://")
+// from a URL string. Used to produce a scheme-independent identity
+// for evidence IDs while preserving the host, path, and all other
+// URL components.
+func StripURLScheme(u string) string {
+	for _, prefix := range []string{"https://", "http://"} {
+		if strings.HasPrefix(u, prefix) {
+			return u[len(prefix):]
+		}
+	}
+	return u
+}
+
+// FileURL resolves a file path to a proper file:// URL. Relative
+// paths are resolved to absolute paths. The result conforms to
+// RFC 8089: file:///absolute/path. Special characters in the path
+// are percent-encoded.
+func FileURL(path string) string {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		absPath = path
+	}
+	u := &url.URL{Scheme: "file", Path: filepath.ToSlash(absPath)}
+	return u.String()
+}
+
+// isHexString reports whether s is a non-empty string of hexadecimal
+// characters (0-9, a-f, A-F).
+func isHexString(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+			return false
+		}
+	}
+	return true
 }

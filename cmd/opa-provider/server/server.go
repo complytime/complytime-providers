@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
@@ -396,10 +397,11 @@ func (s *ProviderServer) processRemoteBranches(
 			logger.Warn("data load failed",
 				"target", target.TargetID, "branch", branch, "error", err)
 			errResult := &results.PerTargetResult{
-				Target: targets.RepoDisplayName(repoURL),
-				Branch: branch,
-				Status: "error",
-				Error:  err.Error(),
+				Target:    targets.RepoDisplayName(repoURL),
+				TargetURL: repoURL,
+				Branch:    branch,
+				Status:    "error",
+				Error:     err.Error(),
 			}
 			if writeErr := results.WritePerTargetResult(
 				errResult, cfg.ResultsDirPath(),
@@ -418,10 +420,11 @@ func (s *ProviderServer) processRemoteBranches(
 			logger.Warn("eval failed",
 				"target", target.TargetID, "branch", branch, "error", evalErr)
 			errResult := &results.PerTargetResult{
-				Target: targets.RepoDisplayName(repoURL),
-				Branch: branch,
-				Status: "error",
-				Error:  evalErr.Error(),
+				Target:    targets.RepoDisplayName(repoURL),
+				TargetURL: repoURL,
+				Branch:    branch,
+				Status:    "error",
+				Error:     evalErr.Error(),
 			}
 			if writeErr := results.WritePerTargetResult(
 				errResult, cfg.ResultsDirPath(),
@@ -430,6 +433,9 @@ func (s *ProviderServer) processRemoteBranches(
 			}
 			targetResults = append(targetResults, errResult)
 			continue
+		}
+		if result != nil {
+			result.TargetURL = repoURL
 		}
 		if evalErr != nil {
 			writeErrs = append(writeErrs, evalErr)
@@ -506,6 +512,27 @@ func (s *ProviderServer) evalAndParse(
 		return nil, fmt.Errorf("parsing conftest output: %w", err)
 	}
 	result.InputPath = inputPath
+
+	// Compute SHA256 digest for regular-file inputs. Directories
+	// are left without a digest per the evidence-source spec.
+	// Stat errors are propagated: if the input was accessible
+	// enough for conftest to evaluate, a subsequent stat failure
+	// is unexpected and must not be silently ignored.
+	info, statErr := os.Stat(inputPath)
+	if statErr != nil {
+		return nil, fmt.Errorf(
+			"stat input for digest %s: %w", inputPath, statErr,
+		)
+	}
+	if !info.IsDir() {
+		digest, dErr := evidence.FileDigest(inputPath)
+		if dErr != nil {
+			return nil, fmt.Errorf(
+				"computing digest for input %s: %w", inputPath, dErr,
+			)
+		}
+		result.InputDigest = digest
+	}
 
 	if writeErr := results.WritePerTargetResult(
 		result, cfg.ResultsDirPath(),

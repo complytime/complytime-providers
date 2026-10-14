@@ -18,6 +18,7 @@ import (
 
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/intoto"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/targets"
+	"github.com/complytime/complytime-providers/internal/evidence"
 )
 
 // RepoTarget holds the repository information extracted from target variables.
@@ -148,18 +149,19 @@ func ResolveSpecPath(specRef, specDir string) string {
 	return specRef
 }
 
-// sanitizeSpecName extracts a filesystem-safe label from a spec reference.
-// For example, "github/branch-rules.yaml" becomes "branch-rules".
-// The "builtin:" prefix is stripped before extracting the base name,
-// so "builtin:github/branch-rules.yaml" also becomes "branch-rules".
-func sanitizeSpecName(specRef string) string {
+// SanitizeSpecName extracts a collision-resistant label from a spec
+// reference by encoding the full path (minus extension and "builtin:"
+// prefix) via evidence.SanitizeForID. This preserves the complete
+// path identity so that specs at any directory depth produce distinct
+// labels (e.g., "dept-a/team/check.yaml" and "dept-b/team/check.yaml"
+// produce distinct IDs).
+func SanitizeSpecName(specRef string) string {
 	name := strings.TrimPrefix(specRef, "builtin:")
-	base := filepath.Base(name)
-	ext := filepath.Ext(base)
+	ext := filepath.Ext(name)
 	if ext != "" {
-		base = base[:len(base)-len(ext)]
+		name = name[:len(name)-len(ext)]
 	}
-	return base
+	return evidence.SanitizeForID(name)
 }
 
 // constructSnappyCommand builds the snappy snap CLI arguments for collecting
@@ -267,7 +269,7 @@ func ScanRepository(repo RepoTarget, branch, specPath string, cfg ScanConfig, ru
 		host = parsedURL.Hostname()
 	}
 
-	specLabel := sanitizeSpecName(specPath)
+	specLabel := SanitizeSpecName(specPath)
 	filePrefix := targets.SanitizeRepoURL(repo.URL) + "-" + branch + "-" + specLabel
 
 	// Run snappy to collect branch protection data as an in-toto attestation

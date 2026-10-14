@@ -381,7 +381,10 @@ func TestBuildMappingReferences(t *testing.T) {
 	assert.Equal(t, evidence.RefOpenSCAPARF, ref.ID)
 	assert.Equal(t, "OpenSCAP ARF scan result", ref.Title)
 	assert.NotEmpty(t, ref.Description)
-	assert.Equal(t, "file://"+config.ARFPath, ref.URL)
+	assert.True(t, strings.HasPrefix(ref.URL, "file:///"),
+		"URL must be a proper file:// URL with absolute path: %s", ref.URL)
+	assert.True(t, strings.HasSuffix(ref.URL, config.ARFPath),
+		"URL must end with the ARF path: %s", ref.URL)
 }
 
 func TestRuleResultMessage(t *testing.T) {

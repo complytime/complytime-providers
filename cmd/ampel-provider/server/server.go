@@ -247,9 +247,10 @@ func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*pr
 					continue
 				}
 
-				// Thread attestation paths and host remark from scan result
+				// Thread attestation paths, spec label, and host remark from scan result
 				parsed.AmpelAttestationPath = rawResult.AmpelAttestationPath
 				parsed.SnappyAttestationPath = rawResult.SnappyAttestationPath
+				parsed.SpecLabel = scan.SanitizeSpecName(specRef)
 				parsed.Remarks = hostRemark
 
 				// Pre-compute digests for evidence (keeps ToScanResponse pure)
