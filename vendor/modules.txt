@@ -1,7 +1,7 @@
-# github.com/antchfx/xmlquery v1.5.1
+# github.com/antchfx/xmlquery v1.5.2
 ## explicit; go 1.14
 github.com/antchfx/xmlquery
-# github.com/antchfx/xpath v1.3.6
+# github.com/antchfx/xpath v1.3.9
 ## explicit; go 1.14
 github.com/antchfx/xpath
 # github.com/complytime/complyctl v1.1.0

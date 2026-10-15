@@ -3,14 +3,14 @@ module github.com/complytime/complytime-providers
 go 1.26.8
 
 require (
-	github.com/antchfx/xmlquery v1.5.1
+	github.com/antchfx/xmlquery v1.5.2
 	github.com/complytime/complyctl v1.1.0
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/stretchr/testify v1.12.1
 )
 
 require (
-	github.com/antchfx/xpath v1.3.6 // indirect
+	github.com/antchfx/xpath v1.3.9 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
