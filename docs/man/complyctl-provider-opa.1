@@ -148,10 +148,12 @@ Each assessment log carries an Evidence entry with:
 \f[I].complytime/opa/repos/<repo>/<branch>\f[R] or a local filesystem
 path)
 .IP \(bu 2
-\f[B]Source.ReferenceID\f[R]: \f[B]conftest\-input\-<target>\f[R]
+\f[B]Source.ReferenceID\f[R]:
+\f[B]conftest\-input\-<target>[\-<branch>]\f[R]
 .PP
-No digest is recorded because the input is a directory, not a single
-file.
+For regular\-file inputs, \f[B]Source.Digest\f[R] contains the SHA\-256
+hash (\f[B]sha256:<hex>\f[R]) of the file content at scan time.
+For directory inputs (cloned repositories), no digest is recorded.
 .RE
 .SH EXIT CODES
 This provider is a gRPC subprocess managed by \f[B]complyctl\f[R].

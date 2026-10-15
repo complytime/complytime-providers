@@ -127,7 +127,8 @@ time.
 \f[B]Source.Digest\f[R]: \f[B]sha256:<hex>\f[R] digest of the
 attestation file
 .IP \(bu 2
-\f[B]Source.ReferenceID\f[R]: \f[B]snappy\-<spec\-label>\f[R]
+\f[B]Source.ReferenceID\f[R]:
+\f[B]snappy\-<repo>\-<branch>\-<spec\-label>\f[R]
 .RE
 .TP
 \f[B]Ampel attestation\f[R] (type: \f[B]IntotoAttestation\f[R])
@@ -142,7 +143,8 @@ A non\-zero exit code indicates policy failures, not tool errors.
 \f[B]Source.Digest\f[R]: \f[B]sha256:<hex>\f[R] digest of the
 attestation file
 .IP \(bu 2
-\f[B]Source.ReferenceID\f[R]: \f[B]ampel\-<spec\-label>\f[R]
+\f[B]Source.ReferenceID\f[R]:
+\f[B]ampel\-<repo>\-<branch>\-<spec\-label>\f[R]
 .RE
 .SH EXIT CODES
 This provider is a gRPC subprocess managed by \f[B]complyctl\f[R].
