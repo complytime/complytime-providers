@@ -144,16 +144,13 @@ func TestHostRemark_NonHexMachineIDIgnored(t *testing.T) {
 		"non-hex machine-id content should be silently ignored")
 }
 
-func TestSanitizeForID_Collision(t *testing.T) {
-	// Inputs that were previously conflated by lossy sanitization
-	// must produce distinct IDs.
+func TestSanitizeForID_SlashDistinction(t *testing.T) {
+	// Forward slashes encode as "--", keeping them distinct from
+	// single hyphens. This prevents collisions between path-like
+	// and hyphenated inputs.
 	pairs := [][2]string{
 		{"a/b", "a-b"},
-		{"a.b", "a-b"},
-		{"a:b", "a-b"},
-		{"a b", "a-b"},
 		{"org/repo", "org-repo"},
-		{"./path", "_2fpath"},
 	}
 	for _, pair := range pairs {
 		a := SanitizeForID(pair[0])
@@ -161,6 +158,25 @@ func TestSanitizeForID_Collision(t *testing.T) {
 		assert.NotEqual(t, a, b,
 			"SanitizeForID(%q) == SanitizeForID(%q) == %q",
 			pair[0], pair[1], a)
+	}
+}
+
+func TestSanitizeForID_NonSlashSpecialCharsCollapse(t *testing.T) {
+	// Non-slash special characters (dots, colons, spaces, etc.)
+	// all map to "-", so they intentionally collide with each
+	// other and with literal hyphens. This is a deliberate
+	// readability trade-off: these collisions are not realistic
+	// for evidence identity inputs (repo URLs, branch names,
+	// spec paths).
+	groups := [][]string{
+		{"a.b", "a:b", "a b", "a-b"},
+	}
+	for _, group := range groups {
+		first := SanitizeForID(group[0])
+		for _, s := range group[1:] {
+			assert.Equal(t, first, SanitizeForID(s),
+				"non-slash special chars should all map to hyphen")
+		}
 	}
 }
 
@@ -175,17 +191,32 @@ func TestSanitizeForID_SpecialChars(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"/", "_2f"},
-		{".", "_2e"},
-		{":", "_3a"},
-		{" ", "_20"},
-		{"_", "_5f"},
-		{"a/b.c:d", "a_2fb_2ec_3ad"},
+		{"/", "--"},
+		{".", "-"},
+		{":", "-"},
+		{" ", "-"},
+		{"_", "-"},
+		{"a/b.c:d", "a--b-c-d"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.input, func(t *testing.T) {
 			assert.Equal(t, tc.expected, SanitizeForID(tc.input))
 		})
+	}
+}
+
+func TestSanitizeForID_NoUnderscoresInOutput(t *testing.T) {
+	// Underscores must never appear in SanitizeForID output so
+	// they remain unambiguous as JoinForID component separators.
+	inputs := []string{
+		"a_b", "hello_world", "my_repo",
+		"github.com/org/my_repo",
+	}
+	for _, input := range inputs {
+		result := SanitizeForID(input)
+		assert.NotContains(t, result, "_",
+			"SanitizeForID(%q) = %q must not contain underscores",
+			input, result)
 	}
 }
 
@@ -225,9 +256,12 @@ func TestFileURL_SpacesAndSpecialChars(t *testing.T) {
 }
 
 func TestJoinForID_CollisionResistance(t *testing.T) {
-	// ("a/b", "c") and ("a", "b/c") must produce distinct IDs
+	// ("a/b", "c") and ("a", "b/c") must produce distinct IDs.
+	// With the underscore separator: "a--b_c" vs "a_b--c".
 	id1 := JoinForID("a/b", "c")
 	id2 := JoinForID("a", "b/c")
+	assert.Equal(t, "a--b_c", id1)
+	assert.Equal(t, "a_b--c", id2)
 	assert.NotEqual(t, id1, id2,
 		"JoinForID must distinguish components with slashes")
 
@@ -236,6 +270,15 @@ func TestJoinForID_CollisionResistance(t *testing.T) {
 
 	// Single component equals SanitizeForID
 	assert.Equal(t, SanitizeForID("hello"), JoinForID("hello"))
+}
+
+func TestJoinForID_UnderscoreSeparator(t *testing.T) {
+	// Components are joined with underscore separators.
+	assert.Equal(t, "a_b_c", JoinForID("a", "b", "c"))
+	assert.Equal(t,
+		"github-com--org--repo_main_branch-rules",
+		JoinForID("github.com/org/repo", "main", "branch-rules"),
+	)
 }
 
 func TestStripURLScheme(t *testing.T) {

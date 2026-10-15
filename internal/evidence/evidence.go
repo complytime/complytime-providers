@@ -24,12 +24,14 @@ const (
 
 // MappingReference ID constants and prefixes used in
 // provider.Evidence.Source.ReferenceID and
-// provider.MappingReference.ID.
+// provider.MappingReference.ID. Prefixes use an underscore
+// trailer to separate the type from the JoinForID suffix,
+// keeping underscores as structural field separators.
 const (
 	RefOpenSCAPARF    = "openscap-arf"
-	RefPrefixAmpel    = "ampel-"
-	RefPrefixSnappy   = "snappy-"
-	RefPrefixConftest = "conftest-input-"
+	RefPrefixAmpel    = "ampel_"
+	RefPrefixSnappy   = "snappy_"
+	RefPrefixConftest = "conftest-input_"
 )
 
 // EnvMachineIDFile is the environment variable that overrides the
@@ -43,12 +45,13 @@ const EnvMachineIDFile = "COMPLYTIME_MACHINE_ID_FILE"
 const defaultMachineIDPath = "/etc/machine-id"
 
 // Evidence ID constants and prefixes used in
-// provider.Evidence.ID.
+// provider.Evidence.ID. Prefixes use an underscore trailer
+// to match the MappingReference prefix convention.
 const (
 	IDOpenSCAPARF    = "arf"
-	IDPrefixAmpel    = "ampel-"
-	IDPrefixSnappy   = "snappy-"
-	IDPrefixConftest = "conftest-"
+	IDPrefixAmpel    = "ampel_"
+	IDPrefixSnappy   = "snappy_"
+	IDPrefixConftest = "conftest_"
 )
 
 // FileDigest computes the SHA256 hash of the file at path and
@@ -140,11 +143,14 @@ func readMachineID() string {
 	return trimmed
 }
 
-// SanitizeForID encodes a string into an ID-safe form where distinct
-// inputs always produce distinct outputs. Alphanumeric characters and
-// hyphens pass through unchanged. All other characters are encoded as
-// _XX where XX is the lowercase hex code point. This prevents
-// collisions such as "a/b" and "a-b" producing the same ID.
+// SanitizeForID encodes a string into a human-readable, ID-safe
+// form. Alphanumeric characters and hyphens pass through unchanged.
+// Forward slashes are encoded as "--" to preserve path structure
+// visibility while remaining distinct from single hyphens (e.g.
+// "a/b" → "a--b" vs "a-b" → "a-b"). All other characters (dots,
+// underscores, colons, spaces, etc.) are replaced with a single
+// hyphen. Underscores never appear in the output, reserving them
+// as unambiguous component separators in JoinForID.
 func SanitizeForID(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -155,21 +161,28 @@ func SanitizeForID(s string) string {
 			r >= '0' && r <= '9',
 			r == '-':
 			b.WriteRune(r)
+		case r == '/':
+			b.WriteString("--")
 		default:
-			fmt.Fprintf(&b, "_%02x", r)
+			b.WriteByte('-')
 		}
 	}
 	return b.String()
 }
 
 // JoinForID encodes multiple identity components into a single
-// collision-resistant ID string. Components are joined with a NULL
-// byte separator before encoding via SanitizeForID. NULL bytes
-// cannot appear in URLs, file paths, or branch names, so the
-// separator is unambiguous. This guarantees that ("a/b", "c") and
-// ("a", "b/c") always produce distinct IDs.
+// human-readable ID string. Each component is sanitized
+// individually via SanitizeForID, then joined with an underscore
+// separator. Because SanitizeForID never produces underscores,
+// the separator is unambiguous. This guarantees that ("a/b", "c")
+// and ("a", "b/c") always produce distinct IDs ("a--b_c" vs
+// "a_b--c").
 func JoinForID(components ...string) string {
-	return SanitizeForID(strings.Join(components, "\x00"))
+	sanitized := make([]string, len(components))
+	for i, c := range components {
+		sanitized[i] = SanitizeForID(c)
+	}
+	return strings.Join(sanitized, "_")
 }
 
 // StripURLScheme removes the URL scheme prefix (e.g., "https://")

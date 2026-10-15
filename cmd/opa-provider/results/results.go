@@ -358,11 +358,11 @@ func buildEvidence(tr *PerTargetResult) []provider.Evidence {
 	}}
 }
 
-// evidenceSuffix produces a collision-resistant ID suffix for a
+// evidenceSuffix produces a human-readable ID suffix for a
 // target result. For remote targets (TargetURL set), it strips
 // the URL scheme and uses the full host+path identity. For local
 // targets, it uses the target path directly. Components are
-// joined via evidence.JoinForID with NULL byte separators to
+// joined via evidence.JoinForID with underscore separators to
 // prevent ambiguity between repo identity and branch name.
 func evidenceSuffix(tr *PerTargetResult) string {
 	var identity string

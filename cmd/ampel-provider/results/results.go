@@ -392,20 +392,17 @@ func scannedRepos(repoResults []*PerRepoResult) []*PerRepoResult {
 	return repos
 }
 
-// repoEvidencePrefix builds a collision-resistant ID prefix from
-// repo URL, branch, and optional spec label using evidence.JoinForID.
+// repoEvidencePrefix builds a human-readable ID suffix from repo
+// URL, branch, and optional spec label using evidence.JoinForID.
 // The repo URL scheme is stripped since it carries no identity.
-// SpecLabel (already SanitizeForID-encoded by SanitizeSpecName) is
-// appended with the encoded NULL separator (_00) to match the
-// JoinForID encoding.
+// Components are joined with underscore separators, producing IDs
+// like "github-com--org--repo_main_branch-rules".
 func repoEvidencePrefix(repo, branch, specLabel string) string {
-	prefix := evidence.JoinForID(
-		evidence.StripURLScheme(repo), branch,
-	)
+	components := []string{evidence.StripURLScheme(repo), branch}
 	if specLabel != "" {
-		prefix += "_00" + specLabel
+		components = append(components, specLabel)
 	}
-	return prefix
+	return evidence.JoinForID(components...)
 }
 
 // buildRepoEvidence constructs two provider.Evidence entries for a

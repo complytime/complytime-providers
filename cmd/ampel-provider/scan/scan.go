@@ -149,12 +149,12 @@ func ResolveSpecPath(specRef, specDir string) string {
 	return specRef
 }
 
-// SanitizeSpecName extracts a collision-resistant label from a spec
+// SanitizeSpecName extracts a human-readable label from a spec
 // reference by encoding the full path (minus extension and "builtin:"
-// prefix) via evidence.SanitizeForID. This preserves the complete
-// path identity so that specs at any directory depth produce distinct
-// labels (e.g., "dept-a/team/check.yaml" and "dept-b/team/check.yaml"
-// produce distinct IDs).
+// prefix) via evidence.SanitizeForID. Forward slashes encode as "--"
+// to preserve path structure, so specs at any directory depth produce
+// distinct labels (e.g., "dept-a/team/check.yaml" → "dept-a--team--check"
+// and "dept-b/team/check.yaml" → "dept-b--team--check").
 func SanitizeSpecName(specRef string) string {
 	name := strings.TrimPrefix(specRef, "builtin:")
 	ext := filepath.Ext(name)

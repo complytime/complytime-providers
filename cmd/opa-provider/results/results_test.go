@@ -830,7 +830,8 @@ func TestToScanResponse_CrossHostEvidenceIDs(t *testing.T) {
 
 func TestToScanResponse_LocalPathCollision(t *testing.T) {
 	// Local paths that differ only by "/" vs "-" must produce
-	// distinct evidence IDs via collision-resistant encoding.
+	// distinct evidence IDs: "/" encodes as "--" while "-" passes
+	// through, keeping "a/b" → "a--b" distinct from "a-b".
 	now := time.Now()
 	results := []*PerTargetResult{
 		{

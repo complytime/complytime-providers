@@ -46,33 +46,41 @@ None currently set the `Evidence` field or return `MappingReferences`.
 
 ### D1: Evidence identity scheme
 
-Each `Evidence.ID` uses a deterministic, human-readable string:
+Each `Evidence.ID` uses a deterministic, human-readable string.
+Components (repo identity, branch, spec label) are joined with
+underscore separators. Within each component, forward slashes encode
+as `--` and dots/other special characters encode as `-`. This keeps
+IDs readable while preserving path structure visibility:
 
-| Provider | Pattern                            | Example                                         |
-|----------|------------------------------------|--------------------------------------------------|
-| OpenSCAP | `"arf"`                            | `"arf"`                                          |
-| Ampel    | `"ampel-<prefix>"`                 | `"ampel-github-com-org-repo-main-branch-rules"`  |
-| Ampel    | `"snappy-<prefix>"`                | `"snappy-github-com-org-repo-main-branch-rules"` |
-| OPA      | `"conftest-<target>[-<branch>]"`   | `"conftest-org/repo-main"`                       |
+| Provider | Pattern                              | Example                                                      |
+|----------|--------------------------------------|--------------------------------------------------------------|
+| OpenSCAP | `"arf"`                              | `"arf"`                                                      |
+| Ampel    | `"ampel_<repo>_<branch>[_<spec>]"`   | `"ampel_github-com--org--repo_main_branch-rules"`            |
+| Ampel    | `"snappy_<repo>_<branch>[_<spec>]"`  | `"snappy_github-com--org--repo_main_branch-rules"`           |
+| OPA      | `"conftest_<target>[_<branch>]"`     | `"conftest_github-com--org--repo_main"`                      |
 
 **Rationale**: IDs must be stable across runs for the same input, and
 human-readable for debugging. OpenSCAP has one ARF per scan so a static
 ID is sufficient. Ampel and OPA require disambiguation by target.
+Underscores separate structural fields (type, repo, branch, spec) while
+hyphens appear within fields and `--` marks original path separators.
 
 **Alternative considered**: UUIDs -- rejected because they are not
-reproducible and provide no human context.
+reproducible and provide no human context. Hex-encoded `_XX` format --
+rejected because it sacrificed readability for theoretical collision
+resistance that was unnecessary in practice.
 
 ### D2: MappingReference identity scheme
 
 Each `MappingReference.ID` mirrors the `Evidence.ID` pattern prefixed
 with the provider context where needed:
 
-| Provider | MappingReference.ID                | MappingReference.Title                            |
-|----------|------------------------------------|---------------------------------------------------|
-| OpenSCAP | `"openscap-arf"`                   | `"OpenSCAP ARF scan result"`                      |
-| Ampel    | `"ampel-<prefix>"`                 | `"Ampel policy attestation for <repo>@<branch>"`  |
-| Ampel    | `"snappy-<prefix>"`                | `"Snappy observation for <repo>@<branch>"`        |
-| OPA      | `"conftest-input-<target>[-<branch>]"` | `"Conftest input for <target>[@<branch>]"`    |
+| Provider | MappingReference.ID                    | MappingReference.Title                            |
+|----------|----------------------------------------|---------------------------------------------------|
+| OpenSCAP | `"openscap-arf"`                       | `"OpenSCAP ARF scan result"`                      |
+| Ampel    | `"ampel_<repo>_<branch>[_<spec>]"`     | `"Ampel policy attestation for <repo>@<branch>"`  |
+| Ampel    | `"snappy_<repo>_<branch>[_<spec>]"`    | `"Snappy observation for <repo>@<branch>"`        |
+| OPA      | `"conftest-input_<target>[_<branch>]"` | `"Conftest input for <target>[@<branch>]"`        |
 
 `Evidence.Source.ReferenceID` matches the corresponding
 `MappingReference.ID` exactly.

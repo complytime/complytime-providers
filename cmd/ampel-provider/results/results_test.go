@@ -890,21 +890,21 @@ func TestToScanResponse_EvidencePerAssessment(t *testing.T) {
 	require.Len(t, ev, 2, "expected two evidence entries per assessment")
 
 	// Ampel evidence
-	require.True(t, strings.HasPrefix(ev[0].ID, "ampel-"))
+	require.True(t, strings.HasPrefix(ev[0].ID, "ampel_"))
 	require.Equal(t, "IntotoAttestation", ev[0].Type)
 	require.NotEmpty(t, ev[0].CollectedAt)
 	require.NotNil(t, ev[0].Source)
-	require.True(t, strings.HasPrefix(ev[0].Source.ReferenceID, "ampel-"))
+	require.True(t, strings.HasPrefix(ev[0].Source.ReferenceID, "ampel_"))
 	require.Equal(t, "/out/myorg-repo1-main-rules-ampel.intoto.json", ev[0].Source.Coordinate)
 	require.Equal(t, "sha256:aaa111", ev[0].Source.Digest)
 	require.Contains(t, ev[0].Source.Remarks, "Collected on host")
 
 	// Snappy evidence
-	require.True(t, strings.HasPrefix(ev[1].ID, "snappy-"))
+	require.True(t, strings.HasPrefix(ev[1].ID, "snappy_"))
 	require.Equal(t, "IntotoAttestation", ev[1].Type)
 	require.NotEmpty(t, ev[1].CollectedAt)
 	require.NotNil(t, ev[1].Source)
-	require.True(t, strings.HasPrefix(ev[1].Source.ReferenceID, "snappy-"))
+	require.True(t, strings.HasPrefix(ev[1].Source.ReferenceID, "snappy_"))
 	require.Equal(t, "/out/myorg-repo1-main-rules-snappy.intoto.json", ev[1].Source.Coordinate)
 	require.Equal(t, "sha256:bbb222", ev[1].Source.Digest)
 	require.Contains(t, ev[1].Source.Remarks, "Collected on host")
@@ -1101,17 +1101,17 @@ func TestToScanResponse_SpecLabelInEvidenceID(t *testing.T) {
 		require.False(t, ids[e.ID], "duplicate evidence ID: %s", e.ID)
 		ids[e.ID] = true
 	}
-	// Verify expected IDs using the collision-resistant encoding
+	// Verify expected IDs using the readable encoding
 	prefix1 := repoEvidencePrefix(
 		"https://github.com/myorg/repo1", "main", "branch-rules",
 	)
 	prefix2 := repoEvidencePrefix(
 		"https://github.com/myorg/repo1", "main", "custom-check",
 	)
-	require.True(t, ids["ampel-"+prefix1])
-	require.True(t, ids["ampel-"+prefix2])
-	require.True(t, ids["snappy-"+prefix1])
-	require.True(t, ids["snappy-"+prefix2])
+	require.True(t, ids["ampel_"+prefix1])
+	require.True(t, ids["ampel_"+prefix2])
+	require.True(t, ids["snappy_"+prefix1])
+	require.True(t, ids["snappy_"+prefix2])
 
 	// Mapping references should also be unique per spec
 	require.Len(t, resp.MappingReferences, 4)
@@ -1165,27 +1165,28 @@ func TestToScanResponse_SameBasenameSpecs(t *testing.T) {
 		ids[e.ID] = true
 	}
 
-	// Verify distinct IDs for each spec variant using collision-resistant encoding
+	// Verify distinct IDs for each spec variant using readable encoding
 	prefix1 := repoEvidencePrefix(
 		"https://github.com/myorg/repo1", "main", "team-a-check",
 	)
 	prefix2 := repoEvidencePrefix(
 		"https://github.com/myorg/repo1", "main", "team-b-check",
 	)
-	require.True(t, ids["ampel-"+prefix1])
-	require.True(t, ids["ampel-"+prefix2])
+	require.True(t, ids["ampel_"+prefix1])
+	require.True(t, ids["ampel_"+prefix2])
 }
 
 func TestToScanResponse_DeepNestedSpecCollision(t *testing.T) {
 	// Specs sharing the same immediate parent and basename but
 	// differing in ancestry must produce distinct evidence IDs.
-	// This exercises the collision-resistant SanitizeSpecName encoding
-	// for paths like "dept-a/team/check.yaml" vs "dept-b/team/check.yaml".
+	// SanitizeSpecName encodes slashes as "--", so
+	// "dept-a/team/check.yaml" → "dept-a--team--check" and
+	// "dept-b/team/check.yaml" → "dept-b--team--check".
 	repoResults := []*PerRepoResult{
 		{
 			Repository:            "https://github.com/myorg/repo1",
 			Branch:                "main",
-			SpecLabel:             "dept-a_2fteam_2fcheck",
+			SpecLabel:             "dept-a--team--check",
 			ScannedAt:             time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC),
 			Status:                "pass",
 			AmpelAttestationPath:  "/out/repo1-main-a-ampel.intoto.json",
@@ -1199,7 +1200,7 @@ func TestToScanResponse_DeepNestedSpecCollision(t *testing.T) {
 		{
 			Repository:            "https://github.com/myorg/repo1",
 			Branch:                "main",
-			SpecLabel:             "dept-b_2fteam_2fcheck",
+			SpecLabel:             "dept-b--team--check",
 			ScannedAt:             time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC),
 			Status:                "pass",
 			AmpelAttestationPath:  "/out/repo1-main-b-ampel.intoto.json",
