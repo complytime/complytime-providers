@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -836,7 +837,7 @@ func TestMapResult(t *testing.T) {
 	require.Equal(t, provider.ResultSkipped, mapResult("skip", "pass"))
 }
 
-func TestToScanResponse_AllReposErroredEmitsErrorSteps(t *testing.T) {
+func TestToScanResponse_AllReposErroredSkipsSynthetic(t *testing.T) {
 	repoResults := []*PerRepoResult{
 		{
 			Repository: "https://github.com/myorg/repo1",
@@ -848,27 +849,406 @@ func TestToScanResponse_AllReposErroredEmitsErrorSteps(t *testing.T) {
 	allReqIDs := []string{"block-force-push"}
 
 	resp := ToScanResponse(repoResults, allReqIDs)
-	require.Len(t, resp.Assessments, 1)
-	assessment := resp.Assessments[0]
-	require.Equal(t, "block-force-push", assessment.RequirementID)
-	// The Gemara schema requires at least one step per assessment log, so
-	// the all-repos-errored case must not produce steps: [].
-	require.NotEmpty(t, assessment.Steps)
-	require.Equal(t, "myorg/repo1@main", assessment.Steps[0].Name)
-	require.Equal(t, provider.ResultError, assessment.Steps[0].Result)
-	require.Contains(t, assessment.Steps[0].Message, "Assessment skipped")
-	require.Contains(t, assessment.Steps[0].Message, "GitHub API authentication failed")
-	require.Contains(t, assessment.Message, "Assessment skipped")
+	// When all repos errored, synthetic assessments are skipped because
+	// they cannot carry evidence (spec requires at least one Evidence
+	// entry per AssessmentLog).
+	require.Empty(t, resp.Assessments,
+		"all-error repos must not produce synthetic assessments")
 	// The operational error is still reported.
 	require.Len(t, resp.Errors, 1)
+	require.Contains(t, resp.Errors[0], "GitHub API authentication failed")
 }
 
-func TestToScanResponse_NoReposEmitsPlaceholderStep(t *testing.T) {
+func TestToScanResponse_NoReposNoAssessments(t *testing.T) {
 	resp := ToScanResponse([]*PerRepoResult{}, []string{"block-force-push"})
+	// Empty repo list produces no assessments (no evidence available).
+	require.Empty(t, resp.Assessments,
+		"empty repo list must not produce synthetic assessments")
+}
+
+func TestToScanResponse_EvidencePerAssessment(t *testing.T) {
+	repoResults := []*PerRepoResult{
+		{
+			Repository:            "https://github.com/myorg/repo1",
+			Branch:                "main",
+			ScannedAt:             time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC),
+			Status:                "pass",
+			AmpelAttestationPath:  "/out/myorg-repo1-main-rules-ampel.intoto.json",
+			SnappyAttestationPath: "/out/myorg-repo1-main-rules-snappy.intoto.json",
+			AmpelDigest:           "sha256:aaa111",
+			SnappyDigest:          "sha256:bbb222",
+			Remarks:               "Collected on host \"scanhost\" (machine-id: abc123)",
+			Findings: []Finding{
+				{TenetID: "check-BP-1.01", Title: "Check", Result: "pass", Reason: "OK"},
+			},
+		},
+	}
+
+	resp := ToScanResponse(repoResults, nil)
 	require.Len(t, resp.Assessments, 1)
-	require.NotEmpty(t, resp.Assessments[0].Steps)
-	require.Equal(t, "ampel", resp.Assessments[0].Steps[0].Name)
-	require.Equal(t, provider.ResultError, resp.Assessments[0].Steps[0].Result)
-	require.Equal(t, "Assessment skipped: no repositories were scanned",
-		resp.Assessments[0].Steps[0].Message)
+	ev := resp.Assessments[0].Evidence
+	require.Len(t, ev, 2, "expected two evidence entries per assessment")
+
+	// Ampel evidence
+	require.True(t, strings.HasPrefix(ev[0].ID, "ampel_"))
+	require.Equal(t, "IntotoAttestation", ev[0].Type)
+	require.NotEmpty(t, ev[0].CollectedAt)
+	require.NotNil(t, ev[0].Source)
+	require.True(t, strings.HasPrefix(ev[0].Source.ReferenceID, "ampel_"))
+	require.Equal(t, "/out/myorg-repo1-main-rules-ampel.intoto.json", ev[0].Source.Coordinate)
+	require.Equal(t, "sha256:aaa111", ev[0].Source.Digest)
+	require.Contains(t, ev[0].Source.Remarks, "Collected on host")
+
+	// Snappy evidence
+	require.True(t, strings.HasPrefix(ev[1].ID, "snappy_"))
+	require.Equal(t, "IntotoAttestation", ev[1].Type)
+	require.NotEmpty(t, ev[1].CollectedAt)
+	require.NotNil(t, ev[1].Source)
+	require.True(t, strings.HasPrefix(ev[1].Source.ReferenceID, "snappy_"))
+	require.Equal(t, "/out/myorg-repo1-main-rules-snappy.intoto.json", ev[1].Source.Coordinate)
+	require.Equal(t, "sha256:bbb222", ev[1].Source.Digest)
+	require.Contains(t, ev[1].Source.Remarks, "Collected on host")
+}
+
+func TestToScanResponse_MappingReferences(t *testing.T) {
+	repoResults := []*PerRepoResult{
+		{
+			Repository:            "https://github.com/myorg/repo1",
+			Branch:                "main",
+			ScannedAt:             time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC),
+			Status:                "pass",
+			AmpelAttestationPath:  "/out/ampel.intoto.json",
+			SnappyAttestationPath: "/out/snappy.intoto.json",
+			AmpelDigest:           "sha256:aaa",
+			SnappyDigest:          "sha256:bbb",
+			Findings: []Finding{
+				{TenetID: "check-BP-1.01", Title: "Check", Result: "pass", Reason: "OK"},
+			},
+		},
+	}
+
+	resp := ToScanResponse(repoResults, nil)
+	require.Len(t, resp.MappingReferences, 2)
+
+	// Check that every Evidence.Source.ReferenceID matches a MappingReference.ID
+	refIDs := make(map[string]bool)
+	for _, mr := range resp.MappingReferences {
+		refIDs[mr.ID] = true
+	}
+	for _, a := range resp.Assessments {
+		for _, ev := range a.Evidence {
+			require.True(t, refIDs[ev.Source.ReferenceID],
+				"evidence ReferenceID %q should match a MappingReference.ID", ev.Source.ReferenceID)
+		}
+	}
+}
+
+func TestToScanResponse_ErrorRepoNoEvidence(t *testing.T) {
+	repoResults := []*PerRepoResult{
+		{
+			Repository: "https://github.com/myorg/repo1",
+			Branch:     "main",
+			Status:     "error",
+			Error:      "API unavailable",
+		},
+	}
+
+	resp := ToScanResponse(repoResults, nil)
+	require.Empty(t, resp.MappingReferences)
+	for _, a := range resp.Assessments {
+		require.Empty(t, a.Evidence)
+	}
+}
+
+func TestToScanResponse_AllErrorsSkipsSynthetic(t *testing.T) {
+	// When all repos errored, synthetic assessments must be
+	// skipped because they cannot carry evidence. The spec requires
+	// at least one Evidence entry per AssessmentLog.
+	repoResults := []*PerRepoResult{
+		{
+			Repository: "https://github.com/myorg/repo1",
+			Branch:     "main",
+			Status:     "error",
+			Error:      "API unavailable",
+		},
+		{
+			Repository: "https://github.com/myorg/repo2",
+			Branch:     "main",
+			Status:     "error",
+			Error:      "auth denied",
+		},
+	}
+
+	allReqIDs := []string{"REQ-001", "REQ-002"}
+	resp := ToScanResponse(repoResults, allReqIDs)
+
+	// No assessments should be produced when all repos errored
+	require.Empty(t, resp.Assessments,
+		"all-error repos must not produce synthetic assessments")
+	// Errors should still be present
+	require.Len(t, resp.Errors, 2,
+		"errors from failed repos must be reported")
+}
+
+func TestToScanResponse_MultiRepoEvidence(t *testing.T) {
+	// Two repos contributing findings for the same requirement ID must
+	// both produce evidence entries on the assessment.
+	repoResults := []*PerRepoResult{
+		{
+			Repository:            "https://github.com/myorg/repo1",
+			Branch:                "main",
+			SpecLabel:             "branch-rules",
+			ScannedAt:             time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC),
+			Status:                "pass",
+			AmpelAttestationPath:  "/out/repo1-main-branch-rules-ampel.intoto.json",
+			SnappyAttestationPath: "/out/repo1-main-branch-rules-snappy.intoto.json",
+			AmpelDigest:           "sha256:aaa111",
+			SnappyDigest:          "sha256:bbb222",
+			Remarks:               "Collected on host \"h1\"",
+			Findings: []Finding{
+				{TenetID: "check-BP-1.01", Title: "Check", Result: "pass", Reason: "OK"},
+			},
+		},
+		{
+			Repository:            "https://github.com/myorg/repo2",
+			Branch:                "main",
+			SpecLabel:             "branch-rules",
+			ScannedAt:             time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC),
+			Status:                "fail",
+			AmpelAttestationPath:  "/out/repo2-main-branch-rules-ampel.intoto.json",
+			SnappyAttestationPath: "/out/repo2-main-branch-rules-snappy.intoto.json",
+			AmpelDigest:           "sha256:ccc333",
+			SnappyDigest:          "sha256:ddd444",
+			Remarks:               "Collected on host \"h1\"",
+			Findings: []Finding{
+				{TenetID: "check-BP-1.01", Title: "Check", Result: "fail", Reason: "FAIL"},
+			},
+		},
+	}
+
+	resp := ToScanResponse(repoResults, nil)
+	require.Len(t, resp.Assessments, 1)
+
+	ev := resp.Assessments[0].Evidence
+	// 2 repos × 2 attestation types = 4 evidence entries
+	require.Len(t, ev, 4,
+		"assessment should include evidence from both contributing repos")
+
+	// Verify evidence IDs are unique (no collision between repos)
+	ids := make(map[string]bool)
+	for _, e := range ev {
+		require.False(t, ids[e.ID], "duplicate evidence ID: %s", e.ID)
+		ids[e.ID] = true
+	}
+
+	// Verify both repos' coordinates are present
+	var coordinates []string
+	for _, e := range ev {
+		coordinates = append(coordinates, e.Source.Coordinate)
+	}
+	require.Contains(t, coordinates, "/out/repo1-main-branch-rules-ampel.intoto.json")
+	require.Contains(t, coordinates, "/out/repo2-main-branch-rules-ampel.intoto.json")
+
+	// Verify mapping references also include both repos
+	require.Len(t, resp.MappingReferences, 4,
+		"two repos × two attestation types = four mapping references")
+}
+
+func TestToScanResponse_SpecLabelInEvidenceID(t *testing.T) {
+	// Evidence IDs must include the spec label to avoid collisions when
+	// the same repo/branch is scanned with different spec files.
+	repoResults := []*PerRepoResult{
+		{
+			Repository:            "https://github.com/myorg/repo1",
+			Branch:                "main",
+			SpecLabel:             "branch-rules",
+			ScannedAt:             time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC),
+			Status:                "pass",
+			AmpelAttestationPath:  "/out/repo1-main-branch-rules-ampel.intoto.json",
+			SnappyAttestationPath: "/out/repo1-main-branch-rules-snappy.intoto.json",
+			AmpelDigest:           "sha256:aaa",
+			SnappyDigest:          "sha256:bbb",
+			Findings: []Finding{
+				{TenetID: "check-BP-1.01", Title: "Check", Result: "pass", Reason: "OK"},
+			},
+		},
+		{
+			Repository:            "https://github.com/myorg/repo1",
+			Branch:                "main",
+			SpecLabel:             "custom-check",
+			ScannedAt:             time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC),
+			Status:                "pass",
+			AmpelAttestationPath:  "/out/repo1-main-custom-check-ampel.intoto.json",
+			SnappyAttestationPath: "/out/repo1-main-custom-check-snappy.intoto.json",
+			AmpelDigest:           "sha256:ccc",
+			SnappyDigest:          "sha256:ddd",
+			Findings: []Finding{
+				{TenetID: "check-BP-1.01", Title: "Check", Result: "pass", Reason: "OK"},
+			},
+		},
+	}
+
+	resp := ToScanResponse(repoResults, nil)
+	require.Len(t, resp.Assessments, 1)
+
+	ev := resp.Assessments[0].Evidence
+	// 2 spec combos × 2 attestation types = 4 evidence entries
+	require.Len(t, ev, 4)
+
+	// Verify IDs include spec label and are unique
+	ids := make(map[string]bool)
+	for _, e := range ev {
+		require.False(t, ids[e.ID], "duplicate evidence ID: %s", e.ID)
+		ids[e.ID] = true
+	}
+	// Verify expected IDs using the readable encoding
+	prefix1 := repoEvidencePrefix(
+		"https://github.com/myorg/repo1", "main", "branch-rules",
+	)
+	prefix2 := repoEvidencePrefix(
+		"https://github.com/myorg/repo1", "main", "custom-check",
+	)
+	require.True(t, ids["ampel_"+prefix1])
+	require.True(t, ids["ampel_"+prefix2])
+	require.True(t, ids["snappy_"+prefix1])
+	require.True(t, ids["snappy_"+prefix2])
+
+	// Mapping references should also be unique per spec
+	require.Len(t, resp.MappingReferences, 4)
+}
+
+func TestToScanResponse_SameBasenameSpecs(t *testing.T) {
+	// Specs with the same basename in different directories must
+	// produce distinct evidence IDs when their SpecLabels include
+	// the directory path (via the updated SanitizeSpecName).
+	repoResults := []*PerRepoResult{
+		{
+			Repository:            "https://github.com/myorg/repo1",
+			Branch:                "main",
+			SpecLabel:             "team-a-check",
+			ScannedAt:             time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC),
+			Status:                "pass",
+			AmpelAttestationPath:  "/out/repo1-main-team-a-check-ampel.intoto.json",
+			SnappyAttestationPath: "/out/repo1-main-team-a-check-snappy.intoto.json",
+			AmpelDigest:           "sha256:aaa",
+			SnappyDigest:          "sha256:bbb",
+			Findings: []Finding{
+				{TenetID: "check-BP-1.01", Title: "Check", Result: "pass", Reason: "OK"},
+			},
+		},
+		{
+			Repository:            "https://github.com/myorg/repo1",
+			Branch:                "main",
+			SpecLabel:             "team-b-check",
+			ScannedAt:             time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC),
+			Status:                "pass",
+			AmpelAttestationPath:  "/out/repo1-main-team-b-check-ampel.intoto.json",
+			SnappyAttestationPath: "/out/repo1-main-team-b-check-snappy.intoto.json",
+			AmpelDigest:           "sha256:ccc",
+			SnappyDigest:          "sha256:ddd",
+			Findings: []Finding{
+				{TenetID: "check-BP-1.01", Title: "Check", Result: "pass", Reason: "OK"},
+			},
+		},
+	}
+
+	resp := ToScanResponse(repoResults, nil)
+	require.Len(t, resp.Assessments, 1)
+
+	ev := resp.Assessments[0].Evidence
+	require.Len(t, ev, 4, "2 specs x 2 attestation types = 4 evidence entries")
+
+	ids := make(map[string]bool)
+	for _, e := range ev {
+		require.False(t, ids[e.ID],
+			"duplicate evidence ID from same-basename specs: %s", e.ID)
+		ids[e.ID] = true
+	}
+
+	// Verify distinct IDs for each spec variant using readable encoding
+	prefix1 := repoEvidencePrefix(
+		"https://github.com/myorg/repo1", "main", "team-a-check",
+	)
+	prefix2 := repoEvidencePrefix(
+		"https://github.com/myorg/repo1", "main", "team-b-check",
+	)
+	require.True(t, ids["ampel_"+prefix1])
+	require.True(t, ids["ampel_"+prefix2])
+}
+
+func TestToScanResponse_DeepNestedSpecCollision(t *testing.T) {
+	// Specs sharing the same immediate parent and basename but
+	// differing in ancestry must produce distinct evidence IDs.
+	// SanitizeSpecName encodes slashes as "--", so
+	// "dept-a/team/check.yaml" → "dept-a--team--check" and
+	// "dept-b/team/check.yaml" → "dept-b--team--check".
+	repoResults := []*PerRepoResult{
+		{
+			Repository:            "https://github.com/myorg/repo1",
+			Branch:                "main",
+			SpecLabel:             "dept-a--team--check",
+			ScannedAt:             time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC),
+			Status:                "pass",
+			AmpelAttestationPath:  "/out/repo1-main-a-ampel.intoto.json",
+			SnappyAttestationPath: "/out/repo1-main-a-snappy.intoto.json",
+			AmpelDigest:           "sha256:aaa",
+			SnappyDigest:          "sha256:bbb",
+			Findings: []Finding{
+				{TenetID: "check-BP-1.01", Title: "Check", Result: "pass", Reason: "OK"},
+			},
+		},
+		{
+			Repository:            "https://github.com/myorg/repo1",
+			Branch:                "main",
+			SpecLabel:             "dept-b--team--check",
+			ScannedAt:             time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC),
+			Status:                "pass",
+			AmpelAttestationPath:  "/out/repo1-main-b-ampel.intoto.json",
+			SnappyAttestationPath: "/out/repo1-main-b-snappy.intoto.json",
+			AmpelDigest:           "sha256:ccc",
+			SnappyDigest:          "sha256:ddd",
+			Findings: []Finding{
+				{TenetID: "check-BP-1.01", Title: "Check", Result: "pass", Reason: "OK"},
+			},
+		},
+	}
+
+	resp := ToScanResponse(repoResults, nil)
+	require.Len(t, resp.Assessments, 1)
+
+	ev := resp.Assessments[0].Evidence
+	require.Len(t, ev, 4, "2 specs x 2 attestation types = 4 evidence entries")
+
+	ids := make(map[string]bool)
+	for _, e := range ev {
+		require.False(t, ids[e.ID],
+			"duplicate evidence ID from deep-nested specs: %s", e.ID)
+		ids[e.ID] = true
+	}
+}
+
+func TestToScanResponse_MappingReferenceFileURL(t *testing.T) {
+	// Mapping reference URLs must be proper file:// URLs with
+	// absolute paths, not file:// + relative path.
+	repoResults := []*PerRepoResult{
+		{
+			Repository:            "https://github.com/myorg/repo1",
+			Branch:                "main",
+			ScannedAt:             time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC),
+			Status:                "pass",
+			AmpelAttestationPath:  "/out/ampel.intoto.json",
+			SnappyAttestationPath: "/out/snappy.intoto.json",
+			AmpelDigest:           "sha256:aaa",
+			SnappyDigest:          "sha256:bbb",
+			Findings: []Finding{
+				{TenetID: "check-BP-1.01", Title: "Check", Result: "pass", Reason: "OK"},
+			},
+		},
+	}
+
+	resp := ToScanResponse(repoResults, nil)
+	for _, mr := range resp.MappingReferences {
+		require.True(t, strings.HasPrefix(mr.URL, "file:///"),
+			"mapping reference URL must be file:///absolute: got %q", mr.URL)
+	}
 }

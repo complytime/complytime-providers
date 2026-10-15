@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/complytime/complytime-providers/cmd/opa-provider/targets"
 	"github.com/complytime/complytime-providers/cmd/opa-provider/toolcheck"
 	"github.com/complytime/complytime-providers/internal/archive"
+	"github.com/complytime/complytime-providers/internal/evidence"
 	"github.com/complytime/complytime-providers/internal/version"
 )
 
@@ -292,6 +294,7 @@ func (s *ProviderServer) Scan(
 	bundleCache := map[string]string{}
 	var allResults []*results.PerTargetResult
 	var writeErrs []error
+	hostRemark := evidence.HostRemark()
 
 	for _, target := range req.Targets {
 		targetResults, writeErr := s.processTarget(
@@ -299,6 +302,9 @@ func (s *ProviderServer) Scan(
 		)
 		if writeErr != nil {
 			writeErrs = append(writeErrs, writeErr)
+		}
+		for _, tr := range targetResults {
+			tr.Remarks = hostRemark
 		}
 		allResults = append(allResults, targetResults...)
 	}
@@ -391,10 +397,11 @@ func (s *ProviderServer) processRemoteBranches(
 			logger.Warn("data load failed",
 				"target", target.TargetID, "branch", branch, "error", err)
 			errResult := &results.PerTargetResult{
-				Target: targets.RepoDisplayName(repoURL),
-				Branch: branch,
-				Status: "error",
-				Error:  err.Error(),
+				Target:    targets.RepoDisplayName(repoURL),
+				TargetURL: repoURL,
+				Branch:    branch,
+				Status:    "error",
+				Error:     err.Error(),
 			}
 			if writeErr := results.WritePerTargetResult(
 				errResult, cfg.ResultsDirPath(),
@@ -413,10 +420,11 @@ func (s *ProviderServer) processRemoteBranches(
 			logger.Warn("eval failed",
 				"target", target.TargetID, "branch", branch, "error", evalErr)
 			errResult := &results.PerTargetResult{
-				Target: targets.RepoDisplayName(repoURL),
-				Branch: branch,
-				Status: "error",
-				Error:  evalErr.Error(),
+				Target:    targets.RepoDisplayName(repoURL),
+				TargetURL: repoURL,
+				Branch:    branch,
+				Status:    "error",
+				Error:     evalErr.Error(),
 			}
 			if writeErr := results.WritePerTargetResult(
 				errResult, cfg.ResultsDirPath(),
@@ -425,6 +433,9 @@ func (s *ProviderServer) processRemoteBranches(
 			}
 			targetResults = append(targetResults, errResult)
 			continue
+		}
+		if result != nil {
+			result.TargetURL = repoURL
 		}
 		if evalErr != nil {
 			writeErrs = append(writeErrs, evalErr)
@@ -499,6 +510,36 @@ func (s *ProviderServer) evalAndParse(
 	result, err := results.ParseConftestOutput(raw, displayName, branch)
 	if err != nil {
 		return nil, fmt.Errorf("parsing conftest output: %w", err)
+	}
+	result.InputPath = inputPath
+
+	// Compute SHA256 digest for regular-file inputs. Directories
+	// are left without a digest per the evidence-source spec.
+	// Stat errors are propagated: if the input was accessible
+	// enough for conftest to evaluate, a subsequent stat failure
+	// is unexpected and must not be silently ignored.
+	//
+	// Known limitation: the digest is computed after conftest
+	// evaluation. If the file is concurrently modified between
+	// conftest reading it and this hash, the digest may not match
+	// the bytes conftest evaluated. This is an inherent constraint
+	// of any external-tool pipeline where the tool reads by path
+	// and does not expose the bytes it consumed. In practice,
+	// compliance scan inputs are not concurrently modified.
+	info, statErr := os.Stat(inputPath)
+	if statErr != nil {
+		return nil, fmt.Errorf(
+			"stat input for digest %s: %w", inputPath, statErr,
+		)
+	}
+	if !info.IsDir() {
+		digest, dErr := evidence.FileDigest(inputPath)
+		if dErr != nil {
+			return nil, fmt.Errorf(
+				"computing digest for input %s: %w", inputPath, dErr,
+			)
+		}
+		result.InputDigest = digest
 	}
 
 	if writeErr := results.WritePerTargetResult(

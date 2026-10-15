@@ -8,11 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/complytime/complyctl/pkg/provider"
+
+	"github.com/complytime/complytime-providers/internal/evidence"
 )
 
 var happyPathFixture = `[
@@ -482,4 +485,463 @@ func TestToScanResponse_MessageFallsBackWhenAllPass(t *testing.T) {
 	require.Len(t, resp.Assessments, 1)
 	assert.Equal(t, "1 of 1 targets passed", resp.Assessments[0].Message,
 		"passing assessments should use the pass-count summary")
+}
+
+func TestToScanResponse_EvidencePerAssessment(t *testing.T) {
+	now := time.Now()
+	results := []*PerTargetResult{
+		{
+			Target:    "org/repo",
+			Branch:    "main",
+			InputPath: "/tmp/workspace/repos/org-repo/main",
+			ScannedAt: now,
+			Status:    "scanned",
+			Remarks:   "Collected on host \"testhost\" (machine-id: abc123)",
+			Findings: []Finding{
+				{
+					RequirementID: "kubernetes.run_as_root",
+					Result:        "fail",
+					Reason:        "violation",
+				},
+			},
+		},
+	}
+
+	resp := ToScanResponse(results, nil)
+	require.Len(t, resp.Assessments, 1)
+
+	al := resp.Assessments[0]
+	require.Len(t, al.Evidence, 1,
+		"each assessment log should have one evidence entry")
+
+	ev := al.Evidence[0]
+	assert.Equal(t, evidence.TypeConftestResult, ev.Type)
+	assert.NotEmpty(t, ev.CollectedAt)
+	require.NotNil(t, ev.Source)
+	assert.NotEmpty(t, ev.Source.Coordinate,
+		"coordinate must carry the input path")
+	assert.Equal(t,
+		"/tmp/workspace/repos/org-repo/main", ev.Source.Coordinate)
+	assert.Empty(t, ev.Source.Digest,
+		"OPA evaluates directories; digest should be empty")
+	assert.True(t,
+		strings.HasPrefix(ev.ID, evidence.IDPrefixConftest),
+		"evidence ID should start with conftest prefix")
+	assert.True(t,
+		strings.HasPrefix(ev.Source.ReferenceID, evidence.RefPrefixConftest),
+		"reference ID should start with conftest-input- prefix")
+	assert.Contains(t, ev.Source.Remarks, "Collected on host")
+}
+
+func TestToScanResponse_EvidenceWithBranch(t *testing.T) {
+	now := time.Now()
+	results := []*PerTargetResult{
+		{
+			Target:    "org/repo",
+			TargetURL: "https://github.com/org/repo",
+			Branch:    "develop",
+			InputPath: "/workspace/repos/org-repo/develop",
+			ScannedAt: now,
+			Status:    "scanned",
+			Findings: []Finding{
+				{
+					RequirementID: "ci.action_pinning",
+					Result:        "fail",
+					Reason:        "unpinned",
+				},
+			},
+		},
+	}
+
+	resp := ToScanResponse(results, nil)
+	require.Len(t, resp.Assessments, 1)
+	require.Len(t, resp.Assessments[0].Evidence, 1)
+
+	ev := resp.Assessments[0].Evidence[0]
+	expectedSuffix := evidenceSuffix(results[0])
+	assert.Equal(t,
+		evidence.IDPrefixConftest+expectedSuffix, ev.ID)
+	assert.Equal(t,
+		evidence.RefPrefixConftest+expectedSuffix,
+		ev.Source.ReferenceID)
+}
+
+func TestToScanResponse_EvidenceOnSyntheticAssessment(t *testing.T) {
+	// Synthetic assessments (all checks passed) should also carry evidence.
+	now := time.Now()
+	results := []*PerTargetResult{
+		{
+			Target:       "target1",
+			Branch:       "main",
+			InputPath:    "/workspace/repos/target1/main",
+			ScannedAt:    now,
+			Status:       "scanned",
+			SuccessCount: 3,
+		},
+	}
+	reverseMap := map[string]string{
+		"kubernetes.run_as_root": "CIS-K8S-5.2.6",
+	}
+
+	resp := ToScanResponse(results, reverseMap)
+	require.Len(t, resp.Assessments, 1)
+	require.Len(t, resp.Assessments[0].Evidence, 1,
+		"synthetic assessments should carry evidence")
+
+	ev := resp.Assessments[0].Evidence[0]
+	assert.Equal(t, evidence.TypeConftestResult, ev.Type)
+	assert.NotEmpty(t, ev.Source.Coordinate)
+}
+
+func TestToScanResponse_ErrorTargetNoEvidence(t *testing.T) {
+	results := []*PerTargetResult{
+		{
+			Target: "org/repo",
+			Branch: "main",
+			Status: "error",
+			Error:  "clone failed",
+		},
+	}
+
+	resp := ToScanResponse(results, nil)
+	assert.Empty(t, resp.Assessments,
+		"error-only targets produce no assessments and no evidence")
+}
+
+func TestToScanResponse_MappingReferences(t *testing.T) {
+	now := time.Now()
+	results := []*PerTargetResult{
+		{
+			Target:    "org/repo",
+			Branch:    "main",
+			InputPath: "/workspace/repos/org-repo/main",
+			ScannedAt: now,
+			Status:    "scanned",
+			Findings: []Finding{
+				{
+					RequirementID: "ci.action_pinning",
+					Result:        "fail",
+					Reason:        "violation",
+				},
+			},
+		},
+		{
+			Target:    "org/repo2",
+			Branch:    "develop",
+			InputPath: "/workspace/repos/org-repo2/develop",
+			ScannedAt: now,
+			Status:    "scanned",
+			Findings: []Finding{
+				{
+					RequirementID: "ci.action_pinning",
+					Result:        "fail",
+					Reason:        "unpinned",
+				},
+			},
+		},
+	}
+
+	resp := ToScanResponse(results, nil)
+
+	require.Len(t, resp.MappingReferences, 2,
+		"each unique target/branch should produce one MappingReference")
+
+	refIDs := make(map[string]bool)
+	for _, mr := range resp.MappingReferences {
+		refIDs[mr.ID] = true
+		assert.True(t,
+			strings.HasPrefix(mr.ID, evidence.RefPrefixConftest),
+			"MappingReference ID should start with conftest-input- prefix")
+		assert.NotEmpty(t, mr.Title)
+	}
+
+	// Verify each evidence source reference matches a MappingReference.
+	for _, al := range resp.Assessments {
+		for _, ev := range al.Evidence {
+			assert.True(t, refIDs[ev.Source.ReferenceID],
+				"Evidence.Source.ReferenceID %q should match a MappingReference.ID",
+				ev.Source.ReferenceID)
+		}
+	}
+}
+
+func TestToScanResponse_MappingReferencesSkipErrors(t *testing.T) {
+	results := []*PerTargetResult{
+		{
+			Target:    "org/repo",
+			TargetURL: "https://github.com/org/repo",
+			Branch:    "main",
+			InputPath: "/workspace/repos/org-repo/main",
+			ScannedAt: time.Now(),
+			Status:    "scanned",
+			Findings: []Finding{
+				{
+					RequirementID: "ci.rule",
+					Result:        "fail",
+					Reason:        "bad",
+				},
+			},
+		},
+		{
+			Target: "org/broken",
+			Branch: "main",
+			Status: "error",
+			Error:  "clone failed",
+		},
+	}
+
+	resp := ToScanResponse(results, nil)
+	require.Len(t, resp.MappingReferences, 1,
+		"error targets should not produce MappingReferences")
+	assert.True(t, strings.HasPrefix(
+		resp.MappingReferences[0].ID,
+		evidence.RefPrefixConftest,
+	), "mapping reference ID should start with conftest prefix")
+}
+
+func TestToScanResponse_MappingReferencesDeduplication(t *testing.T) {
+	now := time.Now()
+	// Same target/branch appearing in multiple findings should
+	// produce only one MappingReference.
+	results := []*PerTargetResult{
+		{
+			Target:    "org/repo",
+			Branch:    "main",
+			InputPath: "/workspace/repos/org-repo/main",
+			ScannedAt: now,
+			Status:    "scanned",
+			Findings: []Finding{
+				{RequirementID: "rule.a", Result: "fail", Reason: "a"},
+				{RequirementID: "rule.b", Result: "fail", Reason: "b"},
+			},
+		},
+	}
+
+	resp := ToScanResponse(results, nil)
+	require.Len(t, resp.MappingReferences, 1,
+		"duplicate target/branch should produce only one MappingReference")
+}
+
+func TestToScanResponse_MultiTargetEvidence(t *testing.T) {
+	// Two targets contributing findings for the same requirement ID must
+	// both produce evidence entries on the assessment.
+	now := time.Now()
+	results := []*PerTargetResult{
+		{
+			Target:    "org/repo1",
+			Branch:    "main",
+			InputPath: "/workspace/repos/org-repo1/main",
+			ScannedAt: now,
+			Status:    "scanned",
+			Remarks:   "Collected on host \"h1\"",
+			Findings: []Finding{
+				{RequirementID: "ci.action_pinning", Result: "fail", Reason: "unpinned"},
+			},
+		},
+		{
+			Target:    "org/repo2",
+			Branch:    "develop",
+			InputPath: "/workspace/repos/org-repo2/develop",
+			ScannedAt: now,
+			Status:    "scanned",
+			Remarks:   "Collected on host \"h1\"",
+			Findings: []Finding{
+				{RequirementID: "ci.action_pinning", Result: "fail", Reason: "unpinned"},
+			},
+		},
+	}
+
+	resp := ToScanResponse(results, nil)
+	require.Len(t, resp.Assessments, 1)
+
+	ev := resp.Assessments[0].Evidence
+	require.Len(t, ev, 2,
+		"assessment should include evidence from both contributing targets")
+
+	// Verify evidence IDs are unique
+	ids := make(map[string]bool)
+	for _, e := range ev {
+		require.False(t, ids[e.ID], "duplicate evidence ID: %s", e.ID)
+		ids[e.ID] = true
+	}
+
+	// Verify both targets' input paths are present
+	var coordinates []string
+	for _, e := range ev {
+		coordinates = append(coordinates, e.Source.Coordinate)
+	}
+	assert.Contains(t, coordinates, "/workspace/repos/org-repo1/main")
+	assert.Contains(t, coordinates, "/workspace/repos/org-repo2/develop")
+
+	// Verify mapping references include both targets
+	require.Len(t, resp.MappingReferences, 2)
+}
+
+func TestToScanResponse_CrossHostEvidenceIDs(t *testing.T) {
+	// Targets from different hosts with the same org/repo must produce
+	// distinct evidence IDs. This tests the fix for the cross-host
+	// collision reported in PR #192.
+	now := time.Now()
+	results := []*PerTargetResult{
+		{
+			Target:    "org/repo",
+			TargetURL: "https://github.com/org/repo",
+			Branch:    "main",
+			InputPath: "/workspace/repos/github-org-repo/main",
+			ScannedAt: now,
+			Status:    "scanned",
+			Findings: []Finding{
+				{RequirementID: "ci.rule", Result: "fail", Reason: "a"},
+			},
+		},
+		{
+			Target:    "org/repo",
+			TargetURL: "https://gitlab.com/org/repo",
+			Branch:    "main",
+			InputPath: "/workspace/repos/gitlab-org-repo/main",
+			ScannedAt: now,
+			Status:    "scanned",
+			Findings: []Finding{
+				{RequirementID: "ci.rule", Result: "fail", Reason: "b"},
+			},
+		},
+	}
+
+	resp := ToScanResponse(results, nil)
+	require.Len(t, resp.Assessments, 1)
+
+	ev := resp.Assessments[0].Evidence
+	require.Len(t, ev, 2,
+		"cross-host targets must produce separate evidence entries")
+
+	ids := make(map[string]bool)
+	for _, e := range ev {
+		require.False(t, ids[e.ID],
+			"duplicate evidence ID across hosts: %s", e.ID)
+		ids[e.ID] = true
+	}
+
+	// Verify mapping references are also distinct
+	require.Len(t, resp.MappingReferences, 2,
+		"cross-host targets must produce separate mapping references")
+	assert.NotEqual(t,
+		resp.MappingReferences[0].ID, resp.MappingReferences[1].ID)
+}
+
+func TestToScanResponse_LocalPathCollision(t *testing.T) {
+	// Local paths that differ only by "/" vs "-" must produce
+	// distinct evidence IDs: "/" encodes as "--" while "-" passes
+	// through, keeping "a/b" → "a--b" distinct from "a-b".
+	now := time.Now()
+	results := []*PerTargetResult{
+		{
+			Target:    "a/b",
+			InputPath: "/workspace/a/b",
+			ScannedAt: now,
+			Status:    "scanned",
+			Findings: []Finding{
+				{RequirementID: "ci.rule", Result: "fail", Reason: "x"},
+			},
+		},
+		{
+			Target:    "a-b",
+			InputPath: "/workspace/a-b",
+			ScannedAt: now,
+			Status:    "scanned",
+			Findings: []Finding{
+				{RequirementID: "ci.rule", Result: "fail", Reason: "y"},
+			},
+		},
+	}
+
+	resp := ToScanResponse(results, nil)
+	require.Len(t, resp.Assessments, 1)
+
+	ev := resp.Assessments[0].Evidence
+	require.Len(t, ev, 2)
+	assert.NotEqual(t, ev[0].ID, ev[1].ID,
+		"a/b and a-b must produce distinct evidence IDs")
+}
+
+func TestToScanResponse_FileInputDigest(t *testing.T) {
+	// When InputDigest is pre-computed (single-file input), it must
+	// appear in the evidence entry.
+	now := time.Now()
+	results := []*PerTargetResult{
+		{
+			Target:      "config.yaml",
+			InputPath:   "/workspace/config.yaml",
+			InputDigest: "sha256:abcdef0123456789",
+			ScannedAt:   now,
+			Status:      "scanned",
+			Findings: []Finding{
+				{RequirementID: "k8s.rule", Result: "fail", Reason: "bad"},
+			},
+		},
+	}
+
+	resp := ToScanResponse(results, nil)
+	require.Len(t, resp.Assessments, 1)
+	require.Len(t, resp.Assessments[0].Evidence, 1)
+
+	ev := resp.Assessments[0].Evidence[0]
+	assert.Equal(t, "sha256:abcdef0123456789", ev.Source.Digest,
+		"file input digest must be carried through to evidence")
+}
+
+func TestToScanResponse_DirectoryInputNoDigest(t *testing.T) {
+	// Directory inputs should have empty digest.
+	now := time.Now()
+	results := []*PerTargetResult{
+		{
+			Target:    "org/repo",
+			InputPath: "/workspace/repos/org-repo/main",
+			ScannedAt: now,
+			Status:    "scanned",
+			Findings: []Finding{
+				{RequirementID: "k8s.rule", Result: "fail", Reason: "bad"},
+			},
+		},
+	}
+
+	resp := ToScanResponse(results, nil)
+	require.Len(t, resp.Assessments, 1)
+	require.Len(t, resp.Assessments[0].Evidence, 1)
+
+	ev := resp.Assessments[0].Evidence[0]
+	assert.Empty(t, ev.Source.Digest,
+		"directory inputs should have empty digest")
+}
+
+func TestToScanResponse_AllErrorsSkipsSynthetic(t *testing.T) {
+	// When all targets errored, synthetic assessments must be
+	// skipped because they cannot carry evidence. The spec requires
+	// at least one Evidence entry per AssessmentLog.
+	results := []*PerTargetResult{
+		{
+			Target: "org/repo1",
+			Branch: "main",
+			Status: "error",
+			Error:  "clone failed",
+		},
+		{
+			Target: "org/repo2",
+			Branch: "main",
+			Status: "error",
+			Error:  "auth denied",
+		},
+	}
+
+	reverseMap := map[string]string{
+		"ci.action_pinning": "REQ-001",
+		"ci.branch_protect": "REQ-002",
+	}
+	resp := ToScanResponse(results, reverseMap)
+
+	// No assessments should be produced when all targets errored
+	assert.Empty(t, resp.Assessments,
+		"all-error targets must not produce synthetic assessments")
+	// Errors should still be present
+	assert.Len(t, resp.Errors, 2,
+		"errors from failed targets must be reported")
 }
