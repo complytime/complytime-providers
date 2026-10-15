@@ -190,6 +190,30 @@ func TestSanitizeForID_NonSlashSpecialCharsCollapse(t *testing.T) {
 	}
 }
 
+func TestSanitizeForID_KnownLossyCollisions(t *testing.T) {
+	// Documents known collision classes where the lossy encoding
+	// produces identical output for distinct inputs. These are
+	// accepted trade-offs for readability. In practice, JoinForID
+	// multi-field composition (repo + branch + spec) mitigates
+	// real-world impact: all fields must collide simultaneously,
+	// and git hosting platforms do not allow "/" in repo names.
+	//
+	// Consecutive non-alphanumeric characters produce "--",
+	// colliding with the "/" encoding:
+	collisionGroup := []string{
+		"a/b",  // slash encodes to "--"
+		"a--b", // two hyphens pass through
+		"a..b", // two dots each encode to "-"
+		"a-.b", // hyphen passes through, dot encodes to "-"
+		"a.-b", // dot encodes to "-", hyphen passes through
+	}
+	expected := "a--b"
+	for _, input := range collisionGroup {
+		assert.Equal(t, expected, SanitizeForID(input),
+			"known lossy collision: SanitizeForID(%q)", input)
+	}
+}
+
 func TestSanitizeForID_Passthrough(t *testing.T) {
 	// Alphanumeric and hyphens pass through unchanged.
 	input := "abc-DEF-123"

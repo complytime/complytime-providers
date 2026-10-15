@@ -65,10 +65,19 @@ ID is sufficient. Ampel and OPA require disambiguation by target.
 Underscores separate structural fields (type, repo, branch, spec) while
 hyphens appear within fields and `--` marks original path separators.
 
+**Known limitation**: The encoding is lossy. Consecutive non-alphanumeric
+characters (e.g., `--`, `..`, `-.`) all produce `--` in the output,
+colliding with the `/` encoding. For example, `release/1` and
+`release--1` both encode to `release--1`. In practice, this does not
+produce real-world collisions because `JoinForID` multi-field
+composition requires all fields to collide simultaneously, and git
+hosting platforms do not allow `/` in repository names.
+
 **Alternative considered**: UUIDs -- rejected because they are not
 reproducible and provide no human context. Hex-encoded `_XX` format --
-rejected because it sacrificed readability for theoretical collision
-resistance that was unnecessary in practice.
+rejected because it sacrificed readability without practical benefit:
+the multi-field composition already prevents real-world collisions for
+standard git hosting URLs and branch names.
 
 ### D2: MappingReference identity scheme
 

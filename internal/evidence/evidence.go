@@ -149,13 +149,23 @@ func readMachineID() string {
 }
 
 // SanitizeForID encodes a string into a human-readable, ID-safe
-// form. Alphanumeric characters and hyphens pass through unchanged.
+// form that prioritizes readability over full collision resistance.
+// Alphanumeric characters and hyphens pass through unchanged.
 // Forward slashes are encoded as "--" to preserve path structure
-// visibility while remaining distinct from single hyphens (e.g.
-// "a/b" → "a--b" vs "a-b" → "a-b"). All other characters (dots,
-// underscores, colons, spaces, etc.) are replaced with a single
-// hyphen. Underscores never appear in the output, reserving them
-// as unambiguous component separators in JoinForID.
+// visibility. All other characters (dots, underscores, colons,
+// spaces, etc.) are replaced with a single hyphen. Underscores
+// never appear in the output, reserving them as unambiguous
+// component separators in JoinForID.
+//
+// Known limitation: the encoding is lossy. Consecutive
+// non-alphanumeric characters (e.g., "--", "..", "-.") all
+// produce "--" in the output, colliding with the "/" encoding.
+// For example, "a/b", "a--b", and "a..b" all encode to "a--b".
+// In practice, JoinForID's multi-field composition mitigates
+// this: all fields (repo, branch, spec) must collide
+// simultaneously, and git hosting platforms do not allow "/" in
+// repository names, limiting the collision surface to local OPA
+// paths with adversarial directory naming.
 func SanitizeForID(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
