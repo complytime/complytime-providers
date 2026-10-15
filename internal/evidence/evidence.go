@@ -56,22 +56,27 @@ const (
 
 // FileDigest computes the SHA256 hash of the file at path and
 // returns it in "sha256:<hex>" format. It returns an error if the
-// path does not exist, is a directory, or cannot be read.
+// path does not exist, is not a regular file, or cannot be read.
+// The function opens the file first and validates the file type via
+// Fstat on the descriptor, avoiding a TOCTOU window between
+// validation and reading.
 func FileDigest(path string) (string, error) {
 	cleaned := filepath.Clean(path)
-	info, err := os.Stat(cleaned)
-	if err != nil {
-		return "", fmt.Errorf("evidence digest: %w", err)
-	}
-	if info.IsDir() {
-		return "", fmt.Errorf("evidence digest: %s is a directory", path)
-	}
-
 	f, err := os.Open(cleaned)
 	if err != nil {
 		return "", fmt.Errorf("evidence digest: %w", err)
 	}
 	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return "", fmt.Errorf("evidence digest: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf(
+			"evidence digest: %s is not a regular file", path,
+		)
+	}
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {

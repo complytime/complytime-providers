@@ -52,7 +52,17 @@ func TestFileDigest_DirectoryPath(t *testing.T) {
 	dir := t.TempDir()
 	_, err := FileDigest(dir)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "is a directory")
+	assert.Contains(t, err.Error(), "is not a regular file")
+}
+
+func TestFileDigest_SymlinkToDirectory(t *testing.T) {
+	dir := t.TempDir()
+	link := filepath.Join(dir, "link-to-dir")
+	require.NoError(t, os.Symlink(dir, link))
+
+	_, err := FileDigest(link)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "is not a regular file")
 }
 
 func TestFileDigest_UnreadableFile(t *testing.T) {

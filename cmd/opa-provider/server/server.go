@@ -518,6 +518,14 @@ func (s *ProviderServer) evalAndParse(
 	// Stat errors are propagated: if the input was accessible
 	// enough for conftest to evaluate, a subsequent stat failure
 	// is unexpected and must not be silently ignored.
+	//
+	// Known limitation: the digest is computed after conftest
+	// evaluation. If the file is concurrently modified between
+	// conftest reading it and this hash, the digest may not match
+	// the bytes conftest evaluated. This is an inherent constraint
+	// of any external-tool pipeline where the tool reads by path
+	// and does not expose the bytes it consumed. In practice,
+	// compliance scan inputs are not concurrently modified.
 	info, statErr := os.Stat(inputPath)
 	if statErr != nil {
 		return nil, fmt.Errorf(
