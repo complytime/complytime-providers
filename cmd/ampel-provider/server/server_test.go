@@ -990,6 +990,170 @@ func TestScan_DigestFailure_ReturnsError(t *testing.T) {
 		"error should indicate the digest failure")
 }
 
+// makeAllSkipAmpelAttestation creates an ampel ResultSet attestation where
+// every policy evaluation produced SKIP (no predicate type match).
+func makeAllSkipAmpelAttestation() []byte {
+	stmt := map[string]any{
+		"_type": "https://in-toto.io/Statement/v1",
+		"subject": []map[string]any{
+			{
+				"name":   "test-subject",
+				"digest": map[string]string{"sha256": "abc123def456"},
+			},
+		},
+		"predicateType": "https://carabiner.dev/ampel/resultset/v0",
+		"predicate": map[string]any{
+			"status": "SKIP",
+			"results": []map[string]any{
+				{
+					"status": "SKIP",
+					"policy": map[string]string{"id": "BP-1.01"},
+					"eval_results": []map[string]any{
+						{
+							"id":     "when",
+							"status": "SKIP",
+							"assessment": map[string]string{
+								"message": "No matching predicate type found for policy",
+							},
+						},
+					},
+					"meta": map[string]string{
+						"description": "Validate branch protection",
+					},
+				},
+			},
+		},
+	}
+	data, _ := json.Marshal(stmt)
+	return data
+}
+
+// makeMixedSkipPassAmpelAttestation creates an ampel ResultSet attestation
+// with one PASS policy and one SKIP policy (mixed result).
+func makeMixedSkipPassAmpelAttestation() []byte {
+	stmt := map[string]any{
+		"_type": "https://in-toto.io/Statement/v1",
+		"subject": []map[string]any{
+			{
+				"name":   "test-subject",
+				"digest": map[string]string{"sha256": "abc123def456"},
+			},
+		},
+		"predicateType": "https://carabiner.dev/ampel/resultset/v0",
+		"predicate": map[string]any{
+			"status": "PASS",
+			"results": []map[string]any{
+				{
+					"status": "PASS",
+					"policy": map[string]string{"id": "BP-1.01"},
+					"eval_results": []map[string]any{
+						{
+							"id":     "01",
+							"status": "PASS",
+							"assessment": map[string]string{
+								"message": "PR required",
+							},
+						},
+					},
+					"meta": map[string]string{
+						"description": "Validate branch protection",
+					},
+				},
+				{
+					"status": "SKIP",
+					"policy": map[string]string{"id": "BP-3.01"},
+					"eval_results": []map[string]any{
+						{
+							"id":     "when",
+							"status": "SKIP",
+							"assessment": map[string]string{
+								"message": "No matching predicate type found for policy",
+							},
+						},
+					},
+					"meta": map[string]string{
+						"description": "Validate force push blocking",
+					},
+				},
+			},
+		},
+	}
+	data, _ := json.Marshal(stmt)
+	return data
+}
+
+func TestScan_AllSkipConvertedToError(t *testing.T) {
+	s, _ := setupServerWithGenerate(t)
+
+	origRunner := ScanRunner
+	ScanRunner = &mockScanRunner{
+		snappyOutput: makeTestAttestation(),
+		ampelOutput:  makeAllSkipAmpelAttestation(),
+	}
+	defer func() { ScanRunner = origRunner }()
+
+	resp, err := s.Scan(context.Background(), &provider.ScanRequest{
+		Targets: []provider.Target{
+			{TargetID: "myorg-repo1", Variables: map[string]string{
+				"url":   "https://github.com/myorg/repo1",
+				"specs": "builtin:github/branch-rules.yaml",
+			}},
+		},
+	})
+	require.NoError(t, err)
+
+	// All-SKIP should be converted to an operational error,
+	// not produce assessments with skip results.
+	require.Len(t, resp.Errors, 1,
+		"all-skip repo should produce an operational error")
+	require.Contains(t, resp.Errors[0], "no policies matched",
+		"error should explain the root cause")
+}
+
+func TestScan_MixedSkipPass_NotConvertedToError(t *testing.T) {
+	s, _ := setupServerWithGenerate(t)
+
+	origRunner := ScanRunner
+	ScanRunner = &mockScanRunner{
+		snappyOutput: makeTestAttestation(),
+		ampelOutput:  makeMixedSkipPassAmpelAttestation(),
+	}
+	defer func() { ScanRunner = origRunner }()
+
+	resp, err := s.Scan(context.Background(), &provider.ScanRequest{
+		Targets: []provider.Target{
+			{TargetID: "myorg-repo1", Variables: map[string]string{
+				"url":   "https://github.com/myorg/repo1",
+				"specs": "builtin:github/branch-rules.yaml",
+			}},
+		},
+	})
+	require.NoError(t, err)
+
+	// Mixed SKIP+PASS should NOT be converted to error
+	require.Empty(t, resp.Errors,
+		"mixed skip+pass should not produce operational errors")
+	require.NotEmpty(t, resp.Assessments,
+		"mixed skip+pass should produce assessments")
+
+	// Verify individual findings are preserved with correct results
+	var hasPass, hasSkip bool
+	for _, a := range resp.Assessments {
+		for _, step := range a.Steps {
+			if step.Result == provider.ResultPassed {
+				hasPass = true
+			}
+			if step.Result == provider.ResultSkipped {
+				hasSkip = true
+			}
+		}
+	}
+	require.True(t, hasPass,
+		"mixed result should preserve passing findings")
+	require.True(t, hasSkip,
+		"mixed result should preserve skipped findings")
+}
+
 // Ensure unused imports are used
 var _ = scan.ExecRunner{}
 var _ = convert.PolicyFileName

@@ -4,11 +4,14 @@
 
 ### Added
 
+- **ampel-provider**: Added `WhenClause` type support for ampel policy serialization. Policies with `when:` guard predicates can now be loaded, merged, and written without losing the `when` field during round-trip.
+- **ampel-provider**: Added version guard that verifies ampel >= 1.4.2 at `Generate`/`Scan` time. Produces an actionable error message when an older ampel version is detected, instead of confusing partial failures from unrecognized CLI flags.
 - **all providers**: Populated `Evidence` entries on every `AssessmentLog` returned in `ScanResponse`, enabling auditors to trace each compliance assessment result back to the artifact that produced it. OpenSCAP attaches ARF file evidence with SHA256 digest, Ampel attaches both snappy and ampel in-toto attestation evidence with digests, and OPA attaches conftest input path evidence. Each provider now also declares `MappingReferences` on `ScanResponse` linking evidence to their source artifacts.
 - **internal/evidence**: New shared package providing `FileDigest()` for SHA256 file hashing, `HostRemark()` for host identification in evidence remarks (using hostname and `/etc/machine-id`), and centralized evidence type/ID constants used across all three providers. The machine-id file path is configurable via the `COMPLYTIME_MACHINE_ID_FILE` environment variable.
 
 ### Fixed
 
+- **ampel-provider**: SKIP evaluation results from ampel are now correctly parsed as `"skip"` findings instead of being misreported as failures. This enables multi-predicate-type policy bundles where policies targeting different attestation predicate types coexist in the same bundle. When all policies produce SKIP (no policy matched the attestation predicate type), the provider reports an error instead of an incorrect result. The `--allow-skip` flag is now passed to `ampel verify` to preserve per-policy SKIP signals.
 - **opa-provider**: Moved `url` and `input_path` from `RequiredTargetVariables` to `OptionalTargetVariableGroups` in `Describe()` response. `complyctl doctor` no longer reports false "missing variable" errors for these mutually exclusive variables. (Fixes #145)
 
 ### Security

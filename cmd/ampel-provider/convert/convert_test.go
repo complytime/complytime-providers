@@ -36,7 +36,7 @@ func loadExpectedBundle(t *testing.T, path string) *AmpelPolicyBundle {
 func TestLoadGranularPolicies(t *testing.T) {
 	policies, err := LoadGranularPolicies("testdata/policies")
 	require.NoError(t, err)
-	require.Len(t, policies, 5)
+	require.Len(t, policies, 6)
 
 	expectedIDs := []string{
 		"block-force-push",
@@ -44,6 +44,7 @@ func TestLoadGranularPolicies(t *testing.T) {
 		"prevent-admin-bypass",
 		"require-code-owner-review",
 		"require-pull-request",
+		"when-guard-policy",
 	}
 	for _, id := range expectedIDs {
 		p, ok := policies[id]
@@ -719,4 +720,73 @@ func TestWritePolicy(t *testing.T) {
 		require.Contains(t, string(data), "second")
 		require.NotContains(t, string(data), "first")
 	})
+}
+
+// --- WhenClause round-trip tests ---
+
+func TestWhenClause_RoundTrip(t *testing.T) {
+	// Load granular policies including the when-guard fixture.
+	granular, err := LoadGranularPolicies("testdata/policies")
+	require.NoError(t, err)
+
+	whenPolicy, ok := granular["when-guard-policy"]
+	require.True(t, ok, "expected when-guard-policy to be loaded")
+	require.NotNil(t, whenPolicy.When,
+		"When field must be populated from fixture")
+	expectedExpr := "predicates.exists(p, p.predicate_type ==" +
+		" 'http://example.com/predicate/v1')"
+	require.Equal(t, expectedExpr, whenPolicy.When.Expression)
+
+	// Merge into a bundle containing only the when-guarded policy.
+	bundle := MergeToBundle([]*AmpelPolicy{whenPolicy})
+
+	// Write the bundle to a temp directory.
+	dir := t.TempDir()
+	require.NoError(t, WritePolicy(bundle, dir))
+
+	// Read the written file back and unmarshal.
+	data, err := os.ReadFile(filepath.Join(dir, PolicyFileName))
+	require.NoError(t, err)
+
+	var roundTripped AmpelPolicyBundle
+	require.NoError(t, json.Unmarshal(data, &roundTripped))
+
+	// Verify the when clause survived the round-trip.
+	require.Len(t, roundTripped.Policies, 1)
+	rtPolicy := roundTripped.Policies[0]
+	require.Equal(t, "when-guard-policy", rtPolicy.ID)
+	require.NotNil(t, rtPolicy.When,
+		"When field must survive marshal/unmarshal round-trip")
+	assert.Equal(t, expectedExpr, rtPolicy.When.Expression)
+}
+
+func TestWhenClause_OmittedWhenNil(t *testing.T) {
+	// A policy without a When guard must not emit the "when" key.
+	bundle := &AmpelPolicyBundle{
+		ID: "no-when-bundle",
+		Policies: []*AmpelPolicy{
+			{
+				ID:   "plain-policy",
+				Meta: PolicyMeta{Description: "no when guard"},
+				Tenets: []AmpelTenet{
+					{
+						ID:   "01",
+						Code: "true",
+						Predicates: PredicateSpec{
+							Types: []string{"http://example.com/v1"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	dir := t.TempDir()
+	require.NoError(t, WritePolicy(bundle, dir))
+
+	data, err := os.ReadFile(filepath.Join(dir, PolicyFileName))
+	require.NoError(t, err)
+
+	assert.NotContains(t, string(data), `"when"`,
+		"policies without When must not emit the when key")
 }

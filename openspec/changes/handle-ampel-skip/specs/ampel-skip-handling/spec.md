@@ -55,6 +55,20 @@ least one policy MUST produce PASS or FAIL for a valid evaluation.
 - **THEN** the provider preserves each finding's result as-is and does
   not convert to error
 
+### Requirement: Version guard ensures ampel >= 1.4.2
+The provider SHALL verify that the installed ampel CLI is version 1.4.2
+or later before executing scans. This prevents confusing partial
+failures from the unrecognized `--allow-skip` flag on older versions.
+
+#### Scenario: ampel version meets minimum requirement
+- **WHEN** `ampel version` reports a version >= 1.4.2
+- **THEN** `checkRequiredTools` succeeds and the scan proceeds
+
+#### Scenario: ampel version is below minimum requirement
+- **WHEN** `ampel version` reports a version < 1.4.2
+- **THEN** `checkRequiredTools` returns an actionable error indicating
+  the minimum required ampel version
+
 ### Requirement: WhenClause field in AmpelPolicy supports round-trip
 The AmpelPolicy struct SHALL include a `When` field so that policies
 with `when:` guards can be loaded, merged, and written without losing

@@ -23,8 +23,12 @@ supports `when:` gate predicates and `--allow-skip`, making the fix possible.
   `PerRepoResult` are SKIP (no policy matched the attestation predicate type),
   convert the result to an error. At least one policy must produce PASS or
   FAIL for a valid evaluation.
+- Add a version guard in `toolcheck.CheckVersion` that verifies ampel
+  >= 1.4.2 at `Generate`/`Scan` time, producing an actionable error
+  instead of confusing partial failures when an older ampel is installed.
 - Add test coverage for SKIP handling, the `--allow-skip` flag, the
-  `WhenClause` round-trip, and the all-SKIP-to-error conversion.
+  `WhenClause` round-trip, the all-SKIP-to-error conversion, and the
+  version guard.
 
 ## Capabilities
 
@@ -42,10 +46,16 @@ _(none — no existing spec-level behavior changes)_
 ## Impact
 
 - **Code**: `cmd/ampel-provider/results/results.go`, `cmd/ampel-provider/scan/scan.go`,
-  `cmd/ampel-provider/convert/types.go`, `cmd/ampel-provider/server/server.go`
-- **Tests**: `results/results_test.go`, `scan/scan_test.go`, `convert/convert_test.go`,
-  `server/server_test.go`
+  `cmd/ampel-provider/convert/types.go`, `cmd/ampel-provider/server/server.go`,
+  `cmd/ampel-provider/toolcheck/toolcheck.go`
+- **Tests**: `cmd/ampel-provider/results/results_test.go`,
+  `cmd/ampel-provider/scan/scan_test.go`,
+  `cmd/ampel-provider/convert/convert_test.go`,
+  `cmd/ampel-provider/server/server_test.go`
 - **Test fixtures**: new `results/testdata/ampel-verify-skip.json`
 - **Dependencies**: requires ampel >= 1.4.2 at runtime (CLI tool, not Go module)
+- **Documentation**: `CHANGELOG.md` (change entries for SKIP handling fix and
+  WhenClause support), `docs/man/complyctl-provider-ampel.md` (add minimum
+  ampel version >= 1.4.2 to EXTERNAL TOOLS section)
 - **External**: org-infra branch-protection policies need `when:` guards added
   (separate repo/PR, not in scope of this change)

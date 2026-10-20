@@ -96,6 +96,23 @@ type Finding struct {
 	Guidance string `json:"guidance,omitempty"`
 }
 
+// AllFindingsSkipped reports whether every finding in the result has
+// Result "skip". Returns false when the findings slice is empty, since
+// an empty result does not indicate a predicate-type mismatch.
+// Used by server.Scan to detect when no policy matched the attestation
+// predicate type (Decision 3 in the design doc).
+func (r *PerRepoResult) AllFindingsSkipped() bool {
+	if len(r.Findings) == 0 {
+		return false
+	}
+	for _, f := range r.Findings {
+		if f.Result != "skip" {
+			return false
+		}
+	}
+	return true
+}
+
 // ParseAmpelOutput parses the in-toto attestation produced by ampel verify
 // (with --attest-results) into a PerRepoResult. The attestation predicate
 // contains the evaluation ResultSet with per-policy and per-tenet results.
@@ -158,6 +175,11 @@ func ParseAmpelOutput(raw []byte, repo, branch string) (*PerRepoResult, error) {
 				if er.Assessment != nil {
 					finding.Reason = stripControlChars(er.Assessment.Message)
 				}
+			case "SKIP":
+				finding.Result = "skip"
+				if er.Assessment != nil {
+					finding.Reason = stripControlChars(er.Assessment.Message)
+				}
 			default:
 				finding.Result = "fail"
 				if er.Error != nil {
@@ -177,10 +199,12 @@ func ParseAmpelOutput(raw []byte, repo, branch string) (*PerRepoResult, error) {
 		}
 	}
 
-	overallStatus := strings.ToUpper(stmt.Predicate.Status)
-	if overallStatus == "PASS" {
+	switch strings.ToUpper(stmt.Predicate.Status) {
+	case "PASS":
 		result.Status = "pass"
-	} else {
+	case "SKIP":
+		result.Status = "skip"
+	default:
 		result.Status = "fail"
 	}
 

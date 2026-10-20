@@ -247,6 +247,18 @@ func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*pr
 					continue
 				}
 
+				// All-SKIP detection: when every finding skipped, no policy's
+				// declared predicate types matched the attestation. This is a
+				// misconfiguration, not a valid scan result (Decision 3).
+				// Clear findings so ToScanResponse routes the result to
+				// operational errors (status "error" + no findings).
+				if parsed.AllFindingsSkipped() {
+					parsed.Status = "error"
+					parsed.Error = "all policies were skipped: " +
+						"no policies matched the attestation predicate type"
+					parsed.Findings = nil
+				}
+
 				// Thread attestation paths, spec label, and host remark from scan result
 				parsed.AmpelAttestationPath = rawResult.AmpelAttestationPath
 				parsed.SnappyAttestationPath = rawResult.SnappyAttestationPath
@@ -379,7 +391,8 @@ func resolvePolicyDir(logger hclog.Logger, req *provider.GenerateRequest) (strin
 	return config.GranularPolicyDirPath(), nil
 }
 
-// checkRequiredTools validates that all required AMPEL tools are on PATH.
+// checkRequiredTools validates that all required AMPEL tools are on PATH
+// and that ampel meets the minimum version for --allow-skip support.
 func checkRequiredTools(logger hclog.Logger) error {
 	if SkipToolCheck {
 		return nil
@@ -391,6 +404,10 @@ func checkRequiredTools(logger hclog.Logger) error {
 	if len(missing) > 0 {
 		logger.Warn("required tools missing", "tools", missing)
 		return toolcheck.FormatMissingToolsError(missing)
+	}
+	// Verify ampel version supports --allow-skip.
+	if err := toolcheck.CheckVersion(toolcheck.MinAmpelVersion); err != nil {
+		return err
 	}
 	return nil
 }

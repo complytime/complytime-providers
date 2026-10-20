@@ -114,6 +114,29 @@ forward-compatible extensibility. Rejected because ampel's `when`
 schema is `{expression: string}` and Go's type safety is preferred
 over speculative flexibility.
 
+### 5. Version guard in toolcheck (toolcheck.go)
+
+**Decision**: Add `CheckVersion(minVersion string) error` to
+`toolcheck.go`. Run `ampel version`, parse the version string,
+and return an error if below the minimum. Call from
+`checkRequiredTools` in `server.go` after the existing PATH check.
+
+**Rationale**: Adding `--allow-skip` unconditionally means ampel
+< 1.4.2 will fail with a confusing "unknown flag" error that
+surfaces only when reading the missing results file. The version
+guard fails fast with an actionable message ("ampel >= 1.4.2
+required") at `Generate`/`Scan` time, before any work is done.
+No semver library is needed — a simple major.minor.patch string
+comparison is sufficient for a fixed version floor.
+
+**Alternative considered**: Making `--allow-skip` conditional on
+detected version (degrade gracefully). Rejected because it would
+silently hide SKIP results for old ampel versions, defeating the
+purpose of this change. Also considered documentation-only
+approach, but the RPM spec cannot express the constraint (ampel
+is not packaged) and the devcontainer/README are not enforcement
+mechanisms.
+
 ## Risks / Trade-offs
 
 - **[Risk] `when` expression requires per-policy predicate type URLs**:

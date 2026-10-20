@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package convert
 
 // AmpelPolicyBundle is the top-level document written to disk for ampel verify.
@@ -22,7 +24,17 @@ type Framework struct {
 type AmpelPolicy struct {
 	ID     string       `json:"id"`
 	Meta   PolicyMeta   `json:"meta"`
+	When   *WhenClause  `json:"when,omitempty"`
 	Tenets []AmpelTenet `json:"tenets"`
+}
+
+// WhenClause holds a CEL guard expression that controls whether a
+// policy is evaluated. Ampel skips evaluation when the expression
+// evaluates to false, producing a SKIP result instead. The pointer
+// field with omitempty on AmpelPolicy avoids emitting the key for
+// policies that have no guard.
+type WhenClause struct {
+	Expression string `json:"expression"`
 }
 
 // PolicyMeta holds metadata for an individual policy.
