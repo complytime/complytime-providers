@@ -71,9 +71,14 @@ are not set manually by the user.
 
 # EXTERNAL TOOLS
 
-Requires **snappy** and **ampel** CLI tools at runtime. These tools are
-not currently packaged in Fedora and must be installed separately. See
-the Carabiner project for installation instructions:
+Requires **snappy** and **ampel** CLI tools at runtime. **ampel** version
+1.4.2 or later is required for SKIP handling and the **--allow-skip**
+flag. The provider verifies the ampel version at **Generate**/**Scan**
+time and reports an actionable error if the installed version is below
+the minimum.
+
+These tools are not currently packaged in Fedora and must be installed
+separately. See the Carabiner project for installation instructions:
 <https://github.com/carabiner-dev>
 
 # FILES

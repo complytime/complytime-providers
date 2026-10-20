@@ -1,0 +1,30 @@
+{
+  "id": "when-guard-policy",
+  "meta": {
+    "description": "Policy with a when guard for predicate type filtering",
+    "controls": [
+      { "framework": "repo-branch-protection", "class": "source-code", "id": "when-guard-test" }
+    ]
+  },
+  "when": {
+    "expression": "predicates.exists(p, p.predicate_type == 'http://example.com/predicate/v1')"
+  },
+  "tenets": [
+    {
+      "id": "01",
+      "code": "predicates[0].data.values.enabled == true",
+      "predicates": {
+        "types": [
+          "http://example.com/predicate/v1"
+        ]
+      },
+      "assessment": {
+        "message": "Feature is enabled."
+      },
+      "error": {
+        "message": "Feature is not enabled",
+        "guidance": "Enable the feature in configuration."
+      }
+    }
+  ]
+}
