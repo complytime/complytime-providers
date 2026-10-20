@@ -67,6 +67,13 @@ func TestFormatMissingToolsError_Empty(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestCheckVersion_AmpelNotFound(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	err := CheckVersion("1.4.2")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "ampel command not found")
+}
+
 func TestCheckVersion_OutputParsing(t *testing.T) {
 	tests := []struct {
 		name    string

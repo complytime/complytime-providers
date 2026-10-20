@@ -38,12 +38,16 @@ var versionPattern = regexp.MustCompile(`(\d+\.\d+\.\d+)`)
 // version is below minVersion. This ensures the provider does not pass
 // flags (e.g. --allow-skip) that older ampel versions do not support.
 func CheckVersion(minVersion string) error {
+	cmdPath, err := exec.LookPath("ampel")
+	if err != nil {
+		return fmt.Errorf("ampel command not found: %w", err)
+	}
 	ctx, cancel := context.WithTimeout(
 		context.Background(), 5*time.Second,
 	)
 	defer cancel()
 	out, err := exec.CommandContext(
-		ctx, "ampel", "version",
+		ctx, cmdPath, "version",
 	).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf(
