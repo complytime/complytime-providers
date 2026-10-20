@@ -990,9 +990,39 @@ func TestScan_DigestFailure_ReturnsError(t *testing.T) {
 		"error should indicate the digest failure")
 }
 
-// makeAllSkipAmpelAttestation creates an ampel ResultSet attestation where
-// every policy evaluation produced SKIP (no predicate type match).
-func makeAllSkipAmpelAttestation() []byte {
+// testPolicyResult describes a single policy evaluation for the
+// makeAmpelAttestation builder.
+type testPolicyResult struct {
+	policyID    string
+	status      string
+	evalID      string
+	evalStatus  string
+	message     string
+	description string
+}
+
+// makeAmpelAttestation builds an ampel ResultSet in-toto attestation
+// with the given overall status and per-policy results. Use this
+// instead of one-off helpers to avoid duplicating the envelope
+// structure across tests.
+func makeAmpelAttestation(
+	overallStatus string, policies []testPolicyResult,
+) []byte {
+	results := make([]map[string]any, len(policies))
+	for i, p := range policies {
+		results[i] = map[string]any{
+			"status": p.status,
+			"policy": map[string]string{"id": p.policyID},
+			"eval_results": []map[string]any{
+				{
+					"id":         p.evalID,
+					"status":     p.evalStatus,
+					"assessment": map[string]string{"message": p.message},
+				},
+			},
+			"meta": map[string]string{"description": p.description},
+		}
+	}
 	stmt := map[string]any{
 		"_type": "https://in-toto.io/Statement/v1",
 		"subject": []map[string]any{
@@ -1003,94 +1033,37 @@ func makeAllSkipAmpelAttestation() []byte {
 		},
 		"predicateType": "https://carabiner.dev/ampel/resultset/v0",
 		"predicate": map[string]any{
-			"status": "SKIP",
-			"results": []map[string]any{
-				{
-					"status": "SKIP",
-					"policy": map[string]string{"id": "BP-1.01"},
-					"eval_results": []map[string]any{
-						{
-							"id":     "when",
-							"status": "SKIP",
-							"assessment": map[string]string{
-								"message": "No matching predicate type found for policy",
-							},
-						},
-					},
-					"meta": map[string]string{
-						"description": "Validate branch protection",
-					},
-				},
-			},
+			"status":  overallStatus,
+			"results": results,
 		},
 	}
 	data, _ := json.Marshal(stmt)
 	return data
 }
 
-// makeMixedSkipPassAmpelAttestation creates an ampel ResultSet attestation
-// with one PASS policy and one SKIP policy (mixed result).
-func makeMixedSkipPassAmpelAttestation() []byte {
-	stmt := map[string]any{
-		"_type": "https://in-toto.io/Statement/v1",
-		"subject": []map[string]any{
-			{
-				"name":   "test-subject",
-				"digest": map[string]string{"sha256": "abc123def456"},
-			},
-		},
-		"predicateType": "https://carabiner.dev/ampel/resultset/v0",
-		"predicate": map[string]any{
-			"status": "PASS",
-			"results": []map[string]any{
-				{
-					"status": "PASS",
-					"policy": map[string]string{"id": "BP-1.01"},
-					"eval_results": []map[string]any{
-						{
-							"id":     "01",
-							"status": "PASS",
-							"assessment": map[string]string{
-								"message": "PR required",
-							},
-						},
-					},
-					"meta": map[string]string{
-						"description": "Validate branch protection",
-					},
-				},
-				{
-					"status": "SKIP",
-					"policy": map[string]string{"id": "BP-3.01"},
-					"eval_results": []map[string]any{
-						{
-							"id":     "when",
-							"status": "SKIP",
-							"assessment": map[string]string{
-								"message": "No matching predicate type found for policy",
-							},
-						},
-					},
-					"meta": map[string]string{
-						"description": "Validate force push blocking",
-					},
-				},
-			},
-		},
+// withMockScanRunner installs a mockScanRunner with the given ampel
+// output and a default snappy attestation. The original runner is
+// restored via t.Cleanup.
+func withMockScanRunner(t *testing.T, ampelOutput []byte) {
+	t.Helper()
+	origRunner := ScanRunner
+	ScanRunner = &mockScanRunner{
+		snappyOutput: makeTestAttestation(),
+		ampelOutput:  ampelOutput,
 	}
-	data, _ := json.Marshal(stmt)
-	return data
+	t.Cleanup(func() { ScanRunner = origRunner })
 }
 
 func TestScan_AllSkipConvertedToError(t *testing.T) {
 	s, _ := setupServerWithGenerate(t)
-
-	origRunner := ScanRunner
-	ScanRunner = &mockScanRunner{
-		snappyOutput: makeTestAttestation(),
-		ampelOutput:  makeAllSkipAmpelAttestation(),
-	}
-	defer func() { ScanRunner = origRunner }()
+	withMockScanRunner(t, makeAmpelAttestation("SKIP", []testPolicyResult{
+		{
+			policyID: "BP-1.01", status: "SKIP",
+			evalID: "when", evalStatus: "SKIP",
+			message:     "No matching predicate type found for policy",
+			description: "Validate branch protection",
+		},
+	}))
 
 	resp, err := s.Scan(context.Background(), &provider.ScanRequest{
 		Targets: []provider.Target{
@@ -1112,13 +1085,20 @@ func TestScan_AllSkipConvertedToError(t *testing.T) {
 
 func TestScan_MixedSkipPass_NotConvertedToError(t *testing.T) {
 	s, _ := setupServerWithGenerate(t)
-
-	origRunner := ScanRunner
-	ScanRunner = &mockScanRunner{
-		snappyOutput: makeTestAttestation(),
-		ampelOutput:  makeMixedSkipPassAmpelAttestation(),
-	}
-	defer func() { ScanRunner = origRunner }()
+	withMockScanRunner(t, makeAmpelAttestation("PASS", []testPolicyResult{
+		{
+			policyID: "BP-1.01", status: "PASS",
+			evalID: "01", evalStatus: "PASS",
+			message:     "PR required",
+			description: "Validate branch protection",
+		},
+		{
+			policyID: "BP-3.01", status: "SKIP",
+			evalID: "when", evalStatus: "SKIP",
+			message:     "No matching predicate type found for policy",
+			description: "Validate force push blocking",
+		},
+	}))
 
 	resp, err := s.Scan(context.Background(), &provider.ScanRequest{
 		Targets: []provider.Target{
