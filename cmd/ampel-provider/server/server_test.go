@@ -931,6 +931,65 @@ func TestScan_MissingScanConfig_FallsBack(t *testing.T) {
 	require.Equal(t, "BP-1.01", scanResp.Assessments[0].RequirementID)
 }
 
+// mockDigestFailRunner simulates a scenario where scan artifacts are
+// produced successfully but become unreadable before digest computation.
+// During the ampel command, it deletes the snappy attestation file.
+type mockDigestFailRunner struct {
+	snappyOutput []byte
+	ampelOutput  []byte
+}
+
+func (m *mockDigestFailRunner) Run(name string, args ...string) ([]byte, error) {
+	return m.run(name, args...)
+}
+
+func (m *mockDigestFailRunner) RunWithEnv(_ []string, name string, args ...string) ([]byte, error) {
+	return m.run(name, args...)
+}
+
+func (m *mockDigestFailRunner) run(name string, args ...string) ([]byte, error) {
+	if name == "snappy" {
+		return m.snappyOutput, nil
+	}
+	for i, arg := range args {
+		if arg == "--results-path" && i+1 < len(args) {
+			resultsPath := args[i+1]
+			// Write valid ampel output
+			_ = os.WriteFile(resultsPath, m.ampelOutput, 0600)
+			// Delete the snappy attestation to simulate file loss between
+			// scan and digest computation
+			snappyPath := resultsPath[:len(resultsPath)-len("-ampel.intoto.json")] +
+				"-snappy.intoto.json"
+			_ = os.Remove(snappyPath)
+			break
+		}
+	}
+	return nil, nil
+}
+
+func TestScan_DigestFailure_ReturnsError(t *testing.T) {
+	s, _ := setupServerWithGenerate(t)
+
+	origRunner := ScanRunner
+	ScanRunner = &mockDigestFailRunner{
+		snappyOutput: makeTestAttestation(),
+		ampelOutput:  makeAmpelResultAttestation(),
+	}
+	defer func() { ScanRunner = origRunner }()
+
+	_, err := s.Scan(context.Background(), &provider.ScanRequest{
+		Targets: []provider.Target{
+			{TargetID: "myorg-repo1", Variables: map[string]string{
+				"url":   "https://github.com/myorg/repo1",
+				"specs": "builtin:github/branch-rules.yaml",
+			}},
+		},
+	})
+	require.Error(t, err, "scan should fail when digest computation fails")
+	require.Contains(t, err.Error(), "evidence digest failed",
+		"error should indicate the digest failure")
+}
+
 // Ensure unused imports are used
 var _ = scan.ExecRunner{}
 var _ = convert.PolicyFileName

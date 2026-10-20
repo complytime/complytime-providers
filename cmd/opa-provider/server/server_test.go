@@ -881,6 +881,41 @@ func TestScan_LocalPath_HappyPath(t *testing.T) {
 	assert.NotEmpty(t, resp.Assessments)
 }
 
+func TestScan_LocalPath_StatFailure(t *testing.T) {
+	// When the input path becomes inaccessible after conftest evaluation,
+	// the stat error must be propagated (not silently ignored).
+	workDir := t.TempDir()
+	writeScanConfig(t, workDir)
+
+	nonexistentPath := filepath.Join(t.TempDir(), "vanished")
+	runner := conftestRunner(conftestHappyJSON)
+	ldr := &mockLoader{
+		loadFn: func(_ provider.Target, _ string) (string, error) {
+			return nonexistentPath, nil
+		},
+	}
+
+	srv := New(ServerOptions{
+		Loader:       ldr,
+		Runner:       runner,
+		ToolChecker:  func() ([]string, error) { return nil, nil },
+		WorkspaceDir: workDir,
+	})
+	req := makeScanRequest(t, []provider.Target{
+		localTarget(t, nonexistentPath, "ghcr.io/org/bundle:dev"),
+	})
+	resp, err := srv.Scan(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	// The stat failure should surface as an error on the target result,
+	// not be silently swallowed.
+	require.NotEmpty(t, resp.Errors,
+		"stat failure must appear in response errors")
+	assert.Contains(t, resp.Errors[0], "stat input for digest",
+		"error message should reference the stat failure")
+}
+
 func TestScan_RemoteURL_HappyPath(t *testing.T) {
 	workDir := t.TempDir()
 	writeScanConfig(t, workDir)

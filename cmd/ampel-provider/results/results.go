@@ -15,6 +15,7 @@ import (
 	"github.com/complytime/complyctl/pkg/provider"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/intoto"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/targets"
+	"github.com/complytime/complytime-providers/internal/evidence"
 )
 
 const maxFieldSize = 10 * 1024 // 10KB per field
@@ -69,14 +70,21 @@ type ampelResultMeta struct {
 	Description string `json:"description"`
 }
 
-// PerRepoResult holds scan findings for a single repository.
+// PerRepoResult holds scan findings for a single repository/branch/spec
+// combination.
 type PerRepoResult struct {
-	Repository string    `json:"repository"`
-	Branch     string    `json:"branch"`
-	ScannedAt  time.Time `json:"scanned_at"`
-	Findings   []Finding `json:"findings"`
-	Status     string    `json:"status"`
-	Error      string    `json:"error,omitempty"`
+	Repository            string    `json:"repository"`
+	Branch                string    `json:"branch"`
+	SpecLabel             string    `json:"spec_label,omitempty"`
+	ScannedAt             time.Time `json:"scanned_at"`
+	Findings              []Finding `json:"findings"`
+	Status                string    `json:"status"`
+	Error                 string    `json:"error,omitempty"`
+	AmpelAttestationPath  string    `json:"ampel_attestation_path,omitempty"`
+	SnappyAttestationPath string    `json:"snappy_attestation_path,omitempty"`
+	AmpelDigest           string    `json:"ampel_digest,omitempty"`
+	SnappyDigest          string    `json:"snappy_digest,omitempty"`
+	Remarks               string    `json:"remarks,omitempty"`
 }
 
 // Finding represents an individual rule evaluation result.
@@ -221,6 +229,8 @@ func ToScanResponse(repoResults []*PerRepoResult, allRequirementIDs []string) *p
 		guidances     []string
 		passCount     int
 		totalCount    int
+		repos         []*PerRepoResult
+		repoSeen      map[*PerRepoResult]bool
 	}
 
 	groups := make(map[string]*reqGroup)
@@ -237,9 +247,18 @@ func ToScanResponse(repoResults []*PerRepoResult, allRequirementIDs []string) *p
 
 			g, ok := groups[reqID]
 			if !ok {
-				g = &reqGroup{requirementID: reqID}
+				g = &reqGroup{
+					requirementID: reqID,
+					repoSeen:      make(map[*PerRepoResult]bool),
+				}
 				groups[reqID] = g
 				order = append(order, reqID)
+			}
+
+			// Track all contributing repos for evidence aggregation
+			if !g.repoSeen[rr] {
+				g.repos = append(g.repos, rr)
+				g.repoSeen[rr] = true
 			}
 
 			result := mapResult(f.Result, rr.Status)
@@ -269,25 +288,41 @@ func ToScanResponse(repoResults []*PerRepoResult, allRequirementIDs []string) *p
 	// The allRequirementIDs are the Gemara requirement IDs from the assessment
 	// configurations sent during Generate; every requirement ID should appear
 	// in the response so complyctl can correlate results.
+	//
+	// When all repos errored (allScanned is empty), synthetic assessments
+	// are skipped because they cannot carry evidence. The spec requires at
+	// least one Evidence entry per AssessmentLog. Errors are already captured
+	// in opErrors for the caller to report.
 	if allRequirementIDs != nil {
-		syntheticSteps := buildSyntheticSteps(repoResults)
-		syntheticPass := 0
-		syntheticGuidances := make([]string, len(syntheticSteps))
-		for _, s := range syntheticSteps {
-			if s.Result == provider.ResultPassed {
-				syntheticPass++
-			}
-		}
-		for _, reqID := range allRequirementIDs {
-			if _, exists := groups[reqID]; !exists {
-				groups[reqID] = &reqGroup{
-					requirementID: reqID,
-					steps:         syntheticSteps,
-					guidances:     syntheticGuidances,
-					passCount:     syntheticPass,
-					totalCount:    len(syntheticSteps),
+		allScanned := scannedRepos(repoResults)
+		if len(allScanned) > 0 {
+			syntheticSteps := buildSyntheticSteps(repoResults)
+			syntheticPass := 0
+			syntheticGuidances := make([]string, len(syntheticSteps))
+			for _, s := range syntheticSteps {
+				if s.Result == provider.ResultPassed {
+					syntheticPass++
 				}
-				order = append(order, reqID)
+			}
+			allScannedSeen := make(
+				map[*PerRepoResult]bool, len(allScanned),
+			)
+			for _, rr := range allScanned {
+				allScannedSeen[rr] = true
+			}
+			for _, reqID := range allRequirementIDs {
+				if _, exists := groups[reqID]; !exists {
+					groups[reqID] = &reqGroup{
+						requirementID: reqID,
+						steps:         syntheticSteps,
+						guidances:     syntheticGuidances,
+						passCount:     syntheticPass,
+						totalCount:    len(syntheticSteps),
+						repos:         allScanned,
+						repoSeen:      allScannedSeen,
+					}
+					order = append(order, reqID)
+				}
 			}
 		}
 	}
@@ -321,16 +356,143 @@ func ToScanResponse(repoResults []*PerRepoResult, allRequirementIDs []string) *p
 			)
 		}
 
-		assessments = append(assessments, provider.AssessmentLog{
+		assessment := provider.AssessmentLog{
 			RequirementID:  g.requirementID,
 			Steps:          g.steps,
 			Message:        msg,
 			Recommendation: recommendation,
 			Confidence:     provider.ConfidenceLevelHigh,
-		})
+		}
+		// Collect evidence from all contributing repos
+		var allEvidence []provider.Evidence
+		for _, rr := range g.repos {
+			allEvidence = append(allEvidence, buildRepoEvidence(rr)...)
+		}
+		assessment.Evidence = allEvidence
+		assessments = append(assessments, assessment)
 	}
 
-	return &provider.ScanResponse{Assessments: assessments, Errors: opErrors}
+	return &provider.ScanResponse{
+		Assessments:       assessments,
+		Errors:            opErrors,
+		MappingReferences: buildMappingReferences(repoResults),
+	}
+}
+
+// scannedRepos returns all non-error PerRepoResults, or nil if all
+// repos errored. Used to associate synthetic assessments (requirement
+// IDs with no findings) with evidence from every contributing repo.
+func scannedRepos(repoResults []*PerRepoResult) []*PerRepoResult {
+	var repos []*PerRepoResult
+	for _, rr := range repoResults {
+		if rr.Status != "error" {
+			repos = append(repos, rr)
+		}
+	}
+	return repos
+}
+
+// repoEvidencePrefix builds a human-readable ID suffix from repo
+// URL, branch, and optional spec label using evidence.JoinForID.
+// The repo URL scheme is stripped since it carries no identity.
+// Components are joined with underscore separators, producing IDs
+// like "github-com--org--repo_main_branch-rules".
+func repoEvidencePrefix(repo, branch, specLabel string) string {
+	components := []string{evidence.StripURLScheme(repo), branch}
+	if specLabel != "" {
+		components = append(components, specLabel)
+	}
+	return evidence.JoinForID(components...)
+}
+
+// buildRepoEvidence constructs two provider.Evidence entries for a
+// repo result: one for the ampel attestation and one for the snappy
+// attestation. Both paths and digests are pre-computed by the caller
+// (server.go) to keep this function pure. The evidence ID includes
+// the spec label to disambiguate scans of the same repo/branch with
+// different spec files.
+func buildRepoEvidence(rr *PerRepoResult) []provider.Evidence {
+	if rr.AmpelAttestationPath == "" && rr.SnappyAttestationPath == "" {
+		return nil
+	}
+
+	prefix := repoEvidencePrefix(rr.Repository, rr.Branch, rr.SpecLabel)
+	collectedAt := rr.ScannedAt.UTC().Format(time.RFC3339)
+
+	var evs []provider.Evidence
+	if rr.AmpelAttestationPath != "" {
+		evs = append(evs, provider.Evidence{
+			ID:          evidence.IDPrefixAmpel + prefix,
+			Type:        evidence.TypeIntotoAttestation,
+			CollectedAt: collectedAt,
+			Source: &provider.EvidenceSource{
+				ReferenceID: evidence.RefPrefixAmpel + prefix,
+				Coordinate:  rr.AmpelAttestationPath,
+				Digest:      rr.AmpelDigest,
+				Remarks:     rr.Remarks,
+			},
+		})
+	}
+	if rr.SnappyAttestationPath != "" {
+		evs = append(evs, provider.Evidence{
+			ID:          evidence.IDPrefixSnappy + prefix,
+			Type:        evidence.TypeIntotoAttestation,
+			CollectedAt: collectedAt,
+			Source: &provider.EvidenceSource{
+				ReferenceID: evidence.RefPrefixSnappy + prefix,
+				Coordinate:  rr.SnappyAttestationPath,
+				Digest:      rr.SnappyDigest,
+				Remarks:     rr.Remarks,
+			},
+		})
+	}
+	return evs
+}
+
+// buildMappingReferences constructs MappingReference entries from the
+// unique attestation paths across all repo results. Error repos are
+// excluded.
+func buildMappingReferences(repoResults []*PerRepoResult) []provider.MappingReference {
+	seen := make(map[string]bool)
+	var refs []provider.MappingReference
+
+	for _, rr := range repoResults {
+		if rr.Status == "error" {
+			continue
+		}
+		prefix := repoEvidencePrefix(
+			rr.Repository, rr.Branch, rr.SpecLabel,
+		)
+		repoName := targets.RepoDisplayName(rr.Repository)
+		label := repoName + "@" + rr.Branch
+
+		ampelID := evidence.RefPrefixAmpel + prefix
+		if rr.AmpelAttestationPath != "" && !seen[ampelID] {
+			seen[ampelID] = true
+			refs = append(refs, provider.MappingReference{
+				ID:          ampelID,
+				Title:       "Ampel policy attestation for " + label,
+				Description: "In-toto attestation from ampel policy evaluation",
+				URL:         evidence.FileURL(rr.AmpelAttestationPath),
+			})
+		}
+
+		snappyID := evidence.RefPrefixSnappy + prefix
+		if rr.SnappyAttestationPath != "" && !seen[snappyID] {
+			seen[snappyID] = true
+			refs = append(refs, provider.MappingReference{
+				ID:          snappyID,
+				Title:       "Snappy observation for " + label,
+				Description: "In-toto attestation from snappy data collection",
+				URL:         evidence.FileURL(rr.SnappyAttestationPath),
+			})
+		}
+	}
+
+	sort.Slice(refs, func(i, j int) bool {
+		return refs[i].ID < refs[j].ID
+	})
+	return refs
 }
 
 // buildSyntheticSteps builds per-repository steps so that synthetic

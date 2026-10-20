@@ -87,6 +87,7 @@ complytime-providers/
 │   ├── archive/               # Shared tar.gz extraction with security constraints
 │   ├── complytime/
 │   │   └── testdata/openscap/ # XML test fixtures
+│   ├── evidence/              # Shared SHA256 file digest and evidence constants
 │   └── version/               # Build-time version injection
 ├── docs/                      # Provider development guide
 │   └── man/                   #   Man page sources (Pandoc markdown) and generated .1 files

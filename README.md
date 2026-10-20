@@ -54,7 +54,7 @@ internal/
 docs/                    # Documentation
 ```
 
-Each provider is self-contained under `cmd/<name>-provider/` with its own subpackage hierarchy. Shared utilities live in `internal/`: `internal/archive/` provides secure archive extraction for complypack content, and `internal/version/` provides build-time version injection.
+Each provider is self-contained under `cmd/<name>-provider/` with its own subpackage hierarchy. Shared utilities live in `internal/`: `internal/archive/` provides secure archive extraction for complypack content, `internal/evidence/` provides SHA256 file digest computation and evidence constants for scan provenance, and `internal/version/` provides build-time version injection.
 
 ## Documentation
 
