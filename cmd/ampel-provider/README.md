@@ -140,7 +140,7 @@ Since snappy and ampel are not available as RPM packages, install them using `go
 
 ```bash
 go install github.com/carabiner-dev/snappy@latest
-go install github.com/carabiner-dev/ampel/cmd/ampel@latest
+go install github.com/policylabs/ampel/cmd/ampel@latest
 ```
 
 Ensure the Go binary directory is in your PATH:
