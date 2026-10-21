@@ -1,0 +1,25 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "enabledManagers overrides the org preset (gomod-only) to add",
+    "a custom regex manager that tracks external tool version pins",
+    "(snappy, ampel, conftest) in CI workflows and devcontainer",
+    "scripts. gomod is preserved for Go toolchain patch tracking."
+  ],
+  "enabledManagers": ["gomod", "custom.tool-versions"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerName": "tool-versions",
+      "description": "Track tool version pins annotated with inline renovate comments",
+      "fileMatch": [
+        "^\\.github/workflows/.*\\.yml$",
+        "^\\.devcontainer/scripts/post-create\\.sh$"
+      ],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=(?<datasource>[a-z-]+)\\s+depName=(?<depName>[^\\s]+)\\n[^\\n]*?(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+      ],
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    }
+  ]
+}

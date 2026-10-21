@@ -61,16 +61,21 @@ jobs:
             # when using the default install-dir. Use an absolute path
             # until upstream fix lands (carabiner-dev/actions).
             - name: Install snappy
-              uses: carabiner-dev/actions/install/snappy@d41fe10fe88deaf493ce026007da73738b9f570c # v1.3.0
+              uses: carabiner-dev/actions/install/snappy@a206c75025db8588f1b065e0630ef3e7fca0fcc4 # post-v1.3.0 (policylabs org support)
               with:
                   install-dir: /home/runner/.carabiner
+                  # renovate: datasource=github-releases depName=carabiner-dev/snappy
+                  version: v0.2.6
 
             - name: Install ampel
-              uses: carabiner-dev/actions/install/ampel@d41fe10fe88deaf493ce026007da73738b9f570c # v1.3.0
+              uses: carabiner-dev/actions/install/ampel@a206c75025db8588f1b065e0630ef3e7fca0fcc4 # post-v1.3.0 (policylabs org support)
               with:
                   install-dir: /home/runner/.carabiner
+                  # renovate: datasource=github-releases depName=policylabs/ampel
+                  version: v1.4.2
 
             - name: Install conftest
+              # renovate: datasource=github-releases depName=open-policy-agent/conftest
               run: go install github.com/open-policy-agent/conftest@v0.68.2
 
             - name: Run cross-repo integration test

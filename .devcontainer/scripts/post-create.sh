@@ -37,14 +37,17 @@ echo "    Build complete. Binaries in ./bin/"
 # ---------------------------------------------------------------------------
 # Step 2: Install snappy, ampel, and conftest
 #
-# Pinned versions — update these when upgrading:
-#   snappy    v0.2.4   https://github.com/carabiner-dev/snappy
-#   ampel     v1.2.1   https://github.com/carabiner-dev/ampel
+# Pinned versions — tracked by Renovate (see renovate.json):
+#   snappy    v0.2.6   https://github.com/carabiner-dev/snappy
+#   ampel     v1.4.2   https://github.com/policylabs/ampel
 #   conftest  v0.68.2  https://github.com/open-policy-agent/conftest
 # ---------------------------------------------------------------------------
 echo ">>> Installing snappy, ampel, and conftest..."
-go install github.com/carabiner-dev/snappy@v0.2.4
-go install github.com/carabiner-dev/ampel/cmd/ampel@v1.2.1
+# renovate: datasource=github-releases depName=carabiner-dev/snappy
+go install github.com/carabiner-dev/snappy@v0.2.6
+# renovate: datasource=github-releases depName=policylabs/ampel
+go install github.com/policylabs/ampel/cmd/ampel@v1.4.2
+# renovate: datasource=github-releases depName=open-policy-agent/conftest
 go install github.com/open-policy-agent/conftest@v0.68.2
 echo "    snappy, ampel, and conftest installed."
 
