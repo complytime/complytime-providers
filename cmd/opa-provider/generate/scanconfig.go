@@ -19,7 +19,7 @@ const (
 type ScanConfig struct {
 	IDs            []string          `json:"ids"`
 	ReverseMapping map[string]string `json:"reverse_mapping"`
-	BundleDir      string            `json:"bundle_dir"`
+	PolicyDir      string            `json:"bundle_dir"`
 	GeneratedAt    string            `json:"generated_at"`
 }
 
@@ -28,20 +28,16 @@ func WriteScanConfig(
 	dir string,
 	ids []string,
 	reverseMap map[string]string,
-	bundleDir string,
+	policyDir string,
 ) error {
-	if err := os.MkdirAll(dir, 0750); err != nil {
-		return fmt.Errorf("creating generated directory: %w", err)
-	}
-
 	cfg := ScanConfig{
 		IDs:            ids,
 		ReverseMapping: reverseMap,
-		BundleDir:      bundleDir,
+		PolicyDir:      policyDir,
 		GeneratedAt:    time.Now().UTC().Format(time.RFC3339),
 	}
 
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	data, err := json.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshaling scan config: %w", err)
 	}

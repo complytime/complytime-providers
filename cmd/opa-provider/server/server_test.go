@@ -18,6 +18,7 @@ import (
 	"github.com/complytime/complyctl/pkg/provider"
 	"github.com/complytime/complytime-providers/cmd/opa-provider/config"
 	"github.com/complytime/complytime-providers/cmd/opa-provider/generate"
+	"github.com/complytime/complytime-providers/internal/genindex"
 )
 
 // --- Mocks ---
@@ -160,11 +161,34 @@ func remoteTarget(bundleRef, url string) provider.Target {
 func writeScanConfig(t *testing.T, workDir string) {
 	t.Helper()
 	cfg := config.NewConfig(workDir)
+	require.NoError(t, os.MkdirAll(cfg.GeneratedDirPath(), 0750))
 	require.NoError(t, generate.WriteScanConfig(
 		cfg.GeneratedDirPath(),
 		[]string{"main"},
 		map[string]string{"main": "test-req"},
 		t.TempDir(),
+	))
+}
+
+func writeIndexedScanConfig(
+	t *testing.T,
+	cfg *config.Config,
+	contentKey string,
+	ids []string,
+	reverseMapping map[string]string,
+	policyDir string,
+) {
+	t.Helper()
+	generatedDir := cfg.GeneratedDirForKey(contentKey)
+	require.NoError(t, os.MkdirAll(generatedDir, 0750))
+	require.NoError(t, generate.WriteScanConfig(generatedDir, ids, reverseMapping, policyDir))
+}
+
+func writePolicyMapping(t *testing.T, policyDir, mapping string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(policyDir, 0750))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(policyDir, generate.MappingFileName), []byte(mapping), 0600,
 	))
 }
 
@@ -294,12 +318,136 @@ func TestGenerate_WithMapping(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, resp.Success)
 
-	// Verify scan-config.json was written.
-	scanCfg, err := generate.ReadScanConfig(cfg.GeneratedDirPath())
+	// Verify scan-config.json was written in the content-addressed directory.
+	contentKey := genindex.ContentKey(
+		[]string{"kubernetes.resource_limits", "kubernetes.run_as_root"}, policyDir,
+	)
+	scanCfg, err := generate.ReadScanConfig(cfg.GeneratedDirForKey(contentKey))
 	require.NoError(t, err)
 	assert.Equal(t, []string{"kubernetes.resource_limits", "kubernetes.run_as_root"}, scanCfg.IDs)
 	assert.Equal(t, "CIS-1", scanCfg.ReverseMapping["kubernetes.run_as_root"])
 	assert.Equal(t, "CIS-2", scanCfg.ReverseMapping["kubernetes.resource_limits"])
+}
+
+func TestGenerate_MultipleTargets_WritesTargetIndexedConfigs(t *testing.T) {
+	workDir := t.TempDir()
+	cfg := config.NewConfig(workDir)
+	require.NoError(t, cfg.EnsureDirectories())
+
+	bundleRefA := "ghcr.io/org/bundle-a:v1"
+	bundleRefB := "ghcr.io/org/bundle-b:v1"
+	policyDirA := cfg.PolicyDirForBundle(bundleRefA)
+	policyDirB := cfg.PolicyDirForBundle(bundleRefB)
+	writePolicyMapping(t, policyDirA, `{"version":"1","mappings":[{"id":"namespace-a","requirement_id":"REQ-A"}]}`)
+	writePolicyMapping(t, policyDirB, `{"version":"1","mappings":[{"id":"namespace-b","requirement_id":"REQ-B"}]}`)
+
+	srv := New(ServerOptions{
+		Runner:       &mockRunner{response: []byte("ok")},
+		ToolChecker:  func() ([]string, error) { return nil, nil },
+		WorkspaceDir: workDir,
+	})
+
+	targetURLA := "https://example.com/target-a"
+	targetURLB := "https://example.com/target-b"
+	for _, req := range []*provider.GenerateRequest{
+		{
+			TargetVariables: map[string]string{"url": targetURLA, "opa_bundle_ref": bundleRefA},
+			Configuration:   []provider.AssessmentConfiguration{{RequirementID: "REQ-A"}},
+		},
+		{
+			TargetVariables: map[string]string{"url": targetURLB, "opa_bundle_ref": bundleRefB},
+			Configuration:   []provider.AssessmentConfiguration{{RequirementID: "REQ-B"}},
+		},
+	} {
+		response, err := srv.Generate(context.Background(), req)
+		require.NoError(t, err)
+		assert.True(t, response.Success, response.ErrorMessage)
+	}
+
+	contentKeyA := genindex.ContentKey([]string{"namespace-a"}, policyDirA)
+	contentKeyB := genindex.ContentKey([]string{"namespace-b"}, policyDirB)
+	assert.NotEqual(t, contentKeyA, contentKeyB)
+	configA, err := generate.ReadScanConfig(cfg.GeneratedDirForKey(contentKeyA))
+	require.NoError(t, err)
+	configB, err := generate.ReadScanConfig(cfg.GeneratedDirForKey(contentKeyB))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"namespace-a"}, configA.IDs)
+	assert.Equal(t, policyDirA, configA.PolicyDir)
+	assert.Equal(t, []string{"namespace-b"}, configB.IDs)
+	assert.Equal(t, policyDirB, configB.PolicyDir)
+
+	index, err := genindex.ReadIndex(cfg.GeneratedDirPath())
+	require.NoError(t, err)
+	assert.Equal(t, contentKeyA, index.Targets[genindex.TargetKey(targetURLA)])
+	assert.Equal(t, contentKeyB, index.Targets[genindex.TargetKey(targetURLB)])
+}
+
+func TestGenerate_IdenticalRequirementsDifferentPolicies_UsesDistinctContentKeys(t *testing.T) {
+	workDir := t.TempDir()
+	cfg := config.NewConfig(workDir)
+	require.NoError(t, cfg.EnsureDirectories())
+
+	bundleRefA := "ghcr.io/org/bundle-a:v1"
+	bundleRefB := "ghcr.io/org/bundle-b:v1"
+	policyDirA := cfg.PolicyDirForBundle(bundleRefA)
+	policyDirB := cfg.PolicyDirForBundle(bundleRefB)
+	mapping := `{"version":"1","mappings":[{"id":"shared-namespace","requirement_id":"REQ-1"}]}`
+	writePolicyMapping(t, policyDirA, mapping)
+	writePolicyMapping(t, policyDirB, mapping)
+
+	srv := New(ServerOptions{
+		Runner:       &mockRunner{response: []byte("ok")},
+		ToolChecker:  func() ([]string, error) { return nil, nil },
+		WorkspaceDir: workDir,
+	})
+	for _, variables := range []map[string]string{
+		{"url": "https://example.com/target-a", "opa_bundle_ref": bundleRefA},
+		{"url": "https://example.com/target-b", "opa_bundle_ref": bundleRefB},
+	} {
+		response, err := srv.Generate(context.Background(), &provider.GenerateRequest{
+			TargetVariables: variables,
+			Configuration:   []provider.AssessmentConfiguration{{RequirementID: "REQ-1"}},
+		})
+		require.NoError(t, err)
+		assert.True(t, response.Success, response.ErrorMessage)
+	}
+
+	contentKeyA := genindex.ContentKey([]string{"shared-namespace"}, policyDirA)
+	contentKeyB := genindex.ContentKey([]string{"shared-namespace"}, policyDirB)
+	assert.NotEqual(t, contentKeyA, contentKeyB)
+	assert.FileExists(t, filepath.Join(cfg.GeneratedDirForKey(contentKeyA), generate.ScanConfigFileName))
+	assert.FileExists(t, filepath.Join(cfg.GeneratedDirForKey(contentKeyB), generate.ScanConfigFileName))
+}
+
+func TestGenerate_InputPathTarget_IndexesInputPath(t *testing.T) {
+	workDir := t.TempDir()
+	cfg := config.NewConfig(workDir)
+	require.NoError(t, cfg.EnsureDirectories())
+
+	bundleRef := "ghcr.io/org/bundle:v1"
+	policyDir := cfg.PolicyDirForBundle(bundleRef)
+	writePolicyMapping(t, policyDir, `{"version":"1","mappings":[{"id":"namespace","requirement_id":"REQ-1"}]}`)
+	inputPath := filepath.Join(t.TempDir(), "input.yaml")
+
+	srv := New(ServerOptions{
+		Runner:       &mockRunner{response: []byte("ok")},
+		ToolChecker:  func() ([]string, error) { return nil, nil },
+		WorkspaceDir: workDir,
+	})
+	response, err := srv.Generate(context.Background(), &provider.GenerateRequest{
+		TargetVariables: map[string]string{
+			"input_path":     inputPath,
+			"opa_bundle_ref": bundleRef,
+		},
+		Configuration: []provider.AssessmentConfiguration{{RequirementID: "REQ-1"}},
+	})
+	require.NoError(t, err)
+	assert.True(t, response.Success, response.ErrorMessage)
+
+	index, err := genindex.ReadIndex(cfg.GeneratedDirPath())
+	require.NoError(t, err)
+	assert.Equal(t, genindex.ContentKey([]string{"namespace"}, policyDir),
+		index.Targets[genindex.TargetKey(inputPath)])
 }
 
 func TestGenerate_WithoutMapping(t *testing.T) {
@@ -390,11 +538,12 @@ func TestGenerate_WithComplypackContentPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, resp.Success, "generate should succeed with complypack path: %s", resp.ErrorMessage)
 
-	// Verify scan-config.json was written with the complypack dir as BundleDir.
-	scanCfg, err := generate.ReadScanConfig(cfg.GeneratedDirPath())
+	// Verify scan-config.json was written with the complypack dir as PolicyDir.
+	contentKey := genindex.ContentKey([]string{"kubernetes.check_one"}, complypackDir)
+	scanCfg, err := generate.ReadScanConfig(cfg.GeneratedDirForKey(contentKey))
 	require.NoError(t, err)
-	assert.Equal(t, complypackDir, scanCfg.BundleDir,
-		"scan config BundleDir should point to the complypack content path")
+	assert.Equal(t, complypackDir, scanCfg.PolicyDir,
+		"scan config PolicyDir should point to the complypack content path")
 	assert.Contains(t, scanCfg.IDs, "kubernetes.check_one")
 	assert.Equal(t, "REQ-1", scanCfg.ReverseMapping["kubernetes.check_one"])
 }
@@ -512,20 +661,22 @@ func TestGenerate_WithComplypackContentPath_TarGz(t *testing.T) {
 		resp.ErrorMessage)
 
 	// Verify scan-config.json was written with the extracted directory
-	// (not the tar.gz path) as BundleDir.
-	scanCfg, err := generate.ReadScanConfig(cfg.GeneratedDirPath())
+	// (not the tar.gz path) as PolicyDir.
+	contentKey := genindex.ContentKey([]string{"kubernetes.check_one"}, filepath.Join(
+		complypackCacheDir, "content"))
+	scanCfg, err := generate.ReadScanConfig(cfg.GeneratedDirForKey(contentKey))
 	require.NoError(t, err)
-	assert.NotEqual(t, archivePath, scanCfg.BundleDir,
-		"BundleDir should be the extracted directory, not the archive")
-	assert.DirExists(t, scanCfg.BundleDir,
-		"BundleDir should be an existing directory")
+	assert.NotEqual(t, archivePath, scanCfg.PolicyDir,
+		"PolicyDir should be the extracted directory, not the archive")
+	assert.DirExists(t, scanCfg.PolicyDir,
+		"PolicyDir should be an existing directory")
 	assert.Contains(t, scanCfg.IDs, "kubernetes.check_one")
 	assert.Equal(t, "REQ-1",
 		scanCfg.ReverseMapping["kubernetes.check_one"])
 
 	// Verify the mapping file exists in the extracted directory.
 	mappingPath := filepath.Join(
-		scanCfg.BundleDir, generate.MappingFileName,
+		scanCfg.PolicyDir, generate.MappingFileName,
 	)
 	assert.FileExists(t, mappingPath)
 }
@@ -689,7 +840,8 @@ func TestGenerate_PartialMatch(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, resp.Success)
 
-	scanCfg, err := generate.ReadScanConfig(cfg.GeneratedDirPath())
+	contentKey := genindex.ContentKey([]string{"ns1"}, policyDir)
+	scanCfg, err := generate.ReadScanConfig(cfg.GeneratedDirForKey(contentKey))
 	require.NoError(t, err)
 	assert.Equal(t, []string{"ns1"}, scanCfg.IDs)
 	assert.Equal(t, "CIS-1", scanCfg.ReverseMapping["ns1"])
@@ -748,9 +900,13 @@ func TestGenerate_Scan_WithMapping(t *testing.T) {
 		WorkspaceDir: workDir,
 	})
 
+	inputPath := t.TempDir()
 	// Step 1: Generate with mapping.
 	genResp, err := srv.Generate(context.Background(), &provider.GenerateRequest{
-		TargetVariables: map[string]string{"opa_bundle_ref": bundleRef},
+		TargetVariables: map[string]string{
+			"input_path":     inputPath,
+			"opa_bundle_ref": bundleRef,
+		},
 		Configuration: []provider.AssessmentConfiguration{
 			{RequirementID: "CIS-K8S-5.2.6", PlanID: "ap-cis-k8s-5.2.6"},
 		},
@@ -764,7 +920,7 @@ func TestGenerate_Scan_WithMapping(t *testing.T) {
 			{
 				TargetID: "local-test",
 				Variables: map[string]string{
-					"input_path":     t.TempDir(),
+					"input_path":     inputPath,
 					"opa_bundle_ref": bundleRef,
 				},
 			},
@@ -941,6 +1097,172 @@ func TestScan_RemoteURL_HappyPath(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.NotEmpty(t, resp.Assessments)
+}
+
+func TestScan_IndexResolvesURLAndInputPathTargets(t *testing.T) {
+	workDir := t.TempDir()
+	cfg := config.NewConfig(workDir)
+	require.NoError(t, cfg.EnsureDirectories())
+
+	urlTarget := remoteTarget("ghcr.io/org/bundle-a:v1", "https://example.com/repo-a")
+	urlTarget.TargetID = "url-target"
+	inputDir := t.TempDir()
+	inputTarget := localTarget(t, inputDir, "ghcr.io/org/bundle-b:v1")
+	inputTarget.TargetID = "input-target"
+
+	policyDirA := t.TempDir()
+	policyDirB := t.TempDir()
+	contentKeyA := "aaaaaaaaaaaaaaaa"
+	contentKeyB := "bbbbbbbbbbbbbbbb"
+	writeIndexedScanConfig(
+		t, cfg, contentKeyA, []string{"namespace-a"},
+		map[string]string{"namespace-a": "REQ-A", "pass-a": "REQ-A-PASS"}, policyDirA,
+	)
+	writeIndexedScanConfig(
+		t, cfg, contentKeyB, []string{"namespace-b"},
+		map[string]string{"namespace-b": "REQ-B", "clear-b": "REQ-B-CLEAR"}, policyDirB,
+	)
+	require.NoError(t, genindex.WriteIndex(cfg.GeneratedDirPath(), genindex.GenerateIndex{
+		Version: 1,
+		Targets: map[string]string{
+			genindex.TargetKey(urlTarget.Variables["url"]):          contentKeyA,
+			genindex.TargetKey(inputTarget.Variables["input_path"]): contentKeyB,
+		},
+	}))
+
+	var policyDirs []string
+	runner := &mockRunner{callFn: func(name string, args []string) ([]byte, error) {
+		if name != "conftest" || len(args) == 0 || args[0] != "test" {
+			return nil, fmt.Errorf("unexpected command: %s %v", name, args)
+		}
+		for index, argument := range args {
+			if argument == "--policy" && index+1 < len(args) {
+				policyDirs = append(policyDirs, args[index+1])
+			}
+		}
+		for _, argument := range args {
+			if argument == "namespace-a" {
+				return []byte(`[{"filename":"input-a","namespace":"namespace-a","failures":[{"msg":"failed a","metadata":{"query":"data.namespace-a.deny"}}]}]`), nil
+			}
+		}
+		return []byte(`[{"filename":"input-b","namespace":"namespace-b","failures":[{"msg":"failed b","metadata":{"query":"data.namespace-b.deny"}}]}]`), nil
+	}}
+	remoteInputDir := t.TempDir()
+	ldr := &mockLoader{loadFn: func(target provider.Target, _ string) (string, error) {
+		if target.Variables["url"] != "" {
+			return remoteInputDir, nil
+		}
+		return target.Variables["input_path"], nil
+	}}
+	srv := New(ServerOptions{
+		Loader:       ldr,
+		Runner:       runner,
+		ToolChecker:  func() ([]string, error) { return nil, nil },
+		WorkspaceDir: workDir,
+	})
+
+	resp, err := srv.Scan(context.Background(), makeScanRequest(t, []provider.Target{urlTarget, inputTarget}))
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{policyDirA, policyDirB}, policyDirs)
+
+	assessments := make(map[string]provider.AssessmentLog)
+	for _, assessment := range resp.Assessments {
+		assessments[assessment.RequirementID] = assessment
+	}
+	assert.Contains(t, assessments, "REQ-A")
+	assert.Contains(t, assessments, "REQ-B")
+	assert.Contains(t, assessments, "REQ-A-PASS")
+	assert.Contains(t, assessments, "REQ-B-CLEAR")
+	assert.Len(t, assessments["REQ-A-PASS"].Steps, 1)
+	assert.Equal(t, "https://example.com/repo-a@main", assessments["REQ-A-PASS"].Steps[0].Name)
+	assert.Len(t, assessments["REQ-B-CLEAR"].Steps, 1)
+	assert.Equal(t, inputDir, assessments["REQ-B-CLEAR"].Steps[0].Name)
+}
+
+func TestScan_PresentIndexFailuresDoNotUseLegacyConfig(t *testing.T) {
+	for _, testCase := range []struct {
+		name          string
+		index         genindex.GenerateIndex
+		target        provider.Target
+		errorFragment string
+	}{
+		{
+			name: "invalid content key",
+			index: genindex.GenerateIndex{Version: 1, Targets: map[string]string{
+				genindex.TargetKey("https://example.com/target"): "../legacy",
+			}},
+			target:        remoteTarget("ghcr.io/org/bundle:v1", "https://example.com/target"),
+			errorFragment: "validating content key",
+		},
+		{
+			name:          "missing target",
+			index:         genindex.GenerateIndex{Version: 1, Targets: map[string]string{}},
+			target:        remoteTarget("ghcr.io/org/bundle:v1", "https://example.com/target"),
+			errorFragment: "missing from generate index",
+		},
+		{
+			name: "missing content artifact",
+			index: genindex.GenerateIndex{Version: 1, Targets: map[string]string{
+				genindex.TargetKey("https://example.com/target"): "cccccccccccccccc",
+			}},
+			target:        remoteTarget("ghcr.io/org/bundle:v1", "https://example.com/target"),
+			errorFragment: "reading generated scan config",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			workDir := t.TempDir()
+			cfg := config.NewConfig(workDir)
+			require.NoError(t, cfg.EnsureDirectories())
+			writeScanConfig(t, workDir)
+			require.NoError(t, genindex.WriteIndex(cfg.GeneratedDirPath(), testCase.index))
+
+			runner := &mockRunner{callFn: func(name string, args []string) ([]byte, error) {
+				return nil, fmt.Errorf("legacy config must not be evaluated: %s %v", name, args)
+			}}
+			srv := New(ServerOptions{
+				Runner:       runner,
+				ToolChecker:  func() ([]string, error) { return nil, nil },
+				WorkspaceDir: workDir,
+			})
+
+			_, err := srv.Scan(context.Background(), makeScanRequest(t, []provider.Target{testCase.target}))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), testCase.target.TargetID)
+			assert.Contains(t, err.Error(), testCase.errorFragment)
+			assert.Empty(t, runner.calls)
+		})
+	}
+}
+
+func TestScan_UnusableIndexDoesNotUseLegacyConfig(t *testing.T) {
+	for name, indexContents := range map[string]string{
+		"malformed":           "{not json",
+		"unsupported version": `{"version":2,"targets":{}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			workDir := t.TempDir()
+			cfg := config.NewConfig(workDir)
+			require.NoError(t, cfg.EnsureDirectories())
+			writeScanConfig(t, workDir)
+			require.NoError(t, os.WriteFile(
+				filepath.Join(cfg.GeneratedDirPath(), "generate-index.json"), []byte(indexContents), 0600,
+			))
+
+			runner := &mockRunner{}
+			srv := New(ServerOptions{
+				Runner:       runner,
+				ToolChecker:  func() ([]string, error) { return nil, nil },
+				WorkspaceDir: workDir,
+			})
+			target := remoteTarget("ghcr.io/org/bundle:v1", "https://example.com/target")
+
+			_, err := srv.Scan(context.Background(), makeScanRequest(t, []provider.Target{target}))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), target.TargetID)
+			assert.Contains(t, err.Error(), "reading generate index")
+			assert.Empty(t, runner.calls)
+		})
+	}
 }
 
 func TestScan_RemoteURL_WithBranches(t *testing.T) {
@@ -1452,7 +1774,7 @@ func TestScan_PerTargetBundles_MissingRef(t *testing.T) {
 	resp, err := srv.Scan(context.Background(), req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	// The missing-ref target falls back to the scan config's BundleDir,
+	// The missing-ref target falls back to the scan config's PolicyDir,
 	// so both targets scan successfully with no findings.
 	assert.Empty(t, resp.Errors)
 }
