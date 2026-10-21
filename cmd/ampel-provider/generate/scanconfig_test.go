@@ -63,12 +63,9 @@ func TestWriteReadScanConfig_NilIDs(t *testing.T) {
 	require.Nil(t, cfg.RequirementIDs)
 }
 
-func TestWriteScanConfig_CreatesDirectory(t *testing.T) {
+func TestWriteScanConfig_MissingDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "nested", "dir")
 
 	err := WriteScanConfig(dir, []string{"BP-1.01"})
-	require.NoError(t, err)
-
-	_, err = os.Stat(filepath.Join(dir, ScanConfigFileName))
-	require.NoError(t, err)
+	require.Error(t, err)
 }

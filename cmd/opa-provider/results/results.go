@@ -37,17 +37,27 @@ type conftestResult struct {
 
 // PerTargetResult holds scan findings for a single target evaluation.
 type PerTargetResult struct {
-	Target       string    `json:"target"`
-	TargetURL    string    `json:"target_url,omitempty"`
-	Branch       string    `json:"branch,omitempty"`
-	InputPath    string    `json:"input_path,omitempty"`
-	InputDigest  string    `json:"input_digest,omitempty"`
-	ScannedAt    time.Time `json:"scanned_at"`
-	Findings     []Finding `json:"findings"`
-	SuccessCount int       `json:"success_count"`
-	Status       string    `json:"status"`
-	Error        string    `json:"error,omitempty"`
-	Remarks      string    `json:"remarks,omitempty"`
+	Target         string            `json:"target"`
+	TargetURL      string            `json:"target_url,omitempty"`
+	Branch         string            `json:"branch,omitempty"`
+	InputPath      string            `json:"input_path,omitempty"`
+	InputDigest    string            `json:"input_digest,omitempty"`
+	ScannedAt      time.Time         `json:"scanned_at"`
+	Findings       []Finding         `json:"findings"`
+	SuccessCount   int               `json:"success_count"`
+	Status         string            `json:"status"`
+	Error          string            `json:"error,omitempty"`
+	Remarks        string            `json:"remarks,omitempty"`
+	ReverseMapping map[string]string `json:"-"`
+}
+
+type reqGroup struct {
+	requirementID string
+	steps         []provider.Step
+	passCount     int
+	totalCount    int
+	targets       []*PerTargetResult
+	targetSeen    map[*PerTargetResult]bool
 }
 
 // Finding represents an individual policy violation.
@@ -191,23 +201,13 @@ func ResolveRequirementID(derivedID string, reverseMap map[string]string) string
 // Findings are grouped by Gemara requirement ID into AssessmentLog entries.
 // Each target/branch scan becomes a Step within the assessment. Operational
 // errors (targets with Status "error" and no findings) are placed into
-// resp.Errors. When reverseMap is non-nil, Rego-derived IDs (e.g.,
-// "kubernetes.run_as_root") are resolved to Gemara requirement IDs (e.g.,
-// "CIS-K8S-5.2.6") before grouping. Each assessment log includes one
-// Evidence entry linking back to the conftest input path that produced it.
+// resp.Errors. Rego-derived IDs are resolved with each result's reverse mapping;
+// reverseMap supports callers that provide one legacy shared mapping. Each assessment
+// log includes one Evidence entry linking back to the conftest input path that produced it.
 // MappingReferences are built from unique target/branch combinations.
 func ToScanResponse(
 	targetResults []*PerTargetResult, reverseMap map[string]string,
 ) *provider.ScanResponse {
-	type reqGroup struct {
-		requirementID string
-		steps         []provider.Step
-		passCount     int
-		totalCount    int
-		targets       []*PerTargetResult
-		targetSeen    map[*PerTargetResult]bool
-	}
-
 	groups := make(map[string]*reqGroup)
 	var order []string
 	var opErrors []string
@@ -219,7 +219,7 @@ func ToScanResponse(
 		}
 
 		for _, f := range tr.Findings {
-			reqID := ResolveRequirementID(f.RequirementID, reverseMap)
+			reqID := ResolveRequirementID(f.RequirementID, mappingForResult(tr, reverseMap))
 			g, ok := groups[reqID]
 			if !ok {
 				g = &reqGroup{
@@ -253,38 +253,7 @@ func ToScanResponse(
 		}
 	}
 
-	// Synthesize passing assessments for requirement IDs that had no findings.
-	// The reverseMap values are the Gemara requirement IDs from the assessment
-	// configurations sent during Generate; every requirement ID should appear
-	// in the response so complyctl can correlate results. Each synthetic
-	// assessment includes a passing step with the target name so evaluation
-	// logs show a meaningful step identity.
-	//
-	// When all targets errored (allScanned is empty), synthetic assessments
-	// are skipped because they cannot carry evidence. The spec requires at
-	// least one Evidence entry per AssessmentLog. Errors are already captured
-	// in opErrors for the caller to report.
-	allScanned := scannedTargets(targetResults)
-	if len(allScanned) > 0 {
-		syntheticSteps := buildSyntheticSteps(targetResults)
-		allScannedSeen := make(map[*PerTargetResult]bool, len(allScanned))
-		for _, tr := range allScanned {
-			allScannedSeen[tr] = true
-		}
-		for _, reqID := range reverseMap {
-			if _, exists := groups[reqID]; !exists {
-				groups[reqID] = &reqGroup{
-					requirementID: reqID,
-					steps:         syntheticSteps,
-					passCount:     len(syntheticSteps),
-					totalCount:    len(syntheticSteps),
-					targets:       allScanned,
-					targetSeen:    allScannedSeen,
-				}
-				order = append(order, reqID)
-			}
-		}
-	}
+	addSyntheticAssessments(groups, &order, targetResults, reverseMap)
 
 	// Sort for deterministic output
 	sort.Strings(order)
@@ -337,6 +306,55 @@ func ToScanResponse(
 		Assessments:       assessments,
 		Errors:            opErrors,
 		MappingReferences: mappingRefs,
+	}
+}
+
+func mappingForResult(tr *PerTargetResult, fallback map[string]string) map[string]string {
+	if tr.ReverseMapping != nil {
+		return tr.ReverseMapping
+	}
+	return fallback
+}
+
+func addSyntheticAssessments(
+	groups map[string]*reqGroup,
+	order *[]string,
+	targetResults []*PerTargetResult,
+	fallbackMapping map[string]string,
+) {
+	for _, tr := range targetResults {
+		if tr.Status == "error" {
+			continue
+		}
+
+		foundRequirements := make(map[string]bool)
+		for _, finding := range tr.Findings {
+			foundRequirements[ResolveRequirementID(
+				finding.RequirementID, mappingForResult(tr, fallbackMapping),
+			)] = true
+		}
+		for _, requirementID := range mappingForResult(tr, fallbackMapping) {
+			if foundRequirements[requirementID] {
+				continue
+			}
+			group, ok := groups[requirementID]
+			if !ok {
+				group = &reqGroup{
+					requirementID: requirementID,
+					targetSeen:    make(map[*PerTargetResult]bool),
+				}
+				groups[requirementID] = group
+				*order = append(*order, requirementID)
+			}
+			if group.targetSeen[tr] {
+				continue
+			}
+			group.targets = append(group.targets, tr)
+			group.targetSeen[tr] = true
+			group.steps = append(group.steps, syntheticStep(tr))
+			group.passCount++
+			group.totalCount++
+		}
 	}
 }
 
@@ -417,42 +435,16 @@ func buildMappingReferences(
 	return refs
 }
 
-// scannedTargets returns all non-error target results. Used to
-// associate synthetic assessments (requirement IDs with no findings)
-// with evidence from every contributing target.
-func scannedTargets(
-	targetResults []*PerTargetResult,
-) []*PerTargetResult {
-	var targets []*PerTargetResult
-	for _, tr := range targetResults {
-		if tr.Status != "error" {
-			targets = append(targets, tr)
-		}
+func syntheticStep(tr *PerTargetResult) provider.Step {
+	stepName := tr.Target
+	if tr.Branch != "" {
+		stepName += "@" + tr.Branch
 	}
-	return targets
-}
-
-// buildSyntheticSteps creates a passing step for each scanned target so that
-// synthetic assessments (requirement IDs with no findings) have step identity in the
-// evaluation log. Without this, the evaluation log shows steps: [] for
-// requirements that passed all checks.
-func buildSyntheticSteps(targetResults []*PerTargetResult) []provider.Step {
-	steps := make([]provider.Step, 0, len(targetResults))
-	for _, tr := range targetResults {
-		if tr.Status == "error" {
-			continue
-		}
-		stepName := tr.Target
-		if tr.Branch != "" {
-			stepName += "@" + tr.Branch
-		}
-		steps = append(steps, provider.Step{
-			Name:    stepName,
-			Result:  provider.ResultPassed,
-			Message: "all checks passed",
-		})
+	return provider.Step{
+		Name:    stepName,
+		Result:  provider.ResultPassed,
+		Message: "all checks passed",
 	}
-	return steps
 }
 
 func mapResult(findingResult, targetStatus string) provider.Result {

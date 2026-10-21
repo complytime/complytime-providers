@@ -25,16 +25,12 @@ type ScanConfig struct {
 
 // WriteScanConfig writes a scan-config.json to the given directory.
 func WriteScanConfig(dir string, requirementIDs []string) error {
-	if err := os.MkdirAll(dir, 0750); err != nil {
-		return fmt.Errorf("creating generated directory: %w", err)
-	}
-
 	cfg := ScanConfig{
 		RequirementIDs: requirementIDs,
 		GeneratedAt:    time.Now().UTC().Format(time.RFC3339),
 	}
 
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	data, err := json.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshaling scan config: %w", err)
 	}

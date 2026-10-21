@@ -681,7 +681,7 @@ func TestWritePolicy(t *testing.T) {
 		require.Empty(t, entries)
 	})
 
-	t.Run("creates directory if missing", func(t *testing.T) {
+	t.Run("returns error when directory is missing", func(t *testing.T) {
 		dir := filepath.Join(t.TempDir(), "subdir", "nested")
 		bundle := &AmpelPolicyBundle{
 			ID: "test",
@@ -690,10 +690,7 @@ func TestWritePolicy(t *testing.T) {
 			},
 		}
 		err := WritePolicy(bundle, dir)
-		require.NoError(t, err)
-
-		_, err = os.Stat(filepath.Join(dir, PolicyFileName))
-		require.NoError(t, err)
+		require.Error(t, err)
 	})
 
 	t.Run("overwrites existing file", func(t *testing.T) {

@@ -4,8 +4,10 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -22,6 +24,7 @@ import (
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/toolcheck"
 	"github.com/complytime/complytime-providers/internal/archive"
 	"github.com/complytime/complytime-providers/internal/evidence"
+	"github.com/complytime/complytime-providers/internal/genindex"
 	"github.com/complytime/complytime-providers/internal/version"
 )
 
@@ -90,8 +93,6 @@ func (s *ProviderServer) Generate(_ context.Context, req *provider.GenerateReque
 			ErrorMessage: resolveErr.Error(),
 		}, nil
 	}
-	outputDir := config.GeneratedPolicyDirPath()
-
 	granular, err := convert.LoadGranularPolicies(sourceDir)
 	if err != nil {
 		return &provider.GenerateResponse{
@@ -111,23 +112,38 @@ func (s *ProviderServer) Generate(_ context.Context, req *provider.GenerateReque
 	}
 
 	bundle := convert.MergeToBundle(matched)
-	if err := convert.WritePolicy(bundle, outputDir); err != nil {
-		return &provider.GenerateResponse{
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("writing AMPEL policy bundle: %v", err),
-		}, nil
-	}
-
 	// Persist matched requirement IDs so Scan can synthesize passing
 	// assessments for requirements with zero findings.
 	requirementIDs := make([]string, len(matched))
 	for i, p := range matched {
 		requirementIDs[i] = p.ID
 	}
-	if err := generate.WriteScanConfig(config.ScanConfigDirPath(), requirementIDs); err != nil {
+	contentKey := genindex.ContentKey(requirementIDs, sourceDir)
+	outputDir := config.GeneratedDirForKey(contentKey)
+	if err := os.MkdirAll(outputDir, 0750); err != nil {
+		return &provider.GenerateResponse{
+			Success:      false,
+			ErrorMessage: fmt.Sprintf("creating generated artifact directory: %v", err),
+		}, nil
+	}
+	if err := convert.WritePolicy(bundle, outputDir); err != nil {
+		return &provider.GenerateResponse{
+			Success:      false,
+			ErrorMessage: fmt.Sprintf("writing AMPEL policy bundle: %v", err),
+		}, nil
+	}
+	if err := generate.WriteScanConfig(outputDir, requirementIDs); err != nil {
 		return &provider.GenerateResponse{
 			Success:      false,
 			ErrorMessage: fmt.Sprintf("writing scan config: %v", err),
+		}, nil
+	}
+	if err := genindex.UpdateIndex(
+		config.GeneratedDirPath(), genindex.TargetKey(req.TargetVariables["url"]), contentKey,
+	); err != nil {
+		return &provider.GenerateResponse{
+			Success:      false,
+			ErrorMessage: fmt.Sprintf("updating generate index: %v", err),
 		}, nil
 	}
 
@@ -154,7 +170,6 @@ func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*pr
 
 	logger.Info("scanning target repositories")
 
-	generatedDir := config.GeneratedPolicyDirPath()
 	resultsDir := config.ResultsDirPath()
 	specDir := config.SpecDirPath()
 
@@ -162,11 +177,24 @@ func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*pr
 		return nil, fmt.Errorf("writing spec files: %w", err)
 	}
 
-	scanCfg := scan.ScanConfig{
-		PolicyPath: filepath.Join(generatedDir, convert.PolicyFileName),
-		OutputDir:  resultsDir,
-		SpecDir:    specDir,
+	baseScanCfg := scan.ScanConfig{
+		OutputDir: resultsDir,
+		SpecDir:   specDir,
 	}
+	index, indexErr := genindex.ReadIndex(config.GeneratedDirPath())
+	if indexErr != nil && !errors.Is(indexErr, os.ErrNotExist) {
+		return nil, fmt.Errorf("reading generate index for target %q: %w", req.Targets[0].TargetID, indexErr)
+	}
+	hasIndex := indexErr == nil
+	var legacyScanConfig *generate.ScanConfig
+	if !hasIndex {
+		logger.Warn("generate index absent; using legacy scan configuration fallback")
+		legacyScanConfig, indexErr = generate.ReadScanConfig(config.ScanConfigDirPath())
+		if indexErr != nil {
+			logger.Warn("scan config not found, passing assessments will not be synthesized", "error", indexErr)
+		}
+	}
+	scanConfigCache := make(map[string]*generate.ScanConfig)
 
 	var repoResults []*results.PerRepoResult
 	hostRemark := evidence.HostRemark()
@@ -176,7 +204,6 @@ func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*pr
 		if repoURL == "" {
 			return nil, fmt.Errorf("target %q: missing required variable 'url'", target.TargetID)
 		}
-
 		specsStr := target.Variables["specs"]
 		if specsStr == "" {
 			return nil, fmt.Errorf("target %q: missing required variable 'specs'", target.TargetID)
@@ -197,6 +224,14 @@ func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*pr
 		if err := validateTargetVariables(repoURL, branches, specs, accessToken, target.TargetID); err != nil {
 			return nil, err
 		}
+		targetScanConfig, policyPath, err := resolveTargetArtifacts(
+			target, index, hasIndex, legacyScanConfig, scanConfigCache,
+		)
+		if err != nil {
+			return nil, err
+		}
+		scanCfg := baseScanCfg
+		scanCfg.PolicyPath = policyPath
 
 		// Validate and detect platform
 		platform, _, _, err := targets.ParseRepoURL(repoURL, platformHint)
@@ -246,6 +281,9 @@ func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*pr
 					}
 					continue
 				}
+				if targetScanConfig != nil {
+					parsed.RequirementIDs = targetScanConfig.RequirementIDs
+				}
 
 				// Thread attestation paths, spec label, and host remark from scan result
 				parsed.AmpelAttestationPath = rawResult.AmpelAttestationPath
@@ -283,20 +321,39 @@ func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*pr
 		}
 	}
 
-	// Read scan config written by Generate to get the full set of requirement
-	// IDs. If missing, fall back to findings-only behavior.
-	var allRequirementIDs []string
-	scanConfig, scanCfgErr := generate.ReadScanConfig(config.ScanConfigDirPath())
-	if scanCfgErr != nil {
-		logger.Warn("scan config not found, passing assessments will not be synthesized",
-			"error", scanCfgErr)
-	} else {
-		allRequirementIDs = scanConfig.RequirementIDs
-	}
-
-	scanResponse := results.ToScanResponse(repoResults, allRequirementIDs)
+	scanResponse := results.ToScanResponse(repoResults, nil)
 	logger.Info("scan complete", "repositories_scanned", len(repoResults))
 	return scanResponse, nil
+}
+
+func resolveTargetArtifacts(
+	target provider.Target,
+	index genindex.GenerateIndex,
+	hasIndex bool,
+	legacyScanConfig *generate.ScanConfig,
+	cache map[string]*generate.ScanConfig,
+) (*generate.ScanConfig, string, error) {
+	if !hasIndex {
+		return legacyScanConfig, filepath.Join(config.GeneratedPolicyDirPath(), convert.PolicyFileName), nil
+	}
+
+	contentKey, ok := index.Targets[genindex.TargetKey(target.Variables["url"])]
+	if !ok {
+		return nil, "", fmt.Errorf("target %q is missing from generate index", target.TargetID)
+	}
+	if err := genindex.ValidateContentKey(contentKey, config.GeneratedDirPath()); err != nil {
+		return nil, "", fmt.Errorf("validating content key for target %q: %w", target.TargetID, err)
+	}
+	if scanConfig, ok := cache[contentKey]; ok {
+		return scanConfig, filepath.Join(config.GeneratedDirForKey(contentKey), convert.PolicyFileName), nil
+	}
+
+	scanConfig, err := generate.ReadScanConfig(config.GeneratedDirForKey(contentKey))
+	if err != nil {
+		return nil, "", fmt.Errorf("reading generated scan config for target %q: %w", target.TargetID, err)
+	}
+	cache[contentKey] = scanConfig
+	return scanConfig, filepath.Join(config.GeneratedDirForKey(contentKey), convert.PolicyFileName), nil
 }
 
 // splitCSV splits a comma-separated string into trimmed, non-empty parts.
