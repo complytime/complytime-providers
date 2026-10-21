@@ -21,6 +21,7 @@ import (
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/generate"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/scan"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/toolcheck"
+	"github.com/complytime/complytime-providers/internal/genindex"
 )
 
 func TestMain(m *testing.M) {
@@ -145,11 +146,27 @@ func setupServerWithGenerate(t *testing.T) (*ProviderServer, string) {
 	// Generate a policy bundle so paths exist
 	resp, err := s.Generate(context.Background(), &provider.GenerateRequest{
 		Configuration: makeTestConfigurations(),
+		TargetVariables: map[string]string{
+			"url": "https://github.com/myorg/repo1",
+		},
 	})
 	require.NoError(t, err)
 	require.True(t, resp.Success)
 
 	return s, dir
+}
+
+func generatedArtifactDir(t *testing.T) string {
+	t.Helper()
+	entries, err := os.ReadDir(config.GeneratedDirPath())
+	require.NoError(t, err)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			return filepath.Join(config.GeneratedDirPath(), entry.Name())
+		}
+	}
+	t.Fatal("expected generated artifact directory")
+	return ""
 }
 
 // --- Describe tests (US4) ---
@@ -166,7 +183,7 @@ func TestDescribe_Healthy(t *testing.T) {
 // --- Generate tests (US1) ---
 
 func TestGenerate_ValidConfiguration(t *testing.T) {
-	s, dir := setupServer(t)
+	s, _ := setupServer(t)
 	resp, err := s.Generate(context.Background(), &provider.GenerateRequest{
 		Configuration: makeTestConfigurations(),
 	})
@@ -174,7 +191,7 @@ func TestGenerate_ValidConfiguration(t *testing.T) {
 	require.True(t, resp.Success)
 	require.Empty(t, resp.ErrorMessage)
 
-	outputPath := filepath.Join(dir, provider.WorkspaceDir, config.ProviderDir, config.GeneratedPolicyDir, convert.PolicyFileName)
+	outputPath := filepath.Join(generatedArtifactDir(t), convert.PolicyFileName)
 	data, err := os.ReadFile(outputPath)
 	require.NoError(t, err)
 	require.Contains(t, string(data), "BP-1.01")
@@ -192,7 +209,7 @@ func TestGenerate_EmptyConfiguration(t *testing.T) {
 }
 
 func TestGenerate_NoMatchingPolicies(t *testing.T) {
-	s, dir := setupServer(t)
+	s, _ := setupServer(t)
 
 	resp, err := s.Generate(context.Background(), &provider.GenerateRequest{
 		Configuration: []provider.AssessmentConfiguration{
@@ -202,13 +219,13 @@ func TestGenerate_NoMatchingPolicies(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, resp.Success, "should succeed with no matches (no error)")
 
-	outputPath := filepath.Join(dir, provider.WorkspaceDir, config.ProviderDir, config.GeneratedPolicyDir, convert.PolicyFileName)
-	_, err = os.Stat(outputPath)
-	require.True(t, os.IsNotExist(err), "no policy file should be created when no rules match")
+	entries, err := os.ReadDir(config.GeneratedDirPath())
+	require.NoError(t, err)
+	require.Empty(t, entries, "no generated artifacts should be created when no rules match")
 }
 
 func TestGenerate_OverwritesExistingPolicy(t *testing.T) {
-	s, dir := setupServer(t)
+	s, _ := setupServer(t)
 
 	// Add a second granular policy
 	policyDir := config.GranularPolicyDirPath()
@@ -227,7 +244,7 @@ func TestGenerate_OverwritesExistingPolicy(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, resp2.Success)
 
-	outputPath := filepath.Join(dir, provider.WorkspaceDir, config.ProviderDir, config.GeneratedPolicyDir, convert.PolicyFileName)
+	outputPath := filepath.Join(generatedArtifactDir(t), convert.PolicyFileName)
 	data, err := os.ReadFile(outputPath)
 	require.NoError(t, err)
 	require.Contains(t, string(data), "BP-3.01")
@@ -248,7 +265,7 @@ func TestGenerate_CustomPolicyDir(t *testing.T) {
 	require.True(t, resp.Success)
 	require.Empty(t, resp.ErrorMessage)
 
-	outputPath := filepath.Join(dir, provider.WorkspaceDir, config.ProviderDir, config.GeneratedPolicyDir, convert.PolicyFileName)
+	outputPath := filepath.Join(generatedArtifactDir(t), convert.PolicyFileName)
 	data, err := os.ReadFile(outputPath)
 	require.NoError(t, err)
 	require.Contains(t, string(data), "BP-1.01")
@@ -283,7 +300,7 @@ func TestGenerate_WritesScanConfig(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, resp.Success)
 
-	cfg, err := generate.ReadScanConfig(config.ScanConfigDirPath())
+	cfg, err := generate.ReadScanConfig(generatedArtifactDir(t))
 	require.NoError(t, err)
 	require.Equal(t, []string{"BP-1.01"}, cfg.RequirementIDs)
 	require.NotEmpty(t, cfg.GeneratedAt)
@@ -300,7 +317,7 @@ func TestGenerate_NoMatchingPolicies_NoScanConfig(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, resp.Success)
 
-	_, err = generate.ReadScanConfig(config.ScanConfigDirPath())
+	_, err = generate.ReadScanConfig(config.GeneratedDirPath())
 	require.Error(t, err, "scan config should not exist when no policies match")
 }
 
@@ -367,8 +384,7 @@ func TestGenerate_ComplypackContentPath_Directory(t *testing.T) {
 	require.True(t, resp.Success)
 	require.Empty(t, resp.ErrorMessage)
 
-	outputPath := filepath.Join(dir, provider.WorkspaceDir, config.ProviderDir,
-		config.GeneratedPolicyDir, convert.PolicyFileName)
+	outputPath := filepath.Join(generatedArtifactDir(t), convert.PolicyFileName)
 	data, err := os.ReadFile(outputPath)
 	require.NoError(t, err)
 	require.Contains(t, string(data), "BP-1.01")
@@ -389,8 +405,7 @@ func TestGenerate_ComplypackContentPath_TarGz(t *testing.T) {
 	require.True(t, resp.Success)
 	require.Empty(t, resp.ErrorMessage)
 
-	outputPath := filepath.Join(dir, provider.WorkspaceDir, config.ProviderDir,
-		config.GeneratedPolicyDir, convert.PolicyFileName)
+	outputPath := filepath.Join(generatedArtifactDir(t), convert.PolicyFileName)
 	data, err := os.ReadFile(outputPath)
 	require.NoError(t, err)
 	require.Contains(t, string(data), "BP-1.01")
@@ -415,8 +430,7 @@ func TestGenerate_ComplypackPrecedenceOverPolicyDir(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, resp.Success)
 
-	outputPath := filepath.Join(dir, provider.WorkspaceDir, config.ProviderDir,
-		config.GeneratedPolicyDir, convert.PolicyFileName)
+	outputPath := filepath.Join(generatedArtifactDir(t), convert.PolicyFileName)
 	data, err := os.ReadFile(outputPath)
 	require.NoError(t, err)
 	require.Contains(t, string(data), "BP-1.01",
@@ -426,7 +440,7 @@ func TestGenerate_ComplypackPrecedenceOverPolicyDir(t *testing.T) {
 }
 
 func TestGenerate_BackwardCompat_EmptyComplypackPath(t *testing.T) {
-	s, dir := setupServer(t)
+	s, _ := setupServer(t)
 
 	// No ComplypackContentPath — should fall back to default dir (set by setupServer).
 	resp, err := s.Generate(context.Background(), &provider.GenerateRequest{
@@ -435,8 +449,7 @@ func TestGenerate_BackwardCompat_EmptyComplypackPath(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, resp.Success)
 
-	outputPath := filepath.Join(dir, provider.WorkspaceDir, config.ProviderDir,
-		config.GeneratedPolicyDir, convert.PolicyFileName)
+	outputPath := filepath.Join(generatedArtifactDir(t), convert.PolicyFileName)
 	data, err := os.ReadFile(outputPath)
 	require.NoError(t, err)
 	require.Contains(t, string(data), "BP-1.01")
@@ -488,7 +501,7 @@ func TestScan_ValidTargets(t *testing.T) {
 	}
 	defer func() { ScanRunner = origRunner }()
 
-	resp, err := s.Scan(context.Background(), &provider.ScanRequest{
+	scanResp, err := s.Scan(context.Background(), &provider.ScanRequest{
 		Targets: []provider.Target{
 			{TargetID: "myorg-repo1", Variables: map[string]string{
 				"url":   "https://github.com/myorg/repo1",
@@ -497,8 +510,8 @@ func TestScan_ValidTargets(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	require.Len(t, resp.Assessments, 1)
-	require.Equal(t, provider.ResultPassed, resp.Assessments[0].Steps[0].Result)
+	require.Len(t, scanResp.Assessments, 1)
+	require.Equal(t, provider.ResultPassed, scanResp.Assessments[0].Steps[0].Result)
 
 	// Verify snappy attestation and ampel intoto result files were created
 	resultsDir := filepath.Join(dir, provider.WorkspaceDir, config.ProviderDir, config.DefaultResultsDir)
@@ -562,6 +575,14 @@ func TestScan_MultipleSpecs(t *testing.T) {
 
 func TestScan_ScanError_ContinuesScanning(t *testing.T) {
 	s, _ := setupServerWithGenerate(t)
+	resp, err := s.Generate(context.Background(), &provider.GenerateRequest{
+		Configuration: makeTestConfigurations(),
+		TargetVariables: map[string]string{
+			"url": "https://github.com/myorg/repo2",
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, resp.Success)
 
 	ampelOutput := makeAmpelResultAttestation()
 
@@ -724,6 +745,14 @@ func TestScan_CommaSeparatedBranches(t *testing.T) {
 
 func TestScan_PlatformHintVariable(t *testing.T) {
 	s, _ := setupServerWithGenerate(t)
+	resp, err := s.Generate(context.Background(), &provider.GenerateRequest{
+		Configuration: makeTestConfigurations(),
+		TargetVariables: map[string]string{
+			"url": "https://git.corp.com/myorg/repo1",
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, resp.Success)
 
 	ampelOutput := makeAmpelResultAttestation()
 
@@ -734,7 +763,7 @@ func TestScan_PlatformHintVariable(t *testing.T) {
 	}
 	defer func() { ScanRunner = origRunner }()
 
-	resp, err := s.Scan(context.Background(), &provider.ScanRequest{
+	scanResp, err := s.Scan(context.Background(), &provider.ScanRequest{
 		Targets: []provider.Target{
 			{TargetID: "corp-repo", Variables: map[string]string{
 				"url":      "https://git.corp.com/myorg/repo1",
@@ -744,7 +773,7 @@ func TestScan_PlatformHintVariable(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	require.Len(t, resp.Assessments, 1)
+	require.Len(t, scanResp.Assessments, 1)
 }
 
 func TestScan_BranchValidation(t *testing.T) {
@@ -837,12 +866,15 @@ func TestScan_SynthesizesPassingAssessments(t *testing.T) {
 			{PlanID: "ap-bp-1.01", RequirementID: "BP-1.01"},
 			{PlanID: "ap-bp-3.01", RequirementID: "BP-3.01"},
 		},
+		TargetVariables: map[string]string{
+			"url": "https://github.com/myorg/repo1",
+		},
 	})
 	require.NoError(t, err)
 	require.True(t, resp.Success)
 
 	// Verify scan config has both IDs
-	cfg, err := generate.ReadScanConfig(config.ScanConfigDirPath())
+	cfg, err := generate.ReadScanConfig(generatedArtifactDir(t))
 	require.NoError(t, err)
 	require.Len(t, cfg.RequirementIDs, 2)
 
@@ -1132,6 +1164,145 @@ func TestScan_MixedSkipPass_NotConvertedToError(t *testing.T) {
 		"mixed result should preserve passing findings")
 	require.True(t, hasSkip,
 		"mixed result should preserve skipped findings")
+}
+
+func TestGenerate_MultipleTargets_WritesIndexedArtifacts(t *testing.T) {
+	s, _ := setupServer(t)
+	writeGranularPolicies(t, config.GranularPolicyDirPath(), "BP-2.01")
+
+	for _, request := range []*provider.GenerateRequest{
+		{
+			Configuration:   []provider.AssessmentConfiguration{{RequirementID: "BP-1.01"}},
+			TargetVariables: map[string]string{"url": "https://github.com/example/one"},
+		},
+		{
+			Configuration:   []provider.AssessmentConfiguration{{RequirementID: "BP-2.01"}},
+			TargetVariables: map[string]string{"url": "https://github.com/example/two"},
+		},
+	} {
+		response, err := s.Generate(context.Background(), request)
+		require.NoError(t, err)
+		require.True(t, response.Success)
+	}
+
+	index, err := genindex.ReadIndex(config.GeneratedDirPath())
+	require.NoError(t, err)
+	require.Len(t, index.Targets, 2)
+	firstKey := index.Targets[genindex.TargetKey("https://github.com/example/one")]
+	secondKey := index.Targets[genindex.TargetKey("https://github.com/example/two")]
+	require.NotEqual(t, firstKey, secondKey)
+	for _, contentKey := range []string{firstKey, secondKey} {
+		require.FileExists(t, filepath.Join(config.GeneratedDirForKey(contentKey), convert.PolicyFileName))
+		require.FileExists(t, filepath.Join(config.GeneratedDirForKey(contentKey), generate.ScanConfigFileName))
+	}
+}
+
+func TestGenerate_IdenticalRequirementsDifferentPolicySources_UsesDistinctContentKeys(t *testing.T) {
+	s, dir := setupServer(t)
+	otherPolicyDir := filepath.Join(dir, "other-policies")
+	writeGranularPolicies(t, otherPolicyDir, "BP-1.01")
+	requests := []*provider.GenerateRequest{
+		{
+			Configuration:   makeTestConfigurations(),
+			TargetVariables: map[string]string{"url": "https://github.com/example/default"},
+		},
+		{
+			Configuration:   makeTestConfigurations(),
+			GlobalVariables: map[string]string{"ampel_policy_dir": otherPolicyDir},
+			TargetVariables: map[string]string{"url": "https://github.com/example/custom"},
+		},
+	}
+	for _, request := range requests {
+		response, err := s.Generate(context.Background(), request)
+		require.NoError(t, err)
+		require.True(t, response.Success)
+	}
+	index, err := genindex.ReadIndex(config.GeneratedDirPath())
+	require.NoError(t, err)
+	require.NotEqual(t,
+		index.Targets[genindex.TargetKey("https://github.com/example/default")],
+		index.Targets[genindex.TargetKey("https://github.com/example/custom")],
+	)
+}
+
+func TestScan_MultipleTargets_UsesTargetRequirementIDs(t *testing.T) {
+	s, _ := setupServer(t)
+	writeGranularPolicies(t, config.GranularPolicyDirPath(), "BP-2.01")
+	for _, request := range []*provider.GenerateRequest{
+		{
+			Configuration:   []provider.AssessmentConfiguration{{RequirementID: "BP-1.01"}},
+			TargetVariables: map[string]string{"url": "https://github.com/example/one"},
+		},
+		{
+			Configuration:   []provider.AssessmentConfiguration{{RequirementID: "BP-2.01"}},
+			TargetVariables: map[string]string{"url": "https://github.com/example/two"},
+		},
+	} {
+		response, err := s.Generate(context.Background(), request)
+		require.NoError(t, err)
+		require.True(t, response.Success)
+	}
+
+	originalRunner := ScanRunner
+	ScanRunner = &mockScanRunner{snappyOutput: makeTestAttestation(), ampelOutput: makeAmpelResultAttestation()}
+	t.Cleanup(func() { ScanRunner = originalRunner })
+	response, err := s.Scan(context.Background(), &provider.ScanRequest{Targets: []provider.Target{
+		{TargetID: "one", Variables: map[string]string{
+			"url": "https://github.com/example/one", "specs": "builtin:github/branch-rules.yaml",
+		}},
+		{TargetID: "two", Variables: map[string]string{
+			"url": "https://github.com/example/two", "specs": "builtin:github/branch-rules.yaml",
+		}},
+	}})
+	require.NoError(t, err)
+	for _, assessment := range response.Assessments {
+		if assessment.RequirementID == "BP-2.01" {
+			require.Len(t, assessment.Steps, 1)
+			require.Contains(t, assessment.Steps[0].Name, "example/two")
+			return
+		}
+	}
+	t.Fatal("expected target-scoped synthetic assessment for BP-2.01")
+}
+
+func TestScan_PresentIndexMissingTarget_ReturnsError(t *testing.T) {
+	s, _ := setupServer(t)
+	require.NoError(t, genindex.UpdateIndex(
+		config.GeneratedDirPath(), genindex.TargetKey("https://github.com/example/other"), "0123456789abcdef",
+	))
+	_, err := s.Scan(context.Background(), &provider.ScanRequest{Targets: []provider.Target{{
+		TargetID: "missing", Variables: map[string]string{
+			"url": "https://github.com/example/missing", "specs": "builtin:github/branch-rules.yaml",
+		},
+	}}})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing from generate index")
+}
+
+func TestScan_PresentIndexInvalidOrUnreadableArtifact_ReturnsError(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		contentKey string
+		expected   string
+	}{
+		{name: "invalid content key", contentKey: "invalid", expected: "validating content key"},
+		{name: "missing artifact", contentKey: "0123456789abcdef", expected: "reading generated scan config"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			s, _ := setupServer(t)
+			url := "https://github.com/example/target"
+			require.NoError(t, genindex.UpdateIndex(
+				config.GeneratedDirPath(), genindex.TargetKey(url), testCase.contentKey,
+			))
+			_, err := s.Scan(context.Background(), &provider.ScanRequest{Targets: []provider.Target{{
+				TargetID: "target", Variables: map[string]string{
+					"url": url, "specs": "builtin:github/branch-rules.yaml",
+				},
+			}}})
+			require.Error(t, err)
+			require.Contains(t, err.Error(), testCase.expected)
+		})
+	}
 }
 
 // Ensure unused imports are used

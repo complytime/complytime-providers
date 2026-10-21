@@ -174,11 +174,7 @@ func WritePolicy(bundle *AmpelPolicyBundle, dir string) error {
 		return nil
 	}
 
-	if err := os.MkdirAll(dir, 0750); err != nil {
-		return fmt.Errorf("creating policy directory %q: %w", dir, err)
-	}
-
-	data, err := json.MarshalIndent(bundle, "", "  ")
+	data, err := json.Marshal(bundle)
 	if err != nil {
 		return fmt.Errorf("marshaling AMPEL policy bundle: %w", err)
 	}

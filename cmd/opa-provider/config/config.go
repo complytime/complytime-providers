@@ -57,6 +57,11 @@ func (c *Config) GeneratedDirPath() string {
 	return filepath.Join(c.OpaDir(), GeneratedDir)
 }
 
+// GeneratedDirForKey returns the path for artifacts associated with contentKey.
+func (c *Config) GeneratedDirForKey(contentKey string) string {
+	return filepath.Join(c.GeneratedDirPath(), contentKey)
+}
+
 // PolicyDirForBundle returns a bundle-specific policy directory path.
 func (c *Config) PolicyDirForBundle(bundleRef string) string {
 	sanitized := bundleRef
