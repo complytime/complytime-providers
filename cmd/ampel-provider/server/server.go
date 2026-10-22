@@ -337,22 +337,13 @@ func resolveTargetArtifacts(
 		return legacyScanConfig, filepath.Join(config.GeneratedPolicyDirPath(), convert.PolicyFileName), nil
 	}
 
-	contentKey, ok := index.Targets[genindex.TargetKey(target.Variables["url"])]
-	if !ok {
-		return nil, "", fmt.Errorf("target %q is missing from generate index", target.TargetID)
-	}
-	if err := genindex.ValidateContentKey(contentKey, config.GeneratedDirPath()); err != nil {
-		return nil, "", fmt.Errorf("validating content key for target %q: %w", target.TargetID, err)
-	}
-	if scanConfig, ok := cache[contentKey]; ok {
-		return scanConfig, filepath.Join(config.GeneratedDirForKey(contentKey), convert.PolicyFileName), nil
-	}
-
-	scanConfig, err := generate.ReadScanConfig(config.GeneratedDirForKey(contentKey))
+	scanConfig, contentKey, err := genindex.ResolveConfig(
+		genindex.TargetKey(target.Variables["url"]), index, config.GeneratedDirPath(), cache,
+		generate.ReadScanConfig,
+	)
 	if err != nil {
-		return nil, "", fmt.Errorf("reading generated scan config for target %q: %w", target.TargetID, err)
+		return nil, "", fmt.Errorf("resolving generated config for target %q: %w", target.TargetID, err)
 	}
-	cache[contentKey] = scanConfig
 	return scanConfig, filepath.Join(config.GeneratedDirForKey(contentKey), convert.PolicyFileName), nil
 }
 

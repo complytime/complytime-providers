@@ -5,6 +5,7 @@ package genindex
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -139,4 +140,43 @@ func TestValidateContentKey_ValidAndInvalid(t *testing.T) {
 			assert.Contains(t, err.Error(), "invalid content key")
 		})
 	}
+}
+
+func TestResolveConfig_ReadsAndCachesByContentKey(t *testing.T) {
+	generatedDir := t.TempDir()
+	contentKey := "0123456789abcdef"
+	index := GenerateIndex{Version: indexVersion, Targets: map[string]string{"target": contentKey}}
+	cache := make(map[string]*string)
+	readCalls := 0
+
+	readConfig := func(path string) (*string, error) {
+		readCalls++
+		assert.Equal(t, filepath.Join(generatedDir, contentKey), path)
+		config := "config"
+		return &config, nil
+	}
+
+	first, firstKey, err := ResolveConfig("target", index, generatedDir, cache, readConfig)
+	require.NoError(t, err)
+	second, secondKey, err := ResolveConfig("target", index, generatedDir, cache, readConfig)
+	require.NoError(t, err)
+
+	assert.Equal(t, contentKey, firstKey)
+	assert.Equal(t, contentKey, secondKey)
+	assert.Equal(t, "config", *first)
+	assert.Same(t, first, second)
+	assert.Equal(t, 1, readCalls)
+}
+
+func TestResolveConfig_MissingTargetAndReadError(t *testing.T) {
+	generatedDir := t.TempDir()
+	index := GenerateIndex{Version: indexVersion, Targets: map[string]string{}}
+	_, _, err := ResolveConfig[string]("missing", index, generatedDir, nil, nil)
+	require.ErrorContains(t, err, "target is missing from generate index")
+
+	index.Targets["target"] = "0123456789abcdef"
+	_, _, err = ResolveConfig("target", index, generatedDir, make(map[string]*string), func(string) (*string, error) {
+		return nil, errors.New("read failed")
+	})
+	require.ErrorContains(t, err, "reading generated scan config: read failed")
 }
