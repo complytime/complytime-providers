@@ -161,6 +161,33 @@ func ValidateContentKey(contentKey, generatedDir string) error {
 	return nil
 }
 
+// ResolveConfig resolves and reads a target's generated configuration, caching by content key.
+func ResolveConfig[T any](
+	targetKey string,
+	index GenerateIndex,
+	generatedDir string,
+	cache map[string]*T,
+	readConfig func(string) (*T, error),
+) (*T, string, error) {
+	contentKey, ok := index.Targets[targetKey]
+	if !ok {
+		return nil, "", fmt.Errorf("target is missing from generate index")
+	}
+	if err := ValidateContentKey(contentKey, generatedDir); err != nil {
+		return nil, "", fmt.Errorf("validating content key: %w", err)
+	}
+	if config, ok := cache[contentKey]; ok {
+		return config, contentKey, nil
+	}
+
+	config, err := readConfig(filepath.Join(generatedDir, contentKey))
+	if err != nil {
+		return nil, "", fmt.Errorf("reading generated scan config: %w", err)
+	}
+	cache[contentKey] = config
+	return config, contentKey, nil
+}
+
 func hashPrefix(value string) string {
 	digest := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(digest[:])[:keyLength]

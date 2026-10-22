@@ -75,6 +75,7 @@ gha-creds-*.json
 
 # Unbound Force — managed by uf init
 # Runtime data under .uf/ (databases, caches, locks, logs)
+.uf/feedback/
 .uf/workflows/
 .uf/artifacts/
 .uf/dewey/graph.db

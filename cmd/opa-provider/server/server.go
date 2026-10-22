@@ -367,22 +367,12 @@ func resolveTargetScanConfig(
 	if inputPath := target.Variables[loader.VarInputPath]; inputPath != "" {
 		targetKeyInput = inputPath
 	}
-	contentKey, ok := index.Targets[genindex.TargetKey(targetKeyInput)]
-	if !ok {
-		return nil, fmt.Errorf("target %q is missing from generate index", target.TargetID)
-	}
-	if err := genindex.ValidateContentKey(contentKey, cfg.GeneratedDirPath()); err != nil {
-		return nil, fmt.Errorf("validating content key for target %q: %w", target.TargetID, err)
-	}
-	if scanCfg, ok := cache[contentKey]; ok {
-		return scanCfg, nil
-	}
-
-	scanCfg, err := generate.ReadScanConfig(cfg.GeneratedDirForKey(contentKey))
+	scanCfg, _, err := genindex.ResolveConfig(
+		genindex.TargetKey(targetKeyInput), index, cfg.GeneratedDirPath(), cache, generate.ReadScanConfig,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("reading generated scan config for target %q: %w", target.TargetID, err)
+		return nil, fmt.Errorf("resolving generated config for target %q: %w", target.TargetID, err)
 	}
-	cache[contentKey] = scanCfg
 	return scanCfg, nil
 }
 
