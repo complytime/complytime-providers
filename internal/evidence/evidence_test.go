@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -77,39 +78,39 @@ func TestFileDigest_UnreadableFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "evidence digest")
 }
 
-func TestHostRemark_BothAvailable(t *testing.T) {
+func TestComputeHostRemark_BothAvailable(t *testing.T) {
 	dir := t.TempDir()
 	idFile := filepath.Join(dir, "machine-id")
 	require.NoError(t, os.WriteFile(idFile, []byte("abc123def456\n"), 0o600))
 
 	t.Setenv(EnvMachineIDFile, idFile)
 
-	remark := HostRemark()
+	remark := computeHostRemark()
 	assert.Contains(t, remark, "Collected on host")
 	assert.Contains(t, remark, "(machine-id: abc123def456)")
 	assert.NotContains(t, remark, "\n")
 }
 
-func TestHostRemark_NoMachineID(t *testing.T) {
+func TestComputeHostRemark_NoMachineID(t *testing.T) {
 	t.Setenv(EnvMachineIDFile, "/nonexistent/machine-id")
 
-	remark := HostRemark()
+	remark := computeHostRemark()
 	assert.Contains(t, remark, "Collected on host")
 	assert.NotContains(t, remark, "machine-id")
 }
 
-func TestHostRemark_EnvOverride(t *testing.T) {
+func TestComputeHostRemark_EnvOverride(t *testing.T) {
 	dir := t.TempDir()
 	idFile := filepath.Join(dir, "custom-machine-id")
 	require.NoError(t, os.WriteFile(idFile, []byte("caf3babe00112233\n"), 0o600))
 
 	t.Setenv(EnvMachineIDFile, idFile)
 
-	remark := HostRemark()
+	remark := computeHostRemark()
 	assert.Contains(t, remark, "(machine-id: caf3babe00112233)")
 }
 
-func TestHostRemark_MachineIDTrimmed(t *testing.T) {
+func TestComputeHostRemark_MachineIDTrimmed(t *testing.T) {
 	dir := t.TempDir()
 	idFile := filepath.Join(dir, "machine-id")
 	require.NoError(t, os.WriteFile(
@@ -118,12 +119,12 @@ func TestHostRemark_MachineIDTrimmed(t *testing.T) {
 
 	t.Setenv(EnvMachineIDFile, idFile)
 
-	remark := HostRemark()
+	remark := computeHostRemark()
 	assert.Contains(t, remark, "(machine-id: abc123)")
 	assert.NotContains(t, remark, " abc123 ")
 }
 
-func TestHostRemark_OversizedMachineIDIgnored(t *testing.T) {
+func TestComputeHostRemark_OversizedMachineIDIgnored(t *testing.T) {
 	dir := t.TempDir()
 	idFile := filepath.Join(dir, "machine-id")
 	// Write a file larger than maxMachineIDSize (1KB)
@@ -135,12 +136,12 @@ func TestHostRemark_OversizedMachineIDIgnored(t *testing.T) {
 
 	t.Setenv(EnvMachineIDFile, idFile)
 
-	remark := HostRemark()
+	remark := computeHostRemark()
 	assert.NotContains(t, remark, "machine-id",
 		"oversized machine-id files should be silently ignored")
 }
 
-func TestHostRemark_NonHexMachineIDIgnored(t *testing.T) {
+func TestComputeHostRemark_NonHexMachineIDIgnored(t *testing.T) {
 	dir := t.TempDir()
 	idFile := filepath.Join(dir, "machine-id")
 	require.NoError(t, os.WriteFile(
@@ -149,9 +150,30 @@ func TestHostRemark_NonHexMachineIDIgnored(t *testing.T) {
 
 	t.Setenv(EnvMachineIDFile, idFile)
 
-	remark := HostRemark()
+	remark := computeHostRemark()
 	assert.NotContains(t, remark, "machine-id",
 		"non-hex machine-id content should be silently ignored")
+}
+
+func TestHostRemark_CachesFirstResult(t *testing.T) {
+	// Reset the package cache so the result does not depend on
+	// whichever test called HostRemark first.
+	hostRemarkOnce = sync.Once{}
+	t.Cleanup(func() { hostRemarkOnce = sync.Once{} })
+
+	dir := t.TempDir()
+	firstID := filepath.Join(dir, "first-machine-id")
+	secondID := filepath.Join(dir, "second-machine-id")
+	require.NoError(t, os.WriteFile(firstID, []byte("aaaa1111\n"), 0o600))
+	require.NoError(t, os.WriteFile(secondID, []byte("bbbb2222\n"), 0o600))
+
+	t.Setenv(EnvMachineIDFile, firstID)
+	first := HostRemark()
+	assert.Contains(t, first, "(machine-id: aaaa1111)")
+
+	t.Setenv(EnvMachineIDFile, secondID)
+	assert.Equal(t, first, HostRemark(),
+		"HostRemark must return the cached value after the first call")
 }
 
 func TestSanitizeForID_SlashDistinction(t *testing.T) {
