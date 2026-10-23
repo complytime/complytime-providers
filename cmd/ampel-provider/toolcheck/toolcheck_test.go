@@ -80,6 +80,7 @@ func TestCheckVersion_OutputParsing(t *testing.T) {
 		output  string
 		want    string
 		wantErr bool
+		wantMsg string
 	}{
 		{
 			name:   "standard ampel output",
@@ -97,14 +98,56 @@ func TestCheckVersion_OutputParsing(t *testing.T) {
 			want:   "1.5.0",
 		},
 		{
+			name:   "structured output with GitVersion",
+			output: "GitVersion: 1.4.2\nGoVersion: go1.26.8\n",
+			want:   "1.4.2",
+		},
+		{
+			name:   "structured output with v prefix",
+			output: "GitVersion: v1.5.0\nGoVersion: go1.26.8\n",
+			want:   "1.5.0",
+		},
+		{
+			name:    "structured devel version",
+			output:  "GitVersion: devel\nGoVersion: go1.26.8\n",
+			wantErr: true,
+			wantMsg: "development version",
+		},
+		{
+			name:    "structured empty GitVersion",
+			output:  "GitVersion: \nGoVersion: go1.26.8\n",
+			wantErr: true,
+			wantMsg: "development version",
+		},
+		{
+			name:    "structured prerelease version",
+			output:  "GitVersion: 1.4.2-rc.1\nGoVersion: go1.26.8\n",
+			wantErr: true,
+			wantMsg: "prerelease version",
+		},
+		{
+			name:    "unstructured prerelease version",
+			output:  "ampel version 1.4.2-rc.1\n",
+			wantErr: true,
+			wantMsg: "prerelease version",
+		},
+		{
+			name:    "ambiguous multi-version output",
+			output:  "ampel 1.4.2 built with go1.26.8\n",
+			wantErr: true,
+			wantMsg: "ambiguous ampel output",
+		},
+		{
 			name:    "no version in output",
 			output:  "ampel is running",
 			wantErr: true,
+			wantMsg: "could not parse version",
 		},
 		{
 			name:    "empty output",
 			output:  "",
 			wantErr: true,
+			wantMsg: "could not parse version",
 		},
 	}
 	for _, tc := range tests {
@@ -112,8 +155,10 @@ func TestCheckVersion_OutputParsing(t *testing.T) {
 			got, err := parseVersionOutput(tc.output)
 			if tc.wantErr {
 				require.Error(t, err)
-				require.Contains(t, err.Error(),
-					"could not parse version")
+				if tc.wantMsg != "" {
+					require.Contains(t, err.Error(),
+						tc.wantMsg)
+				}
 				return
 			}
 			require.NoError(t, err)
