@@ -96,13 +96,16 @@ the Carabiner project for installation instructions:
 :   Per-repository result JSON summarizing findings for a single
     repository and branch combination.
 
-*.complytime/ampel/policy/scan-config.json*
+*.complytime/ampel/generated/\<content-key\>/scan-config.json*
 :   Scan configuration written by the **Generate** RPC. Records the
     matched requirement IDs so the **Scan** RPC can synthesize passing
     assessments for requirements with no findings.
 
-*.complytime/ampel/policy/*
+*.complytime/ampel/generated/\<content-key\>/*
 :   Merged AMPEL policy bundle generated from granular policy files.
+
+*.complytime/ampel/generated/generate-index.json*
+:   Maps each generated target to its content-keyed scan configuration and policy bundle.
 
 *.complytime/ampel/granular-policies/*
 :   Default directory for granular AMPEL policy source files. Overridden

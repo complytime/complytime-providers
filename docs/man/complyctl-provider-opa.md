@@ -109,10 +109,13 @@ Requires the following tools at runtime:
     target and branch combination. For local targets, the branch
     component is omitted.
 
-*.complytime/opa/generated/scan-config.json*
+*.complytime/opa/generated/\<content-key\>/scan-config.json*
 :   Scan configuration written by the **Generate** RPC. Records matched
     requirement IDs, the Rego-to-Gemara reverse mapping, and the
     resolved policy directory path.
+
+*.complytime/opa/generated/generate-index.json*
+:   Maps each generated target to its content-keyed scan configuration.
 
 *.complytime/opa/generated/complytime-mapping.json*
 :   Mapping file shipped in the OCI policy bundle or complypack. Maps

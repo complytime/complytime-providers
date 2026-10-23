@@ -88,6 +88,7 @@ complytime-providers/
 │   ├── complytime/
 │   │   └── testdata/openscap/ # XML test fixtures
 │   ├── evidence/              # Shared SHA256 file digest and evidence constants
+│   ├── genindex/               # Shared generated-artifact index validation and resolution
 │   └── version/               # Build-time version injection
 ├── docs/                      # Provider development guide
 │   └── man/                   #   Man page sources (Pandoc markdown) and generated .1 files

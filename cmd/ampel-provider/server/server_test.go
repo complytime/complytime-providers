@@ -1161,6 +1161,31 @@ func TestScan_PresentIndexInvalidOrUnreadableArtifact_ReturnsError(t *testing.T)
 	}
 }
 
+func TestScan_PresentIndexMalformedOrUnsupported_ReturnsError(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		contents string
+		expected string
+	}{
+		{name: "malformed", contents: `{`, expected: "parse generate index"},
+		{name: "unsupported version", contents: `{"version":2,"targets":{}}`, expected: "unsupported generate index version"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			s, _ := setupServer(t)
+			require.NoError(t, os.WriteFile(
+				filepath.Join(config.GeneratedDirPath(), "generate-index.json"), []byte(testCase.contents), 0o600,
+			))
+
+			_, err := s.Scan(context.Background(), &provider.ScanRequest{Targets: []provider.Target{{
+				TargetID: "target", Variables: map[string]string{
+					"url": "https://github.com/example/target", "specs": "builtin:github/branch-rules.yaml",
+				},
+			}}})
+			require.ErrorContains(t, err, testCase.expected)
+		})
+	}
+}
+
 // Ensure unused imports are used
 var _ = scan.ExecRunner{}
 var _ = convert.PolicyFileName
