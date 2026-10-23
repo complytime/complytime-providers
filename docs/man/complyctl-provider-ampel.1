@@ -69,6 +69,12 @@ was executed.
 Default: \f[B]/etc/machine\-id\f[R]
 .SH EXTERNAL TOOLS
 Requires \f[B]snappy\f[R] and \f[B]ampel\f[R] CLI tools at runtime.
+\f[B]ampel\f[R] version 1.4.2 or later is required for SKIP handling and
+the \f[B]\(enallow\-skip\f[R] flag.
+The provider verifies the ampel version at
+\f[B]Generate\f[R]/\f[B]Scan\f[R] time and reports an actionable error
+if the installed version is below the minimum.
+.PP
 These tools are not currently packaged in Fedora and must be installed
 separately.
 See the Carabiner project for installation instructions: \c
