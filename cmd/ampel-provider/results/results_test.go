@@ -23,6 +23,65 @@ func loadFixture(t *testing.T, path string) []byte {
 	return data
 }
 
+func TestAllFindingsSkipped(t *testing.T) {
+	tests := []struct {
+		name     string
+		findings []Finding
+		want     bool
+	}{
+		{
+			name:     "EmptyFindings",
+			findings: []Finding{},
+			want:     false,
+		},
+		{
+			name: "AllSkip",
+			findings: []Finding{
+				{TenetID: "check-BP-1.01", Result: "skip"},
+				{TenetID: "check-BP-3.01", Result: "skip"},
+			},
+			want: true,
+		},
+		{
+			name: "MixedPassAndSkip",
+			findings: []Finding{
+				{TenetID: "check-BP-1.01", Result: "pass"},
+				{TenetID: "check-BP-3.01", Result: "skip"},
+			},
+			want: false,
+		},
+		{
+			name: "AllPass",
+			findings: []Finding{
+				{TenetID: "check-BP-1.01", Result: "pass"},
+				{TenetID: "check-BP-3.01", Result: "pass"},
+			},
+			want: false,
+		},
+		{
+			name: "AllFail",
+			findings: []Finding{
+				{TenetID: "check-BP-1.01", Result: "fail"},
+			},
+			want: false,
+		},
+		{
+			name: "SingleSkip",
+			findings: []Finding{
+				{TenetID: "check-BP-1.01", Result: "skip"},
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &PerRepoResult{Findings: tt.findings}
+			require.Equal(t, tt.want, r.AllFindingsSkipped())
+		})
+	}
+}
+
 func TestParseAmpelOutput_Pass(t *testing.T) {
 	data := loadFixture(t, "testdata/ampel-verify-pass.json")
 	result, err := ParseAmpelOutput(data, "https://github.com/myorg/repo1", "main")
@@ -72,6 +131,53 @@ func TestParseAmpelOutput_DSSEEnvelope(t *testing.T) {
 	}
 	require.Equal(t, 1, passCount, "expected 1 passing finding")
 	require.Equal(t, 1, failCount, "expected 1 failing finding")
+}
+
+func TestParseAmpelOutput_Skip(t *testing.T) {
+	data := loadFixture(t, "testdata/ampel-verify-skip.json")
+	result, err := ParseAmpelOutput(
+		data, "https://github.com/myorg/repo1", "main",
+	)
+	require.NoError(t, err)
+	// Overall status is PASS when mixed PASS+SKIP results exist
+	require.Equal(t, "pass", result.Status)
+	require.Len(t, result.Findings, 2)
+
+	// First finding: PASS
+	require.Equal(t, "check-BP-1.01", result.Findings[0].TenetID)
+	require.Equal(t, "pass", result.Findings[0].Result)
+	require.Equal(t,
+		"Direct pushes are disabled in default branch. PR required.",
+		result.Findings[0].Reason,
+	)
+
+	// Second finding: SKIP with reason from assessment.message
+	require.Equal(t, "check-BP-3.01", result.Findings[1].TenetID)
+	require.Equal(t, "skip", result.Findings[1].Result)
+	require.Equal(t,
+		"No matching predicate type found for policy",
+		result.Findings[1].Reason,
+	)
+}
+
+func TestParseAmpelOutput_AllSkip(t *testing.T) {
+	data := loadFixture(t, "testdata/ampel-verify-all-skip.json")
+	result, err := ParseAmpelOutput(
+		data, "https://github.com/myorg/repo1", "main",
+	)
+	require.NoError(t, err)
+	// Overall status is SKIP when all policies skipped
+	require.Equal(t, "skip", result.Status)
+	require.Len(t, result.Findings, 2)
+
+	for _, f := range result.Findings {
+		require.Equal(t, "skip", f.Result,
+			"finding %s should be skip", f.TenetID)
+		require.Equal(t,
+			"No matching predicate type found for policy",
+			f.Reason,
+		)
+	}
 }
 
 func TestParseAmpelOutput_Error(t *testing.T) {

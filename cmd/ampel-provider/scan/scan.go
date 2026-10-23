@@ -200,6 +200,7 @@ func constructAmpelVerifyCommand(subject, policyPath, attestationPath, resultsPa
 		"sha256:" + subject,
 		"-p", policyPath,
 		"-a", attestationPath,
+		"--allow-skip",
 		"--attest-results",
 		"--results-path", resultsPath,
 	}

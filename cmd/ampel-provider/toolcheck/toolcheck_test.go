@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package toolcheck
 
 import (
@@ -63,4 +65,195 @@ func TestFormatMissingToolsError_MentionsPATH(t *testing.T) {
 func TestFormatMissingToolsError_Empty(t *testing.T) {
 	err := FormatMissingToolsError(nil)
 	require.NoError(t, err)
+}
+
+func TestCheckVersion_AmpelNotFound(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	err := CheckVersion("1.4.2")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "ampel command not found")
+}
+
+func TestCheckVersion_OutputParsing(t *testing.T) {
+	tests := []struct {
+		name    string
+		output  string
+		want    string
+		wantErr bool
+		wantMsg string
+	}{
+		{
+			name:   "standard ampel output",
+			output: "ampel version 1.4.2\n",
+			want:   "1.4.2",
+		},
+		{
+			name:   "version only",
+			output: "1.4.2",
+			want:   "1.4.2",
+		},
+		{
+			name:   "verbose output with build info",
+			output: "ampel CLI v1.5.0 (built 2026-01-15)",
+			want:   "1.5.0",
+		},
+		{
+			name:   "structured output with GitVersion",
+			output: "GitVersion: 1.4.2\nGoVersion: go1.26.8\n",
+			want:   "1.4.2",
+		},
+		{
+			name:   "structured output with v prefix",
+			output: "GitVersion: v1.5.0\nGoVersion: go1.26.8\n",
+			want:   "1.5.0",
+		},
+		{
+			name:    "structured devel version",
+			output:  "GitVersion: devel\nGoVersion: go1.26.8\n",
+			wantErr: true,
+			wantMsg: "development version",
+		},
+		{
+			name:    "structured empty GitVersion",
+			output:  "GitVersion: \nGoVersion: go1.26.8\n",
+			wantErr: true,
+			wantMsg: "development version",
+		},
+		{
+			name:    "structured prerelease version",
+			output:  "GitVersion: 1.4.2-rc.1\nGoVersion: go1.26.8\n",
+			wantErr: true,
+			wantMsg: "prerelease version",
+		},
+		{
+			name:    "unstructured prerelease version",
+			output:  "ampel version 1.4.2-rc.1\n",
+			wantErr: true,
+			wantMsg: "prerelease version",
+		},
+		{
+			name:    "ambiguous multi-version output",
+			output:  "ampel 1.4.2 built with go1.26.8\n",
+			wantErr: true,
+			wantMsg: "ambiguous ampel output",
+		},
+		{
+			name:   "version with build metadata",
+			output: "ampel version 1.4.2+build.123\n",
+			want:   "1.4.2",
+		},
+		{
+			name:    "prerelease with build metadata",
+			output:  "ampel version 1.4.2-rc.1+build.123\n",
+			wantErr: true,
+			wantMsg: "prerelease version",
+		},
+		{
+			name:    "no version in output",
+			output:  "ampel is running",
+			wantErr: true,
+			wantMsg: "could not parse version",
+		},
+		{
+			name:    "empty output",
+			output:  "",
+			wantErr: true,
+			wantMsg: "could not parse version",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseVersionOutput(tc.output)
+			if tc.wantErr {
+				require.Error(t, err)
+				if tc.wantMsg != "" {
+					require.Contains(t, err.Error(),
+						tc.wantMsg)
+				}
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestCheckVersion_Comparison(t *testing.T) {
+	tests := []struct {
+		name     string
+		detected string
+		minimum  string
+		wantErr  bool
+		wantMsg  string
+	}{
+		{
+			name:     "exact match",
+			detected: "1.4.2",
+			minimum:  "1.4.2",
+		},
+		{
+			name:     "above minimum patch",
+			detected: "1.4.3",
+			minimum:  "1.4.2",
+		},
+		{
+			name:     "above minimum minor",
+			detected: "1.5.0",
+			minimum:  "1.4.2",
+		},
+		{
+			name:     "above minimum major",
+			detected: "2.0.0",
+			minimum:  "1.4.2",
+		},
+		{
+			name:     "below minimum patch",
+			detected: "1.4.1",
+			minimum:  "1.4.2",
+			wantErr:  true,
+			wantMsg:  "below minimum required",
+		},
+		{
+			name:     "below minimum minor",
+			detected: "1.3.9",
+			minimum:  "1.4.2",
+			wantErr:  true,
+			wantMsg:  "below minimum required",
+		},
+		{
+			name:     "below minimum major",
+			detected: "0.9.9",
+			minimum:  "1.4.2",
+			wantErr:  true,
+			wantMsg:  "below minimum required",
+		},
+		{
+			name:     "invalid detected version",
+			detected: "notaversion",
+			minimum:  "1.4.2",
+			wantErr:  true,
+			wantMsg:  "invalid version format",
+		},
+		{
+			name:     "invalid minimum version",
+			detected: "1.4.2",
+			minimum:  "bad",
+			wantErr:  true,
+			wantMsg:  "invalid version format",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := compareVersions(tc.detected, tc.minimum)
+			if tc.wantErr {
+				require.Error(t, err)
+				if tc.wantMsg != "" {
+					require.Contains(t, err.Error(),
+						tc.wantMsg)
+				}
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }

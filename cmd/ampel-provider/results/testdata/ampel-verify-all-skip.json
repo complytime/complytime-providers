@@ -1,0 +1,39 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "test-subject",
+      "digest": {"sha256": "abc123"}
+    }
+  ],
+  "predicateType": "https://carabiner.dev/ampel/resultset/v0",
+  "predicate": {
+    "status": "SKIP",
+    "results": [
+      {
+        "status": "SKIP",
+        "policy": {"id": "BP-1.01"},
+        "eval_results": [
+          {
+            "id": "when",
+            "status": "SKIP",
+            "assessment": {"message": "No matching predicate type found for policy"}
+          }
+        ],
+        "meta": {"description": "Validate branch protection settings require pull requests"}
+      },
+      {
+        "status": "SKIP",
+        "policy": {"id": "BP-3.01"},
+        "eval_results": [
+          {
+            "id": "when",
+            "status": "SKIP",
+            "assessment": {"message": "No matching predicate type found for policy"}
+          }
+        ],
+        "meta": {"description": "Validate force push blocking is enabled on protected branches"}
+      }
+    ]
+  }
+}
