@@ -31,8 +31,11 @@ func CheckTools() ([]string, error) {
 	return missing, nil
 }
 
-// versionPattern matches a major.minor.patch version string in output.
-var versionPattern = regexp.MustCompile(`(\d+\.\d+\.\d+)`)
+// versionPattern matches a major.minor.patch version string with an
+// optional prerelease suffix (e.g., 1.4.2, 1.4.2-rc.1).
+var versionPattern = regexp.MustCompile(
+	`(\d+\.\d+\.\d+)(-[a-zA-Z0-9.]+)?`,
+)
 
 // CheckVersion runs "ampel version" and returns an error if the detected
 // version is below minVersion. This ensures the provider does not pass
@@ -63,15 +66,65 @@ func CheckVersion(minVersion string) error {
 }
 
 // parseVersionOutput extracts a major.minor.patch version string from
-// the output of "ampel version".
+// the output of "ampel version". It prefers the GitVersion field in
+// structured output and rejects development or prerelease builds.
 func parseVersionOutput(output string) (string, error) {
-	match := versionPattern.FindString(output)
-	if match == "" {
+	// Prefer structured output: look for a GitVersion field.
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "GitVersion:") {
+			continue
+		}
+		value := strings.TrimSpace(
+			strings.TrimPrefix(trimmed, "GitVersion:"),
+		)
+		if value == "" || value == "devel" {
+			return "", fmt.Errorf(
+				"ampel reports development version %q;"+
+					" a released version >= %s is required",
+				value, MinAmpelVersion,
+			)
+		}
+		return extractCleanVersion(value)
+	}
+
+	// Unstructured output: accept only if exactly one version
+	// substring is present to avoid misidentifying GoVersion
+	// or other metadata as the ampel version.
+	matches := versionPattern.FindAllStringSubmatch(output, -1)
+	if len(matches) == 0 {
 		return "", fmt.Errorf(
-			"could not parse version from ampel output: %q", output,
+			"could not parse version from ampel output: %q",
+			output,
 		)
 	}
-	return match, nil
+	if len(matches) > 1 {
+		return "", fmt.Errorf(
+			"ambiguous ampel output contains multiple version"+
+				" strings; cannot determine ampel version: %q",
+			output,
+		)
+	}
+	return extractCleanVersion(matches[0][0])
+}
+
+// extractCleanVersion validates that a version string is a clean
+// X.Y.Z release without prerelease suffixes.
+func extractCleanVersion(s string) (string, error) {
+	m := versionPattern.FindStringSubmatch(s)
+	if m == nil {
+		return "", fmt.Errorf(
+			"could not parse version from %q", s,
+		)
+	}
+	if m[2] != "" {
+		return "", fmt.Errorf(
+			"ampel prerelease version %q is not supported;"+
+				" a stable release >= %s is required",
+			m[0], MinAmpelVersion,
+		)
+	}
+	return m[1], nil
 }
 
 // compareVersions returns an error if detected is below minimum.
