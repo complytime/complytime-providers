@@ -138,6 +138,17 @@ func TestCheckVersion_OutputParsing(t *testing.T) {
 			wantMsg: "ambiguous ampel output",
 		},
 		{
+			name:   "version with build metadata",
+			output: "ampel version 1.4.2+build.123\n",
+			want:   "1.4.2",
+		},
+		{
+			name:    "prerelease with build metadata",
+			output:  "ampel version 1.4.2-rc.1+build.123\n",
+			wantErr: true,
+			wantMsg: "prerelease version",
+		},
+		{
 			name:    "no version in output",
 			output:  "ampel is running",
 			wantErr: true,
@@ -173,6 +184,7 @@ func TestCheckVersion_Comparison(t *testing.T) {
 		detected string
 		minimum  string
 		wantErr  bool
+		wantMsg  string
 	}{
 		{
 			name:     "exact match",
@@ -199,30 +211,35 @@ func TestCheckVersion_Comparison(t *testing.T) {
 			detected: "1.4.1",
 			minimum:  "1.4.2",
 			wantErr:  true,
+			wantMsg:  "below minimum required",
 		},
 		{
 			name:     "below minimum minor",
 			detected: "1.3.9",
 			minimum:  "1.4.2",
 			wantErr:  true,
+			wantMsg:  "below minimum required",
 		},
 		{
 			name:     "below minimum major",
 			detected: "0.9.9",
 			minimum:  "1.4.2",
 			wantErr:  true,
+			wantMsg:  "below minimum required",
 		},
 		{
 			name:     "invalid detected version",
 			detected: "notaversion",
 			minimum:  "1.4.2",
 			wantErr:  true,
+			wantMsg:  "invalid version format",
 		},
 		{
 			name:     "invalid minimum version",
 			detected: "1.4.2",
 			minimum:  "bad",
 			wantErr:  true,
+			wantMsg:  "invalid version format",
 		},
 	}
 	for _, tc := range tests {
@@ -230,6 +247,10 @@ func TestCheckVersion_Comparison(t *testing.T) {
 			err := compareVersions(tc.detected, tc.minimum)
 			if tc.wantErr {
 				require.Error(t, err)
+				if tc.wantMsg != "" {
+					require.Contains(t, err.Error(),
+						tc.wantMsg)
+				}
 				return
 			}
 			require.NoError(t, err)
