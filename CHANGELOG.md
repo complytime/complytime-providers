@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- **ampel-provider**, **opa-provider**: Store generated scan artifacts per target and resolve them through a persisted index so multi-target scans use their matching policy configuration. (complytime/website#176; Spec: `openspec/changes/fix-scan-config-per-target/`)
 - **opa-provider**: Moved `url` and `input_path` from `RequiredTargetVariables` to `OptionalTargetVariableGroups` in `Describe()` response. `complyctl doctor` no longer reports false "missing variable" errors for these mutually exclusive variables. (Fixes #145)
 
 ### Security

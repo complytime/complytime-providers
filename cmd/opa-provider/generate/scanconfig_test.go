@@ -3,6 +3,7 @@
 package generate
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -26,7 +27,7 @@ func TestWriteAndReadScanConfig_RoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, ids, cfg.IDs)
 	assert.Equal(t, reverseMap, cfg.ReverseMapping)
-	assert.Equal(t, "/path/to/bundle", cfg.BundleDir)
+	assert.Equal(t, "/path/to/bundle", cfg.PolicyDir)
 	assert.NotEmpty(t, cfg.GeneratedAt)
 }
 
@@ -40,7 +41,7 @@ func TestWriteAndReadScanConfig_NullIDs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, cfg.IDs)
 	assert.Nil(t, cfg.ReverseMapping)
-	assert.Equal(t, "/path/to/bundle", cfg.BundleDir)
+	assert.Equal(t, "/path/to/bundle", cfg.PolicyDir)
 }
 
 func TestReadScanConfig_MissingFile(t *testing.T) {
@@ -61,11 +62,19 @@ func TestReadScanConfig_MalformedJSON(t *testing.T) {
 	assert.Contains(t, err.Error(), "parsing scan config")
 }
 
-func TestWriteScanConfig_CreatesDirectory(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "nested", "dir")
-	err := WriteScanConfig(dir, nil, nil, "")
+func TestReadScanConfig_LegacyBundleDirJSON(t *testing.T) {
+	dir := t.TempDir()
+	legacyConfig := map[string]any{
+		"ids":             []string{"kubernetes.run_as_root"},
+		"reverse_mapping": map[string]string{"kubernetes.run_as_root": "CIS-1"},
+		"bundle_dir":      "/legacy/policy",
+		"generated_at":    "2026-01-01T00:00:00Z",
+	}
+	data, err := json.Marshal(legacyConfig)
 	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ScanConfigFileName), data, 0600))
 
-	_, err = os.Stat(filepath.Join(dir, ScanConfigFileName))
+	cfg, err := ReadScanConfig(dir)
 	require.NoError(t, err)
+	assert.Equal(t, "/legacy/policy", cfg.PolicyDir)
 }

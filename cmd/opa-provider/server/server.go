@@ -22,6 +22,7 @@ import (
 	"github.com/complytime/complytime-providers/cmd/opa-provider/toolcheck"
 	"github.com/complytime/complytime-providers/internal/archive"
 	"github.com/complytime/complytime-providers/internal/evidence"
+	"github.com/complytime/complytime-providers/internal/genindex"
 	"github.com/complytime/complytime-providers/internal/version"
 )
 
@@ -155,10 +156,22 @@ func (s *ProviderServer) Generate(
 		logger.Warn(w)
 	}
 
-	if err := generate.WriteScanConfig(
-		cfg.GeneratedDirPath(), ids, reverseMap, policyDir,
-	); err != nil {
+	contentKey := genindex.ContentKey(ids, policyDir)
+	generatedDir := cfg.GeneratedDirForKey(contentKey)
+	if err := os.MkdirAll(generatedDir, 0750); err != nil {
+		return nil, fmt.Errorf("creating content-generated directory: %w", err)
+	}
+	if err := generate.WriteScanConfig(generatedDir, ids, reverseMap, policyDir); err != nil {
 		return nil, fmt.Errorf("writing scan config: %w", err)
+	}
+	targetKeyInput := req.TargetVariables[loader.VarURL]
+	if inputPath := req.TargetVariables[loader.VarInputPath]; inputPath != "" {
+		targetKeyInput = inputPath
+	}
+	if err := genindex.UpdateIndex(
+		cfg.GeneratedDirPath(), genindex.TargetKey(targetKeyInput), contentKey,
+	); err != nil {
+		return nil, fmt.Errorf("updating generate index: %w", err)
 	}
 
 	logger.Info("generate complete",
@@ -210,7 +223,7 @@ func (s *ProviderServer) resolvePolicyDir(
 }
 
 // resolveScanPolicyDir determines the policy directory for Scan. It uses
-// the BundleDir from the scan config (set by Generate) if available. Falls
+// the PolicyDir from the scan config (set by Generate) if available. Falls
 // back to pulling via opa_bundle_ref when no scan config exists.
 func (s *ProviderServer) resolveScanPolicyDir(
 	logger hclog.Logger,
@@ -221,10 +234,10 @@ func (s *ProviderServer) resolveScanPolicyDir(
 ) (string, error) {
 	// Prefer the directory from Generate's scan config (works for both
 	// complypack and opa_bundle_ref paths).
-	if scanCfg != nil && scanCfg.BundleDir != "" {
+	if scanCfg != nil && scanCfg.PolicyDir != "" {
 		logger.Info("using policy dir from scan config",
-			"bundle_dir", scanCfg.BundleDir)
-		return scanCfg.BundleDir, nil
+			"policy_dir", scanCfg.PolicyDir)
+		return scanCfg.PolicyDir, nil
 	}
 
 	// Fall back to pulling via opa_bundle_ref.
@@ -285,11 +298,22 @@ func (s *ProviderServer) Scan(
 		return nil, fmt.Errorf("directory setup failed: %w", err)
 	}
 
-	// Read scan config written by Generate.
-	scanCfg, scanCfgErr := generate.ReadScanConfig(cfg.GeneratedDirPath())
-	if scanCfgErr != nil {
-		logger.Warn("no scan config found; run Generate before Scan", "error", scanCfgErr)
+	index, indexErr := genindex.ReadIndex(cfg.GeneratedDirPath())
+	if indexErr != nil && !errors.Is(indexErr, os.ErrNotExist) {
+		return nil, fmt.Errorf(
+			"reading generate index for target %q: %w", req.Targets[0].TargetID, indexErr,
+		)
 	}
+	hasIndex := indexErr == nil
+	var legacyScanConfig *generate.ScanConfig
+	if !hasIndex {
+		logger.Warn("generate index absent; using legacy scan configuration fallback")
+		legacyScanConfig, indexErr = generate.ReadScanConfig(cfg.GeneratedDirPath())
+		if indexErr != nil {
+			logger.Warn("no legacy scan config found; run Generate before Scan", "error", indexErr)
+		}
+	}
+	scanConfigCache := make(map[string]*generate.ScanConfig)
 
 	bundleCache := map[string]string{}
 	var allResults []*results.PerTargetResult
@@ -297,6 +321,12 @@ func (s *ProviderServer) Scan(
 	hostRemark := evidence.HostRemark()
 
 	for _, target := range req.Targets {
+		scanCfg, err := resolveTargetScanConfig(
+			target, cfg, index, hasIndex, legacyScanConfig, scanConfigCache,
+		)
+		if err != nil {
+			return nil, err
+		}
 		targetResults, writeErr := s.processTarget(
 			logger, target, cfg, bundleCache, scanCfg,
 		)
@@ -305,21 +335,45 @@ func (s *ProviderServer) Scan(
 		}
 		for _, tr := range targetResults {
 			tr.Remarks = hostRemark
+			if scanCfg != nil {
+				tr.ReverseMapping = scanCfg.ReverseMapping
+			}
 		}
 		allResults = append(allResults, targetResults...)
 	}
 
-	var reverseMap map[string]string
-	if scanCfg != nil {
-		reverseMap = scanCfg.ReverseMapping
-	}
-	resp := results.ToScanResponse(allResults, reverseMap)
+	resp := results.ToScanResponse(allResults, nil)
 
 	if aggregatedErr := errors.Join(writeErrs...); aggregatedErr != nil {
 		resp.Errors = append(resp.Errors, aggregatedErr.Error())
 	}
 
 	return resp, nil
+}
+
+func resolveTargetScanConfig(
+	target provider.Target,
+	cfg *config.Config,
+	index genindex.GenerateIndex,
+	hasIndex bool,
+	legacyScanConfig *generate.ScanConfig,
+	cache map[string]*generate.ScanConfig,
+) (*generate.ScanConfig, error) {
+	if !hasIndex {
+		return legacyScanConfig, nil
+	}
+
+	targetKeyInput := target.Variables[loader.VarURL]
+	if inputPath := target.Variables[loader.VarInputPath]; inputPath != "" {
+		targetKeyInput = inputPath
+	}
+	scanCfg, _, err := genindex.ResolveConfig(
+		genindex.TargetKey(targetKeyInput), index, cfg.GeneratedDirPath(), cache, generate.ReadScanConfig,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("resolving generated config for target %q: %w", target.TargetID, err)
+	}
+	return scanCfg, nil
 }
 
 func (s *ProviderServer) processTarget(
@@ -349,7 +403,7 @@ func (s *ProviderServer) processTarget(
 		}}, nil
 	}
 
-	// Resolve policy directory: use scan config's BundleDir (set by
+	// Resolve policy directory: use scan config's PolicyDir (set by
 	// Generate from complypack or opa_bundle_ref), then fall back to
 	// pulling via opa_bundle_ref if scan config is unavailable.
 	policyDir, err := s.resolveScanPolicyDir(

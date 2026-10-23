@@ -17,6 +17,8 @@ const (
 	DefaultGranularPolicyDir = "granular-policies"
 	// GeneratedPolicyDir is the workspace subdirectory for generated policy artifacts.
 	GeneratedPolicyDir = "policy"
+	// GeneratedDir is the workspace subdirectory for target-scoped generation artifacts.
+	GeneratedDir = "generated"
 	// DefaultResultsDir is the default directory name for per-repository result files.
 	DefaultResultsDir = "results"
 )
@@ -40,6 +42,7 @@ func EnsureDirectories() error {
 		ampelDir(),
 		GranularPolicyDirPath(),
 		GeneratedPolicyDirPath(),
+		GeneratedDirPath(),
 		ResultsDirPath(),
 		SpecDirPath(),
 	}
@@ -65,6 +68,16 @@ func ResultsDirPath() string {
 // GeneratedPolicyDirPath returns the workspace path for generated policy output.
 func GeneratedPolicyDirPath() string {
 	return filepath.Join(ampelDir(), GeneratedPolicyDir)
+}
+
+// GeneratedDirPath returns the path for target-scoped generation artifacts.
+func GeneratedDirPath() string {
+	return filepath.Join(ampelDir(), GeneratedDir)
+}
+
+// GeneratedDirForKey returns the path for artifacts associated with contentKey.
+func GeneratedDirForKey(contentKey string) string {
+	return filepath.Join(GeneratedDirPath(), contentKey)
 }
 
 // ScanConfigDirPath returns the directory path where scan-config.json is stored.

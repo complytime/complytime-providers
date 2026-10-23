@@ -85,6 +85,7 @@ type PerRepoResult struct {
 	AmpelDigest           string    `json:"ampel_digest,omitempty"`
 	SnappyDigest          string    `json:"snappy_digest,omitempty"`
 	Remarks               string    `json:"remarks,omitempty"`
+	RequirementIDs        []string  `json:"-"`
 }
 
 // Finding represents an individual rule evaluation result.
@@ -293,37 +294,33 @@ func ToScanResponse(repoResults []*PerRepoResult, allRequirementIDs []string) *p
 	// are skipped because they cannot carry evidence. The spec requires at
 	// least one Evidence entry per AssessmentLog. Errors are already captured
 	// in opErrors for the caller to report.
-	if allRequirementIDs != nil {
-		allScanned := scannedRepos(repoResults)
-		if len(allScanned) > 0 {
-			syntheticSteps := buildSyntheticSteps(repoResults)
-			syntheticPass := 0
-			syntheticGuidances := make([]string, len(syntheticSteps))
-			for _, s := range syntheticSteps {
-				if s.Result == provider.ResultPassed {
-					syntheticPass++
-				}
+	for _, rr := range scannedRepos(repoResults) {
+		requirementIDs := rr.RequirementIDs
+		if requirementIDs == nil {
+			requirementIDs = allRequirementIDs
+		}
+		for _, reqID := range requirementIDs {
+			if repoHasRequirementFinding(rr, reqID) {
+				continue
 			}
-			allScannedSeen := make(
-				map[*PerRepoResult]bool, len(allScanned),
-			)
-			for _, rr := range allScanned {
-				allScannedSeen[rr] = true
+			g, ok := groups[reqID]
+			if !ok {
+				g = &reqGroup{requirementID: reqID, repoSeen: make(map[*PerRepoResult]bool)}
+				groups[reqID] = g
+				order = append(order, reqID)
 			}
-			for _, reqID := range allRequirementIDs {
-				if _, exists := groups[reqID]; !exists {
-					groups[reqID] = &reqGroup{
-						requirementID: reqID,
-						steps:         syntheticSteps,
-						guidances:     syntheticGuidances,
-						passCount:     syntheticPass,
-						totalCount:    len(syntheticSteps),
-						repos:         allScanned,
-						repoSeen:      allScannedSeen,
-					}
-					order = append(order, reqID)
-				}
+			if !g.repoSeen[rr] {
+				g.repos = append(g.repos, rr)
+				g.repoSeen[rr] = true
 			}
+			g.steps = append(g.steps, provider.Step{
+				Name:    targets.RepoDisplayName(rr.Repository) + "@" + rr.Branch,
+				Result:  provider.ResultPassed,
+				Message: "all checks passed",
+			})
+			g.guidances = append(g.guidances, "")
+			g.passCount++
+			g.totalCount++
 		}
 	}
 
@@ -377,6 +374,15 @@ func ToScanResponse(repoResults []*PerRepoResult, allRequirementIDs []string) *p
 		Errors:            opErrors,
 		MappingReferences: buildMappingReferences(repoResults),
 	}
+}
+
+func repoHasRequirementFinding(result *PerRepoResult, requirementID string) bool {
+	for _, finding := range result.Findings {
+		if strings.TrimPrefix(finding.TenetID, "check-") == requirementID {
+			return true
+		}
+	}
+	return false
 }
 
 // scannedRepos returns all non-error PerRepoResults, or nil if all
