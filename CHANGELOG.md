@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- **internal/evidence**: `HostRemark()` now caches its result with `sync.Once` instead of calling `os.Hostname()` and reading the machine-id file on every Scan. (Fixes #204)
 - **opa-provider**: Moved `url` and `input_path` from `RequiredTargetVariables` to `OptionalTargetVariableGroups` in `Describe()` response. `complyctl doctor` no longer reports false "missing variable" errors for these mutually exclusive variables. (Fixes #145)
 
 ### Security
