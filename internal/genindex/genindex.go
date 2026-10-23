@@ -84,10 +84,29 @@ func WriteIndex(indexDir string, index GenerateIndex) error {
 	if err := os.MkdirAll(indexDir, directoryMode); err != nil {
 		return fmt.Errorf("create generate index directory: %w", err)
 	}
-	if err := os.WriteFile(
-		filepath.Join(indexDir, indexFilename), contents, fileMode,
-	); err != nil {
-		return fmt.Errorf("write generate index: %w", err)
+	temporaryFile, err := os.CreateTemp(indexDir, ".generate-index-*")
+	if err != nil {
+		return fmt.Errorf("create temporary generate index: %w", err)
+	}
+	temporaryPath := temporaryFile.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporaryFile.Chmod(fileMode); err != nil {
+		temporaryFile.Close()
+		return fmt.Errorf("set temporary generate index permissions: %w", err)
+	}
+	if _, err := temporaryFile.Write(contents); err != nil {
+		temporaryFile.Close()
+		return fmt.Errorf("write temporary generate index: %w", err)
+	}
+	if err := temporaryFile.Sync(); err != nil {
+		temporaryFile.Close()
+		return fmt.Errorf("sync temporary generate index: %w", err)
+	}
+	if err := temporaryFile.Close(); err != nil {
+		return fmt.Errorf("close temporary generate index: %w", err)
+	}
+	if err := os.Rename(temporaryPath, filepath.Join(indexDir, indexFilename)); err != nil {
+		return fmt.Errorf("publish generate index: %w", err)
 	}
 
 	return nil
@@ -138,7 +157,6 @@ func ValidateContentKey(contentKey, generatedDir string) error {
 			contentKey, keyLength,
 		)
 	}
-
 	absoluteGeneratedDir, err := filepath.Abs(generatedDir)
 	if err != nil {
 		return fmt.Errorf("resolve generated directory: %w", err)
@@ -157,8 +175,26 @@ func ValidateContentKey(contentKey, generatedDir string) error {
 		filepath.IsAbs(relativePath) {
 		return fmt.Errorf("content key %q resolves outside generated directory", contentKey)
 	}
+	if err := rejectSymlinks(absoluteContentDir); err != nil {
+		return fmt.Errorf("inspect content key directory: %w", err)
+	}
 
 	return nil
+}
+
+func rejectSymlinks(path string) error {
+	return filepath.WalkDir(path, func(entryPath string, entry os.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) && entryPath == path {
+				return nil
+			}
+			return err
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink at %s", entryPath)
+		}
+		return nil
+	})
 }
 
 // ResolveConfig resolves and reads a target's generated configuration, caching by content key.

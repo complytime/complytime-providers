@@ -103,13 +103,17 @@ The filename follows the same pattern as the snappy attestation.
 Per\-repository result JSON summarizing findings for a single repository
 and branch combination.
 .TP
-\f[I].complytime/ampel/policy/scan\-config.json\f[R]
+\f[I].complytime/ampel/generated/<content\-key>/scan\-config.json\f[R]
 Scan configuration written by the \f[B]Generate\f[R] RPC.
 Records the matched requirement IDs so the \f[B]Scan\f[R] RPC can
 synthesize passing assessments for requirements with no findings.
 .TP
-\f[I].complytime/ampel/policy/\f[R]
+\f[I].complytime/ampel/generated/<content\-key>/\f[R]
 Merged AMPEL policy bundle generated from granular policy files.
+.TP
+\f[I].complytime/ampel/generated/generate\-index.json\f[R]
+Maps each generated target to its content\-keyed scan configuration and policy
+bundle.
 .TP
 \f[I].complytime/ampel/granular\-policies/\f[R]
 Default directory for granular AMPEL policy source files.

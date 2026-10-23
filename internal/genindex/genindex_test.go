@@ -57,6 +57,19 @@ func TestIndex_CreateReadAndUpdate(t *testing.T) {
 	assert.Equal(t, "fedcba9876543210", updatedIndex.Targets["target-one"])
 }
 
+func TestWriteIndex_ReplacesExistingIndex(t *testing.T) {
+	indexDir := t.TempDir()
+	initialIndex := GenerateIndex{Version: indexVersion, Targets: map[string]string{"target-one": "0123456789abcdef"}}
+	replacementIndex := GenerateIndex{Version: indexVersion, Targets: map[string]string{"target-two": "fedcba9876543210"}}
+
+	require.NoError(t, WriteIndex(indexDir, initialIndex))
+	require.NoError(t, WriteIndex(indexDir, replacementIndex))
+
+	index, err := ReadIndex(indexDir)
+	require.NoError(t, err)
+	assert.Equal(t, replacementIndex, index)
+}
+
 func TestUpdateIndex_CreatesNewIndex(t *testing.T) {
 	indexDir := filepath.Join(t.TempDir(), "generated")
 
@@ -140,6 +153,27 @@ func TestValidateContentKey_ValidAndInvalid(t *testing.T) {
 			assert.Contains(t, err.Error(), "invalid content key")
 		})
 	}
+}
+
+func TestValidateContentKey_RejectsSymlink(t *testing.T) {
+	generatedDir := t.TempDir()
+	contentKey := "0123456789abcdef"
+	require.NoError(t, os.Symlink(t.TempDir(), filepath.Join(generatedDir, contentKey)))
+
+	err := ValidateContentKey(contentKey, generatedDir)
+	require.ErrorContains(t, err, "symlink")
+}
+
+func TestResolveConfig_RejectsSymlinkedArtifact(t *testing.T) {
+	generatedDir := t.TempDir()
+	contentKey := "0123456789abcdef"
+	contentDir := filepath.Join(generatedDir, contentKey)
+	require.NoError(t, os.Mkdir(contentDir, 0o755))
+	require.NoError(t, os.Symlink(t.TempDir(), filepath.Join(contentDir, "scan-config.json")))
+
+	index := GenerateIndex{Version: indexVersion, Targets: map[string]string{"target": contentKey}}
+	_, _, err := ResolveConfig("target", index, generatedDir, make(map[string]*string), nil)
+	require.ErrorContains(t, err, "symlink")
 }
 
 func TestResolveConfig_ReadsAndCachesByContentKey(t *testing.T) {
