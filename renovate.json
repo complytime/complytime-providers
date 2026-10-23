@@ -6,11 +6,10 @@
     "(snappy, ampel, conftest) in CI workflows and devcontainer",
     "scripts. gomod is preserved for Go toolchain patch tracking."
   ],
-  "enabledManagers": ["gomod", "custom.tool-versions"],
+  "enabledManagers": ["gomod", "custom.regex"],
   "customManagers": [
     {
       "customType": "regex",
-      "managerName": "tool-versions",
       "description": "Track tool version pins annotated with inline renovate comments",
       "fileMatch": [
         "^\\.github/workflows/.*\\.yml$",
