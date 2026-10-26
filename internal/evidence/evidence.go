@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // Evidence type constants used in provider.Evidence.Type.
@@ -86,11 +87,19 @@ func FileDigest(path string) (string, error) {
 	return fmt.Sprintf("sha256:%x", h.Sum(nil)), nil
 }
 
+var (
+	hostRemarkOnce sync.Once
+	cachedRemark   string
+)
+
 // HostRemark returns a human-readable string identifying the host
 // where evidence was collected. It combines the system hostname with
 // the machine-id from /etc/machine-id (or the path specified by the
 // COMPLYTIME_MACHINE_ID_FILE environment variable). The result is
 // suitable for use as EvidenceSource.Remarks.
+//
+// The result is computed once and cached for the process lifetime,
+// since hostname and machine-id do not change between Scan calls.
 //
 // Fallback behavior:
 //   - Both available: Collected on host "name" (machine-id: abc123)
@@ -98,6 +107,15 @@ func FileDigest(path string) (string, error) {
 //   - Machine-id only: Collected on host with machine-id: abc123
 //   - Neither:        Collected on unknown host
 func HostRemark() string {
+	hostRemarkOnce.Do(func() {
+		cachedRemark = computeHostRemark()
+	})
+	return cachedRemark
+}
+
+// computeHostRemark builds the uncached host remark. Tests call it
+// directly so each case can vary COMPLYTIME_MACHINE_ID_FILE.
+func computeHostRemark() string {
 	hostname, hostErr := os.Hostname()
 	machineID := readMachineID()
 
