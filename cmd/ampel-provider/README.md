@@ -131,7 +131,7 @@ When the plugin receives the `scan` command from complyctl, it will:
 - **Go** version 1.24 or higher
 - **Make** (optional, for using the Makefile)
 - **snappy** CLI tool
-- **ampel** CLI tool
+- **ampel** CLI tool (version 1.4.2 or later)
 - A **GitHub** and/or **GitLab personal access token** with repository read permissions
 
 ### Installing snappy and ampel

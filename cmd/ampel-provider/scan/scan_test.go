@@ -132,6 +132,7 @@ func TestConstructAmpelVerifyCommand(t *testing.T) {
 		"sha256:abc123",
 		"-p", "/policy/path.json",
 		"-a", "/attestation/data.json",
+		"--allow-skip",
 		"--attest-results",
 		"--results-path", "/results/output.json",
 	}, args)
