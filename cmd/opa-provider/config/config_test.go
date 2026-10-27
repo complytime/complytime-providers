@@ -48,6 +48,14 @@ func TestGeneratedDirPath(t *testing.T) {
 	assert.Equal(t, filepath.Join(dir, "opa", "generated"), cfg.GeneratedDirPath())
 }
 
+func TestGeneratedDirForKey_ReturnsContentKeyDirectory(t *testing.T) {
+	dir := t.TempDir()
+	cfg := NewConfig(dir)
+
+	assert.Equal(t, filepath.Join(dir, "opa", "generated", "0123456789abcdef"),
+		cfg.GeneratedDirForKey("0123456789abcdef"))
+}
+
 func TestEnsureDirectories(t *testing.T) {
 	dir := t.TempDir()
 	cfg := NewConfig(dir)

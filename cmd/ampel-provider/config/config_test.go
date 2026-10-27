@@ -29,6 +29,13 @@ func TestGeneratedPolicyDirPath(t *testing.T) {
 	require.Equal(t, expected, GeneratedPolicyDirPath())
 }
 
+func TestGeneratedDirPaths(t *testing.T) {
+	generatedDir := filepath.Join(provider.WorkspaceDir, ProviderDir, GeneratedDir)
+	require.Equal(t, generatedDir, GeneratedDirPath())
+	require.Equal(t, filepath.Join(generatedDir, "0123456789abcdef"),
+		GeneratedDirForKey("0123456789abcdef"))
+}
+
 func TestScanConfigDirPath(t *testing.T) {
 	expected := filepath.Join(provider.WorkspaceDir, ProviderDir, GeneratedPolicyDir)
 	require.Equal(t, expected, ScanConfigDirPath())
@@ -52,6 +59,7 @@ func TestEnsureDirectories(t *testing.T) {
 	require.DirExists(t, filepath.Join(dir, provider.WorkspaceDir, ProviderDir))
 	require.DirExists(t, filepath.Join(dir, provider.WorkspaceDir, ProviderDir, DefaultGranularPolicyDir))
 	require.DirExists(t, filepath.Join(dir, provider.WorkspaceDir, ProviderDir, GeneratedPolicyDir))
+	require.DirExists(t, filepath.Join(dir, provider.WorkspaceDir, ProviderDir, GeneratedDir))
 	require.DirExists(t, filepath.Join(dir, provider.WorkspaceDir, ProviderDir, DefaultResultsDir))
 	require.DirExists(t, filepath.Join(dir, provider.WorkspaceDir, ProviderDir, "specs"))
 }

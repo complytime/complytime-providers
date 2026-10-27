@@ -13,6 +13,7 @@
 
 - **internal/evidence**: `HostRemark()` now caches its result with `sync.Once` instead of calling `os.Hostname()` and reading the machine-id file on every Scan. (Fixes #204)
 - **ampel-provider**: SKIP evaluation results from ampel are now correctly parsed as `"skip"` findings instead of being misreported as failures. This enables multi-predicate-type policy bundles where policies targeting different attestation predicate types coexist in the same bundle. When all policies produce SKIP (no policy matched the attestation predicate type), the provider reports an error instead of an incorrect result. The `--allow-skip` flag is now passed to `ampel verify` to preserve per-policy SKIP signals.
+- **ampel-provider**, **opa-provider**: Store generated scan artifacts per target and resolve them through a persisted index so multi-target scans use their matching policy configuration. (complytime/website#176; Spec: `openspec/changes/fix-scan-config-per-target/`)
 - **opa-provider**: Moved `url` and `input_path` from `RequiredTargetVariables` to `OptionalTargetVariableGroups` in `Describe()` response. `complyctl doctor` no longer reports false "missing variable" errors for these mutually exclusive variables. (Fixes #145)
 
 ### Security
