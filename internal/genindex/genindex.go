@@ -27,6 +27,9 @@ const (
 	pathKeyPrefix = "path:"
 )
 
+// ContentDirectoryMode restricts generated artifacts to the workspace owner and group.
+const ContentDirectoryMode = 0o750
+
 var contentKeyPattern = regexp.MustCompile(`^[0-9a-f]{16}$`)
 
 // GenerateIndex maps target keys to content-addressed generated artifact directories.

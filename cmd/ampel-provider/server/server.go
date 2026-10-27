@@ -120,7 +120,7 @@ func (s *ProviderServer) Generate(_ context.Context, req *provider.GenerateReque
 	}
 	contentKey := genindex.ContentKey(requirementIDs, sourceDir)
 	outputDir := config.GeneratedDirForKey(contentKey)
-	if err := os.MkdirAll(outputDir, 0750); err != nil {
+	if err := os.MkdirAll(outputDir, genindex.ContentDirectoryMode); err != nil {
 		return &provider.GenerateResponse{
 			Success:      false,
 			ErrorMessage: fmt.Sprintf("creating generated artifact directory: %v", err),

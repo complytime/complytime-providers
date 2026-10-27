@@ -158,7 +158,7 @@ func (s *ProviderServer) Generate(
 
 	contentKey := genindex.ContentKey(ids, policyDir)
 	generatedDir := cfg.GeneratedDirForKey(contentKey)
-	if err := os.MkdirAll(generatedDir, 0750); err != nil {
+	if err := os.MkdirAll(generatedDir, genindex.ContentDirectoryMode); err != nil {
 		return nil, fmt.Errorf("creating content-generated directory: %w", err)
 	}
 	if err := generate.WriteScanConfig(generatedDir, ids, reverseMap, policyDir); err != nil {
