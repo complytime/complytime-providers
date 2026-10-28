@@ -19,7 +19,7 @@ files_to_sync:
 
 actions:
     post-modifications:
-        - bash -c "set -xeuo pipefail; export GOTOOLCHAIN=local; if [ -n \"${PACKIT_DOWNSTREAM_REPO:-}\" ]; then cd \"$PACKIT_DOWNSTREAM_REPO\"; fi; go_vendor_archive create --config go-vendor-tools.toml complytime-providers.spec; go_vendor_license --config go-vendor-tools.toml --path complytime-providers.spec report --verify-spec --autofill=auto"
+        - bash -c "set -xeuo pipefail; export GOTOOLCHAIN=auto; if [ -n \"${PACKIT_DOWNSTREAM_REPO:-}\" ]; then cd \"$PACKIT_DOWNSTREAM_REPO\"; fi; go_vendor_archive create --config go-vendor-tools.toml complytime-providers.spec; go_vendor_license --config go-vendor-tools.toml --path complytime-providers.spec report --verify-spec --autofill=auto"
 
 jobs:
     - job: copr_build
