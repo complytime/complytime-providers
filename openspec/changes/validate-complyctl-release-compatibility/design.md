@@ -11,13 +11,54 @@ Upstream complyctl PR #944 owns static public API compatibility analysis for
 `api/plugin` and `pkg/provider`. This change supplies the separate downstream
 build and runtime validation called out by that work.
 
+## Upstream Verification
+
+On 2026-11-02, `gh pr view 944 --repo complytime/complyctl` reported that PR
+#944 is `OPEN`. A structured query returned `mergedAt: null` and
+`mergeCommit: null`, so there is no merged commit to record. The PR summary
+states that the documentation hands downstream validation to
+`complytime-providers#187`, but that documentation is not merged. Task 1.1
+remains incomplete until the PR merges and its merged documentation can be
+verified.
+
+## Released Harness Verification
+
+On 2026-11-02, the direct dependency in this repository's `go.mod` was
+`github.com/complytime/complyctl v1.1.0`. GitHub's releases API identified
+`v1.1.0` as the latest stable release, published on 2026-10-02. The tag
+resolves to commit `f10129ea815298cea24d337ac0a0399237a07566`; it is the
+highest stable tag in the required v1 compatibility line. Older v1 release
+`v1.0.0` and v1 prerelease tags exist, but none supersede `v1.1.0`.
+
+The `v1.1.0` source tree contains the required release-side interface:
+
+- `Makefile` defines `build`, which compiles `./cmd/...` into `bin/`, including
+  `complyctl` and `mock-oci-registry`.
+- `Makefile` defines `test-cross-repo`, which builds complyctl and invokes the
+  executable `tests/cross-repo/cross_repo_integration_test.sh`.
+- The harness and its Ampel/OPA fixtures are present at
+  `tests/cross-repo/`. The harness requires `PROVIDERS_BIN_DIR`,
+  `GITHUB_TOKEN`, `conftest`, `jq`, and `curl`, and verifies that the built
+  complyctl, mock registry, Ampel provider, and OPA provider are executable.
+- The release declares Go `1.26.8`; the existing workflow selects the higher
+  Go version from both repositories, so the providers' declared Go `1.26.10`
+  remains suitable.
+
+The current integration workflow already meets the harness's non-runner
+prerequisites: it builds both repositories, installs Snappy, Ampel, and
+conftest, and provides `PROVIDERS_BIN_DIR` plus `GITHUB_TOKEN`. Therefore,
+`v1.1.0` can provide the required build target and test harness. The released
+baseline job must check all prerequisites, including `jq` and `curl`, so a
+future selected release fails with a preparation diagnostic rather than a shell
+error.
+
 ## Goals / Non-Goals
 
 **Goals:**
 
 - Validate provider build and integration behavior against the highest stable
-  release in the major version declared by this repository's `complyctl`
-  dependency.
+  release in the compatibility line declared by this repository's `complyctl`
+  dependency: its major version for v1+ or its minor version for v0.
 - Keep the existing `complyctl@main` integration path intact.
 - Produce diagnostics that identify the selected release and the stage that
   failed.
@@ -34,31 +75,36 @@ build and runtime validation called out by that work.
 
 Add a job alongside the current main-branch integration job. It resolves the
 stable baseline and passes the tag and commit to a consumer job that checks out
-the released `complyctl` source, builds providers, and runs the existing
-integration target.
+the resolved commit from the released `complyctl` source. The consumer creates
+an isolated provider checkout, temporarily replaces its `complyctl` module
+dependency with that checkout, then builds all provider binaries and runs the
+existing Ampel-focused integration target. The replacement is confined to the
+CI workspace and does not change the repository's committed dependency.
 
 Keeping the jobs distinct makes the tested baseline visible and preserves the
 current main-to-main signal. Parameterizing the existing job to run both
 baselines would reduce YAML duplication but makes failure attribution and job
-status less clear.
+status less clear. The isolated replacement makes the provider compile against
+the selected release rather than its normally pinned dependency.
 
 ### Derive the supported major from go.mod
 
 The resolver reads the direct `github.com/complytime/complyctl` requirement and
-selects the highest stable semantic-version tag in that major. It rejects
-malformed and prerelease tags, emits the selected tag and commit, and fails
-closed when no baseline exists.
+selects the highest stable semantic-version tag in its compatibility line: the
+same major for v1+ dependencies or the same minor for v0 dependencies. It
+rejects malformed and prerelease tags, emits the selected tag and commit, and
+fails closed when no baseline exists.
 
 Using the declared dependency makes the check follow the compatibility promise
 being validated. Selecting the unrestricted latest tag could test a future
-major with intentionally incompatible APIs.
+major, or a breaking v0 minor, with intentionally incompatible APIs.
 
 ### Reuse the existing integration harness with prerequisite checks
 
 The released checkout remains the source of the `test-cross-repo` harness. The
-job verifies required scripts and build targets before running it, so older
-releases fail with a clear preparation diagnostic instead of an ambiguous shell
-failure.
+job verifies that its checkout HEAD equals the resolved commit and verifies
+required scripts and build targets before running it, so older releases fail
+with a clear preparation diagnostic instead of an ambiguous shell failure.
 
 Copying the harness into this repository would decouple it from released
 complyctl, but would duplicate cross-repository test ownership and risk drift.
@@ -82,6 +128,24 @@ step-level failures directly to maintainers.
   release-baseline diagnostic rather than silently skipping validation.
 - [PR #944 merges differently from its current design] -> Verify its merged
   API-compatibility policy and downstream handoff before implementation.
+
+## Local Verification
+
+On 2026-11-02, the provider checks completed successfully after the workflow
+change:
+
+- `make build` exited 0 and built `complyctl-provider-openscap`,
+  `complyctl-provider-ampel`, and `complyctl-provider-opa`.
+- `make test` exited 0. All 30 packages completed without failures; the three
+  provider command packages reported no test files.
+- `make lint` exited 0 with `0 issues.`
+- All three released-baseline shell test scripts exited 0: resolver,
+  released-checkout prerequisite, and workflow diagnostics.
+- `yamllint .github/workflows/ci_cross_repo_integration.yml` exited 0.
+
+`actionlint` is not installed in the local environment. Task 2.4 remains
+pending until an available GitHub Actions workflow linter and CI run can verify
+the released baseline tag and commit.
 
 ## Migration Plan
 

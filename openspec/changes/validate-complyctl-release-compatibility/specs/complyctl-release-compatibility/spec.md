@@ -9,13 +9,14 @@ Validates that provider binaries interoperate with the supported stable
 
 ### Requirement: Stable release baseline selection
 The CI workflow MUST select the highest stable `complyctl` release tag in the
-same major version as the provider module's declared `complyctl` dependency.
-Prerelease and malformed tags MUST be excluded. The workflow MUST report the
-selected tag and resolved commit, and MUST fail when it cannot resolve a valid
-baseline.
+provider module's declared compatibility line: the same major version for a
+v1+ dependency or the same minor version for a v0 dependency. Prerelease and
+malformed tags MUST be excluded. The workflow MUST report the selected tag and
+resolved commit, check out and execute that resolved commit, and MUST fail when
+it cannot resolve or verify a valid baseline.
 
 #### Scenario: Stable release is available
-- **WHEN** stable release tags exist for the declared dependency major version
+- **WHEN** stable release tags exist for the declared dependency compatibility line
 - **THEN** CI selects the highest stable tag and reports its tag and commit
 
 #### Scenario: No stable release is available
@@ -23,14 +24,20 @@ baseline.
   version
 - **THEN** CI fails with a release-baseline diagnostic before integration runs
 
+#### Scenario: Resolved commit cannot be verified
+- **WHEN** the released checkout does not resolve to the selected commit
+- **THEN** CI fails with a release-baseline diagnostic before build or integration runs
+
 ### Requirement: Released complyctl integration validation
-The CI workflow MUST build the provider binaries and run the existing
-cross-repository integration validation against the selected stable `complyctl`
-release. A successful result MUST require both the provider build and the
-integration validation to succeed.
+The CI workflow MUST build all provider binaries from an isolated workspace
+whose `complyctl` module dependency is temporarily replaced with the selected
+stable release checkout, and run the existing Ampel-focused cross-repository
+integration validation against that checkout. A successful result MUST require
+both the provider build and the integration validation to succeed.
 
 #### Scenario: Providers support the selected release
-- **WHEN** provider binaries build and interoperate with the selected release
+- **WHEN** all provider binaries build and the existing Ampel integration harness
+  interoperates with the selected release
 - **THEN** the release compatibility validation succeeds
 
 #### Scenario: Provider API usage is incompatible

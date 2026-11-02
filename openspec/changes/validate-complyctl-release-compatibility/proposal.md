@@ -16,7 +16,8 @@ upstream static API checks.
 ## What Changes
 
 - Add CI coverage that runs the provider integration workflow against a stable
-  `complyctl` release in the supported major version.
+  `complyctl` release in the supported compatibility line: the declared major
+  for v1+ dependencies and the declared minor for v0 dependencies.
 - Preserve the existing `make build`, `make test`, and `complyctl@main`
   integration coverage.
 - Report the selected release tag and commit, and distinguish release
@@ -38,7 +39,8 @@ None.
 
 - Affects `.github/workflows/ci_cross_repo_integration.yml` and any focused
   workflow helper required to resolve the release baseline.
-- Reuses `make build` and `make test-cross-repo` rather than changing provider
-  APIs or adding runtime dependencies.
+- Reuses `make build` to compile all provider binaries and the existing
+  Ampel-focused `make test-cross-repo` runtime harness rather than changing
+  provider APIs or adding runtime dependencies.
 - Depends on the upstream compatibility policy introduced by complyctl PR #944;
   implementation must verify its merged behavior before relying on it.
