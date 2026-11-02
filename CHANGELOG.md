@@ -18,6 +18,7 @@
 
 ### Security
 
+- **dependencies**: Bumped `golang.org/x/net` from v0.61.0 to v0.62.0, addressing GO-2026-6866 (missed ancestor namespace transitions when rendering raw text in `html`) and GO-2026-6860 (quadratic complexity when coalescing text nodes in `html`). Both affect `golang.org/x/net/html`, which is reached indirectly through `antchfx/xmlquery` and `google.golang.org/grpc`. Neither was reachable from provider code. No exported API or transitive dependency changes.
 - **ampel-provider**, **opa-provider**: Added aggregate extraction size limit (500 MB total) and file count limit (10,000 files) for complypack tar.gz archives. Previously, only individual files were capped at 100 MB. (Fixes #71)
 - **opa-provider**: Fixed missing cleanup of partial extractions on error. Previously, a failed extraction left corrupted content that would be silently reused on subsequent attempts.
 
