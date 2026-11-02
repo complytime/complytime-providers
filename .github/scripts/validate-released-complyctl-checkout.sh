@@ -48,10 +48,16 @@ require_path() {
     [[ -e "$checkout_dir/$relative_path" ]] || die "missing required path: $relative_path"
 }
 
+require_command() {
+    command -v "$1" > /dev/null 2>&1 || die "missing required command: $1"
+}
+
 require_path 'Makefile'
 require_path 'tests/cross-repo/cross_repo_integration_test.sh'
 require_path 'tests/cross-repo/testdata'
 require_path 'cmd/mock-oci-registry'
+require_command 'curl'
+require_command 'jq'
 
 [[ -x "$checkout_dir/tests/cross-repo/cross_repo_integration_test.sh" ]] || \
     die 'integration harness is not executable: tests/cross-repo/cross_repo_integration_test.sh'

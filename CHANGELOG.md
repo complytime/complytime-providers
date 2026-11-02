@@ -36,7 +36,7 @@
 - Modernized RPM spec for Fedora Go Packaging Guidelines: adopted `go-vendor-tools` for vendored license handling, replaced raw `go build` with `%gobuild` macro, switched to forge macros and `%autorelease`, added aggregated vendored license expression, and introduced main `complytime-providers` package for shared license files.
 - Consolidated duplicate tar.gz extraction code from ampel and OPA providers into shared `internal/archive/` package, eliminating code duplication and ensuring consistent security behavior across providers.
 - **ci**: Pinned the `carabiner-dev/actions` install steps (`snappy`, `ampel`) in `ci_cross_repo_integration.yml` to the v1.3.1 release tag. The previous pin tracked an untagged post-v1.3.0 commit whose free-form version comment pinact v4 `--verify` rejects, which failed the `Standardized CI / Verify action versions` job on `main` and on every PR.
-- **ci**: Added released-baseline cross-repository integration validation. Each PR now builds providers against the highest stable `complyctl` release compatible with the declared module dependency and runs the existing integration harness, while retaining the `complyctl@main` integration job.
+- **ci**: Added released-baseline cross-repository integration validation. Each PR now builds providers against the highest stable `complyctl` release compatible with the declared module dependency and runs the existing integration harness, while retaining the `complyctl@main` integration job. (Spec: `openspec/changes/validate-complyctl-release-compatibility/`)
 
 ### Breaking Changes
 
