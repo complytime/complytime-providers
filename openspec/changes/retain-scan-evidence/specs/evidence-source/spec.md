@@ -1,0 +1,259 @@
+# Spec Delta
+
+## MODIFIED Requirements
+
+### Requirement: Evidence entry per assessment log
+
+Each provider MUST populate at least one `Evidence` entry on every
+`AssessmentLog` it returns in a `ScanResponse`.
+
+#### Scenario: OpenSCAP returns ARF evidence
+
+- **GIVEN** OpenSCAP has completed an evaluation and retained a valid ARF file
+- **WHEN** the provider constructs the `ScanResponse`
+- **THEN** every assessment from that evaluation contains evidence with type `ARF`
+- **AND** a non-empty RFC 3339 `CollectedAt` timestamp
+
+#### Scenario: Ampel returns two attestation evidence entries
+
+- **GIVEN** Ampel has successfully scanned a repository/branch/spec combination
+- **WHEN** the provider constructs the `ScanResponse`
+- **THEN** assessments from that evaluation contain evidence for both retained attestations
+- **AND** their IDs use the `ampel_` and `snappy_` prefixes and the evaluation identity
+- **AND** both have type `IntotoAttestation` and non-empty RFC 3339 `CollectedAt` timestamps
+
+#### Scenario: OPA returns conftest evidence
+
+- **GIVEN** OPA has completed an evaluation of a remote repository, local file, or local directory
+- **WHEN** the provider constructs the `ScanResponse`
+- **THEN** every assessment from that evaluation contains evidence for retained conftest JSON
+- **AND** the type remains `ConftestResult` with a non-empty RFC 3339 `CollectedAt` timestamp
+
+### Requirement: EvidenceSource coordinate references a file path
+
+Each `Evidence` entry MUST have a non-nil `Source` with `Coordinate` set to the
+retained evidence artifact's filesystem path relative to the workspace root, as
+defined in `Workspace-relative evidence references`. The path MUST be the same artifact
+used to construct the assessment, not a reconstructed fixed filename or a
+replaceable input location.
+
+#### Scenario: OpenSCAP coordinate points to ARF file
+
+- **GIVEN** a completed OpenSCAP scan with a retained ARF file
+- **WHEN** an OpenSCAP evidence entry is returned
+- **THEN** `Source.Coordinate` identifies `arf.xml` in that evaluation's directory
+
+#### Scenario: Ampel coordinates point to attestation files
+
+- **GIVEN** a completed Ampel repository/branch/spec evaluation
+- **WHEN** its evidence entries are returned
+- **THEN** their coordinates identify `ampel.intoto.json` and `snappy.intoto.json`
+  in that evaluation's directory
+
+#### Scenario: OPA coordinate points to retained evaluation output
+
+- **GIVEN** a completed OPA evaluation against any supported input type
+- **WHEN** an OPA evidence entry is returned
+- **THEN** `Source.Coordinate` identifies `conftest.json` in that evaluation's directory
+- **AND** it does not identify the working clone, local input, or normalized summary
+
+#### Scenario: OPA coordinate points to evaluated input
+
+- **GIVEN** a legacy Evaluation Log whose OPA coordinate points to evaluated input
+- **WHEN** the upgraded provider performs a new evaluation
+- **THEN** it leaves the legacy log unchanged
+- **AND** the new evaluation's coordinate identifies retained conftest output instead
+
+#### Scenario: Evidence survives source replacement
+
+- **GIVEN** an Evaluation Log referencing a completed OPA evaluation
+- **WHEN** another scan replaces the clone or a user edits or removes the local input
+- **THEN** the previous evidence coordinate still resolves to its original conftest output
+
+### Requirement: EvidenceSource digest for file-based evidence
+
+Every retained evidence artifact in these providers is a file. `Source.Digest`
+MUST contain its SHA256 hash in `sha256:<hex>` format, computed from the stored
+bytes before evidence publication. OPA MUST hash the retained result file
+regardless of whether its evaluated input was a file or directory.
+
+#### Scenario: OpenSCAP digest covers ARF file
+
+- **GIVEN** a completed OpenSCAP evaluation with a retained ARF file
+- **WHEN** an OpenSCAP evidence entry is returned
+- **THEN** its digest matches `sha256:[a-f0-9]{64}` and the retained ARF bytes
+
+#### Scenario: Ampel digest covers attestation files
+
+- **GIVEN** a completed Ampel evaluation with both retained attestations
+- **WHEN** its evidence entries are returned
+- **THEN** each digest matches `sha256:[a-f0-9]{64}` and its corresponding stored file
+
+#### Scenario: OPA digest covers results for every input type
+
+- **WHEN** OPA returns evidence for a remote repository, local file, or local directory
+- **THEN** its digest matches `sha256:[a-f0-9]{64}` and the stored `conftest.json` bytes
+- **AND** no input-file hash or empty directory digest substitutes for that result-file hash
+
+#### Scenario: OPA omits digest for directory inputs
+
+- **GIVEN** a legacy OPA Evaluation Log omitting a digest for directory input evidence
+- **WHEN** the upgraded provider evaluates that directory again
+- **THEN** it leaves the legacy log unchanged
+- **AND** the new evidence includes the digest of the retained conftest result file
+
+#### Scenario: Digest computation failure returns an error
+
+- **GIVEN** an evidence artifact is missing, unreadable, or cannot be hashed completely
+- **WHEN** the provider attempts to compute its digest
+- **THEN** it reports an operational error and publishes no evidence-backed assessment
+  for the affected evaluation
+
+### Requirement: EvidenceSource ReferenceID links to MappingReference
+
+Each `Evidence.Source.ReferenceID` MUST match a `MappingReference.ID` in the same
+response. References and evidence IDs MUST distinguish artifact instances using
+provider-specific artifact kind and evaluation identity. A mapping reference's URL
+MUST resolve to the same retained file as the coordinate when both are interpreted
+against the workspace root. Repeated use of the
+same artifact across assessments MUST share its identity and mapping reference.
+
+`Evidence.ID` is provider-internal and need not equal `MappingReference.ID`.
+Only `Evidence.Source.ReferenceID` MUST equal its `MappingReference.ID`.
+Evidence IDs MUST use `ampel_<token>`, `snappy_<token>`, `arf_<token>`, or
+`conftest_<token>` for their respective artifact kinds. Mapping-reference IDs MUST
+use `ampel_<token>`, `snappy_<token>`, `openscap-arf_<token>`, or
+`conftest-result_<token>`, respectively, with the allocated evaluation token.
+
+#### Scenario: OpenSCAP declares ARF mapping reference
+
+- **WHEN** OpenSCAP returns evidence for a completed evaluation
+- **THEN** its mapping reference uses an evaluation-qualified `openscap-arf` identity
+- **AND** every ARF source reference matches that identity and retained artifact URL
+
+#### Scenario: Ampel declares attestation mapping references
+
+- **WHEN** Ampel returns evidence from one or more completed evaluations
+- **THEN** each attestation's source reference matches its mapping-reference ID
+- **AND** the reference URL identifies that attestation's retained file
+
+#### Scenario: OPA declares result mapping reference
+
+- **WHEN** OPA returns evidence from a completed evaluation
+- **THEN** the source reference matches a result-file mapping reference
+- **AND** its title describes conftest results and its URL identifies retained `conftest.json`
+
+#### Scenario: OPA declares input mapping reference
+
+- **GIVEN** a legacy OPA Evaluation Log declaring an input mapping reference
+- **WHEN** the upgraded provider evaluates the target again
+- **THEN** it leaves the legacy reference unchanged
+- **AND** the new response declares a separate result-file mapping reference
+
+#### Scenario: Repeated targets and colliding display labels
+
+- **WHEN** distinct evaluations share a target, timestamp, or sanitized display label
+- **THEN** their artifact identities and references remain distinct
+- **AND** deduplication by reference ID does not collapse different artifacts
+
+#### Scenario: Many assessments share one artifact
+
+- **WHEN** several assessments derive from one evaluation's ARF or conftest output
+- **THEN** they share the corresponding artifact identity and mapping reference
+- **AND** the provider does not make an artifact copy per assessment
+
+### Requirement: Man page documents evidence artifacts
+
+Each provider's man page MUST include an `EVIDENCE` section describing retained
+artifacts, their production, their representation in the Evaluation Log, and
+the preservation guarantee. It MUST explain that output retention is enabled
+by default and has no automatic cleanup in this feature.
+
+#### Scenario: OpenSCAP man page describes ARF evidence
+
+- **WHEN** a user reads the OpenSCAP man page
+- **THEN** it describes per-evaluation ARF storage, production by `oscap xccdf eval`,
+  coordinates, digests, and instance-qualified references
+
+#### Scenario: Ampel man page describes attestation evidence
+
+- **WHEN** a user reads the Ampel man page
+- **THEN** it describes both retained attestations, readable repo/branch/spec grouping,
+  and their Evaluation Log representation
+
+#### Scenario: OPA man page describes conftest evidence
+
+- **WHEN** a user reads the OPA man page
+- **THEN** it describes retained conftest JSON evidence for both local and remote targets
+- **AND** explains that original inputs and policies are not archived and historical
+  re-evaluation is not guaranteed
+- **AND** explains that unchanged findings do not prove the evaluated input was unchanged
+- **AND** distinguishes embedded conftest input filenames from retained evidence coordinates
+
+### Requirement: Expanded FILES section in man pages
+
+Each provider's man page `FILES` section MUST list concrete artifact path patterns,
+including readable context directories, timestamped evaluation directories, and
+`metadata.json`, as well as existing Generate-time and working-data locations.
+
+#### Scenario: OpenSCAP FILES lists scan artifacts
+
+- **WHEN** a user reads the OpenSCAP man page
+- **THEN** it lists retained `arf.xml`, `results.xml`, and metadata paths, plus
+  existing tailoring and remediation paths
+
+#### Scenario: Ampel FILES lists attestation artifacts
+
+- **WHEN** a user reads the Ampel man page
+- **THEN** it lists both attestation paths, optional supporting metadata,
+  and the existing generated scan configuration
+
+#### Scenario: OPA FILES lists scan artifacts
+
+- **WHEN** a user reads the OPA man page
+- **THEN** it lists retained `conftest.json` and optional supporting metadata paths,
+  scan configuration, mapping, and generated directories
+- **AND** identifies the clone directory as replaceable working data
+
+## ADDED Requirements
+
+### Requirement: Consistent evaluation collection timestamp
+
+Providers MUST capture one UTC collection-start timestamp per evaluation before
+tool execution. The evaluation directory's timestamp component, metadata when
+written, and all evidence `CollectedAt` fields
+for that evaluation MUST derive from that instant. Uniqueness MUST NOT depend
+on clock precision or ordering.
+
+#### Scenario: Evaluation crosses a clock boundary
+
+- **WHEN** an evaluation starts before a second or day boundary and finishes afterward
+- **THEN** its directory timestamp and evidence collection timestamps represent its start
+- **AND** parsing time does not replace the recorded collection timestamp
+
+#### Scenario: Clock moves backward
+
+- **WHEN** a later evaluation observes an equal or earlier wall-clock time
+- **THEN** it still receives a distinct artifact location and identity
+- **AND** no monotonic ordering or global complyctl scan ID is inferred from the timestamp
+
+### Requirement: Workspace-relative evidence references
+
+Evidence coordinates MUST be filesystem paths relative to the workspace root
+containing `.complytime`. Mapping-reference URLs MUST be escaped relative URI
+references to the same artifacts, interpreted against that root rather than the
+Evaluation Log's directory. Documentation MUST explain the base and that the log
+and referenced workspace layout must travel together to preserve resolution.
+
+#### Scenario: Relocated workspace
+
+- **GIVEN** an Evaluation Log and its referenced workspace tree are copied together
+- **WHEN** an auditor resolves a coordinate and its mapping-reference URL against the copied workspace root
+- **THEN** both identify the same retained artifact
+- **AND** the artifact's digest matches the Evaluation Log
+
+#### Scenario: URL contains special characters
+
+- **WHEN** the retained workspace path contains spaces, percent signs, or non-ASCII characters
+- **THEN** the relative URI reference is properly escaped
+- **AND** resolving it against the workspace root identifies the same file as the coordinate
