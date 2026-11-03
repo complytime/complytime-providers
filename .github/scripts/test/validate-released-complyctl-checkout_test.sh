@@ -23,7 +23,10 @@ create_valid_checkout() {
 build:
 	@:
 
+require = $(if $($1),,$(error $1 is not set))
+
 test-cross-repo:
+	$(call require,PROVIDERS_BIN_DIR)
 	@:
 EOF
     cat > "$checkout_dir/tests/cross-repo/cross_repo_integration_test.sh" <<'EOF'

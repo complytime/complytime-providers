@@ -63,7 +63,7 @@ require_command 'jq'
     die 'integration harness is not executable: tests/cross-repo/cross_repo_integration_test.sh'
 
 make -C "$checkout_dir" -n build > /dev/null || die 'missing or unusable build target'
-make -C "$checkout_dir" -n test-cross-repo COMPLYCTL_DIR=. > /dev/null || \
+make -C "$checkout_dir" -n test-cross-repo COMPLYCTL_DIR=. PROVIDERS_BIN_DIR=. > /dev/null || \
     die 'missing or unusable test-cross-repo target'
 
 printf 'released checkout prerequisites verified for %s\n' "$complyctl_tag"
