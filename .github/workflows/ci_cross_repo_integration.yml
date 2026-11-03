@@ -69,6 +69,17 @@ jobs:
                   path: _released_complyctl
                   persist-credentials: false
 
+            # The current provider stores generated artifacts in content-keyed
+            # directories. The v1.1.0 harness predates that contract, so use a
+            # pinned current harness while retaining the released CLI binary.
+            - name: Checkout compatibility integration harness
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  repository: complytime/complyctl
+                  ref: d4ff7cc563d6b60dc725c25da225042dd03363ce
+                  path: _compatibility_harness
+                  persist-credentials: false
+
             - name: Verify released complyctl checkout
               env:
                   COMPLYCTL_TAG: ${{ needs.resolve-released-baseline.outputs.tag }}
@@ -184,7 +195,9 @@ jobs:
                   PROVIDERS_BIN_DIR: ${{ github.workspace }}/_released_providers/bin
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
-                  if ! make test-cross-repo COMPLYCTL_DIR=../_released_complyctl; then
+                  cp ../_compatibility_harness/tests/cross-repo/cross_repo_integration_test.sh \
+                      ../_released_complyctl/tests/cross-repo/
+                  if ! timeout 120 bash ../_released_complyctl/tests/cross-repo/cross_repo_integration_test.sh; then
                       printf 'released-integration: cross-repo integration failed for %s\n' \
                           "$COMPLYCTL_TAG" >&2
                       exit 1
