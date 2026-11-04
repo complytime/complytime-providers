@@ -30,8 +30,18 @@ make build-opa-provider
 # Run all unit tests
 make test
 
+# Run OPA's real-conftest isolation tests (requires conftest and git on PATH)
+go test -race -count=1 ./cmd/opa-provider/server -run '^TestScan_(RealConftest|.*WithRealConftest|WorkspaceIgnoreWithConftest)'
+
+# On Linux with bwrap, set COMPLYCTL_TEST_BINARY, OPA_PROVIDER_TEST_BINARY,
+# and CONFTEST_TEST_BINARY to absolute paths of the prebuilt binaries first.
+go test -race -count=1 ./cmd/opa-provider/server -run '^TestComplyctlScan_Offline'
+
 # Run linter (golangci-lint with default config)
 make lint
+
+# Generate man pages (requires pandoc)
+make man
 
 # Vendor dependencies
 make vendor
@@ -80,7 +90,7 @@ complytime-providers/
 │       ├── loader/            #   Data loading (git clone, local path)
 │       ├── results/           #   Conftest result parsing & mapping
 │       ├── scan/              #   Conftest command execution
-│       ├── server/            #   gRPC provider implementation
+│       ├── server/            #   gRPC provider and workspace/input-safety preflight
 │       ├── targets/           #   Target resolution & URL parsing
 │       └── toolcheck/         #   Tool availability checking
 ├── internal/
@@ -121,8 +131,11 @@ complytime-providers/
 - **Framework**: Go stdlib `testing` + `github.com/stretchr/testify`
   (assert/require)
 - **Naming**: `TestFunctionName_Description` pattern
-- **Coverage**: 28 test files across all subpackages (every non-type
-  package has a corresponding `_test.go`)
+- **Coverage**: Tests live in `_test.go` files alongside package code.
+  Real-conftest isolation tests skip when conftest is absent, not because
+  of its version string or missing module metadata. An installed executable
+  must satisfy the behavior contracts. Record actual tested versions;
+  local CI does not install conftest, so a skip does not validate behavior.
 - **Test data**: XML fixtures stored in
   `internal/complytime/testdata/openscap/`
 - **Run**: `go test ./...` (via `make test`)

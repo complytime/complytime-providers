@@ -60,6 +60,11 @@ are not set manually by the user.
     sequences (**../**) are rejected.
     Default: root of the cloned repository.
 
+**workspace** (injected by complyctl)
+:   Workspace base directory. The provider excludes this base joined with
+    **.complytime**, as well as its own artifact directory when different.
+    When absent, the provider uses its configured artifact directory.
+
 **platform** (optional)
 :   Platform hint for self-hosted git instances (e.g., **github**,
     **gitlab**). Affects the credential username (**oauth2** for GitLab,
@@ -76,7 +81,94 @@ The OCI policy bundle must include a **complytime-mapping.json** file
 that maps requirement IDs to Rego namespaces. The provider returns an
 error if this file is missing.
 
+# SELECTING SCAN INPUT
+
+Keep target files outside the complyctl workspace so generated artifacts
+and prior results do not affect OPA assessments. For a local directory
+target that contains a workspace, the provider excludes the workspace
+files, including user-owned files. Files outside the excluded directories
+remain eligible subject to the link and input checks below.
+
+The provider resolves the host workspace as the **workspace** base injected
+by complyctl joined with **.complytime**. It also excludes its own artifact
+directory, normally **.complytime** relative to the provider's working
+directory, when that directory differs. For example, a host base of
+*/srv/team* and a provider working directory of */srv/scan* create two
+boundaries: */srv/team/.complytime* and */srv/scan/.complytime*. If the
+host does not provide a workspace base, the provider uses its configured
+artifact directory. The provider resolves both paths through symbolic links.
+If it cannot resolve a boundary, it rejects the target. Check that both
+workspace directories exist and that the provider can access their paths,
+then retry the scan.
+
+The provider rejects an explicitly selected local workspace file or
+directory. To scan such a file, copy it to a directory outside both
+workspace boundaries and set **input_path** to the copy. Use a copy, not
+a hard link: the provider checks filesystem identity and rejects a hard
+link to workspace content when it cannot exclude it safely. It also
+rejects unsafe symbolic links and unresolved paths.
+
+An intentional remote clone remains eligible, even though it is stored
+inside the workspace. The provider rejects clone files hard-linked to
+other workspace content. It also rejects a remote scan path or traversed
+link that reaches other workspace content or matches its file identity.
+The provider rejects unresolved paths and link cycles. Non-cyclic links
+within the selected clone remain eligible. Fix or remove unsafe links, or
+copy the intended input outside the workspace.
+
+Local directories and remote clones or **scan_path** directories with no
+confirmed evaluated input produce an operational error and no assessments
+for that target. This includes empty, workspace-only, and fully ignored
+inputs. Add a supported input file or adjust the effective ignore rule;
+other targets retain their results.
+
+For a remote target selecting multiple branches, an input-safety rejection or
+lack of confirmed evaluated directory input in any branch suppresses assessments
+from every branch of that configured target. This applies in either branch order.
+The error identifies the rejected target and branch; other configured targets
+retain their assessments. Repair the rejected branch's input or select only the
+intended eligible branches. Previously written per-branch result files are not deleted.
+
+Workspace exclusion does not prune directories from traversal. An
+unreadable directory or broken link can still cause an operational error;
+fix the path or its permissions before retrying. Preflight is not a
+sandbox: concurrent filesystem changes between preflight and conftest
+traversal can defeat isolation.
+
+## Conftest ignore configuration
+
+For a local directory that contains a workspace, the provider combines a
+nonempty **CONFTEST_IGNORE** with the workspace exclusion. If the variable
+is empty or unset and an applicable conftest configuration file exists,
+or the provider cannot determine whether one exists, it rejects the target
+rather than discarding a possible user ignore rule. Non-overlapping local
+targets and remote clones do not need this workspace ignore rule.
+
+To resolve this error, select a file or directory outside both workspace
+boundaries that does not contain either boundary. Alternatively, set
+**CONFTEST_IGNORE** to the effective ignore expression, including the
+file's existing **ignore** value. If the file defines no ignore rule, use
+a valid expression that matches no file paths:
+
+```bash
+export CONFTEST_IGNORE='^$'
+```
+
+Other conftest configuration settings continue to apply. The provider
+checks configuration in conftest's working directory and resolves a
+relative **CONFTEST_CONFIG_FILE** from that directory.
+
 # ENVIRONMENT
+
+**CONFTEST_IGNORE**
+:   Conftest ignore regular expression. For local directory targets that
+    contain a workspace, the provider combines a nonempty value with the
+    workspace exclusion. See **Conftest ignore configuration** above.
+
+**CONFTEST_CONFIG_FILE**
+:   Path to the conftest configuration file. The provider resolves a
+    relative path from conftest's working directory when checking for a
+    configuration that may define an ignore rule.
 
 **COMPLYTIME_MACHINE_ID_FILE**
 :   Path to the machine-id file used for host identification in
@@ -90,9 +182,27 @@ error if this file is missing.
 Requires the following tools at runtime:
 
 **conftest**
-:   Open Policy Agent test runner for structured data. Not currently
-    packaged in Fedora; must be installed separately. See:
-    <https://www.conftest.dev>
+:   Open Policy Agent test runner for structured data. Install conftest
+    and make it available on **PATH**. The provider uses behavior-based
+    compatibility rather than an exact-version runtime check. It does
+    not require successful version detection or embedded module metadata;
+    a source build reporting **dev** is not rejected for that reason.
+    Input-safety, execution, and structured-output validation still apply.
+
+    The real-tool regression suite has been exercised against **0.68.2**
+    and **0.71.1**. It runs against any installed executable, without
+    skipping based on version. These runs establish tested behavior, not
+    compatibility with every future release. Local CI does not install
+    conftest, so recurring changing-release coverage remains a tracked
+    follow-up: <https://github.com/complytime/complyctl/issues/957>.
+
+    To record the installed version when diagnosing an issue:
+
+    ```bash
+    conftest --version
+    ```
+
+    Releases: <https://github.com/open-policy-agent/conftest/releases>
 
 **git**
 :   Required for cloning remote repositories when **url** is specified.

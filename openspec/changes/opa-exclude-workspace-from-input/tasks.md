@@ -42,13 +42,55 @@ of the pending revision.
 ## 4. PR review fixes
 
 - [x] 4.1 Revise and strictly validate the proposal, design, and capability deltas for configured-target rejection across branches and behavior-based conftest compatibility; assess documentation impact without changing implementation or governance gates.
-- [ ] 4.2 Review, commit, and push the spec-only revision before beginning implementation. If push is not authorized, retain the local spec commit and pause at this boundary.
-- [ ] 4.3 Add failing regressions for a valid remote branch followed by an unsafe symlink or hard link, an empty or fully ignored directory branch, and missing evaluated-input evidence; repeat with reversed branch order, a separate valid configured target, an all-valid multi-branch control, and cancellation.
-- [ ] 4.4 Fix configured-target aggregation so the new input-safety and evaluated-input rejections discard assessments from all selected branches, retain actionable target/branch errors and accumulated result-write errors, and preserve other targets' assessments and mapping references. Use structured error classification rather than error-message matching; preserve unrelated legacy error behavior and existing artifact/clone lifecycle.
-- [ ] 4.5 Remove exact-version runtime enforcement and the source-build module fallback, clean up unused version-only mocks and tests, and replace CLI version-rejection assertions with behavior-based acceptance and operational-error assertions. Verify that different, unknown, and placeholder version strings do not independently block otherwise valid local or remote scans.
-- [ ] 4.6 Make real-tool helpers execute any installed conftest without version-based skips; skip only when absent, fail for discovered executables that cannot perform the required operations, and record available version diagnostics without requiring them. Add behavior contracts for flag/environment/config ignore precedence, config discovery, explicit-file ignore bypass, symlink traversal and resolution, structured evaluation evidence, and empty-input errors.
-- [ ] 4.7 Update CHANGELOG, root and provider READMEs, AGENTS usage/structure guidance, RPM description, and man-page source/generated output to remove exact-version and downgrade requirements, explain configured-target rejection across branches, and document tested compatibility and remaining automation limits. Keep recurring changing-release coverage scoped to the existing complyctl#957 follow-up and migration guidance to website#189; do not change CI or governance gates.
-- [ ] 4.8 Run strict OpenSpec validation, make build, make test, go test -race -count=1 ./..., make lint, make man, and git diff --check. Run real-conftest contracts against v0.68.2 and at least one other available release, recording actual versions, commands, outcomes, and any skipped prerequisites. Run offline complyctl regressions with rebuilt binaries, then rerun the required review council and resolve blocking findings before completing the fix commits.
+- [x] 4.2 Review, commit, and push the spec-only revision before beginning implementation. If push is not authorized, retain the local spec commit and pause at this boundary.
+- [x] 4.3 Add failing regressions for a valid remote branch followed by an unsafe symlink or hard link, an empty or fully ignored directory branch, and missing evaluated-input evidence; repeat with reversed branch order, a separate valid configured target, an all-valid multi-branch control, and cancellation.
+- [x] 4.4 Fix configured-target aggregation so the new input-safety and evaluated-input rejections discard assessments from all selected branches, retain actionable target/branch errors and accumulated result-write errors, and preserve other targets' assessments and mapping references. Use structured error classification rather than error-message matching; preserve unrelated legacy error behavior and existing artifact/clone lifecycle.
+- [x] 4.5 Remove exact-version runtime enforcement and the source-build module fallback, clean up unused version-only mocks and tests, and replace CLI version-rejection assertions with behavior-based acceptance and operational-error assertions. Verify that different, unknown, and placeholder version strings do not independently block otherwise valid local or remote scans.
+- [x] 4.6 Make real-tool helpers execute any installed conftest without version-based skips; skip only when absent, fail for discovered executables that cannot perform the required operations, and record available version diagnostics without requiring them. Add behavior contracts for flag/environment/config ignore precedence, config discovery, explicit-file ignore bypass, symlink traversal and resolution, structured evaluation evidence, and empty-input errors.
+- [x] 4.7 Update CHANGELOG, root and provider READMEs, AGENTS usage/structure guidance, RPM description, and man-page source/generated output to remove exact-version and downgrade requirements, explain configured-target rejection across branches, and document tested compatibility and remaining automation limits. Keep recurring changing-release coverage scoped to the existing complyctl#957 follow-up and migration guidance to website#189; do not change CI or governance gates.
+- [x] 4.8 Run strict OpenSpec validation, make build, make test, go test -race -count=1 ./..., make lint, make man, and git diff --check. Run real-conftest contracts against v0.68.2 and at least one other available release, recording actual versions, commands, outcomes, and any skipped prerequisites. Run offline complyctl regressions with rebuilt binaries, then rerun the required review council and resolve blocking findings before completing the fix commits.
+
+## Review-fix verification
+
+- The new multi-branch regression failed before the aggregation fix for workspace
+  symlinks, hard links, empty or fully ignored branches, and missing evaluated-input
+  evidence in both branch orders. The fixed implementation passes those cases and
+  retains a separate valid target's assessments, evidence, and mapping references.
+- `make build`, `make test`, `make lint`, strict OpenSpec validation, `make man`,
+  and `git diff --check` passed. An unrelated Ampel man-page wrapping change from
+  generation was excluded from this OPA-only change.
+- `go test -race -count=1 ./...` passed with conftest 0.71.1 on `PATH`, including
+  the real-tool regressions. Offline `TestComplyctlScan_Offline` tests passed with
+  rebuilt complyctl/provider binaries, conftest 0.71.1, and Linux `bwrap`.
+- The cross-repository integration workflow's `make test-cross-repo` passed with
+  a locally built complyctl, provider binaries, snappy, ampel, and conftest 0.68.2.
+- The real-tool suite command below passed separately against release binaries
+  reporting `Conftest: 0.68.2` and `Conftest: 0.71.1`, with each executable placed
+  on `PATH` for its run:
+
+  ```bash
+  go test -race -count=1 ./cmd/opa-provider/server \
+    -run '^(TestScan_(RealConftest|.*WithRealConftest|WorkspaceIgnoreWithConftest)|TestRequireRealConftest)'
+  ```
+
+- Conftest 0.71.1 honors ignore for explicit files, whereas 0.68.2 bypasses it.
+  The contract accepts either evaluation of only the explicitly selected file or
+  an empty-input operational error, not an unrelated input or a synthetic pass.
+  This is a safe behavior difference, not a reason to reject a release by version.
+- Recurring non-skipping coverage of changing releases remains tracked in
+  [complyctl#957](https://github.com/complytime/complyctl/issues/957). No CI or
+  governance gates were changed; these runs do not guarantee future compatibility.
+- All nine discovered Divisor reviewers approved the code review: adversary,
+  architect, guard, testing, sre, curator, scribe, herald, and envoy. The guard's
+  non-blocking changelog traceability advisory was addressed with spec references.
+  No source changes followed approval.
+- Gaze reported 90.5% OPA server statement coverage and full line coverage for
+  the new error/filter helpers, with no concrete new correctness risk. Its
+  quality/classification commands could not analyze Go 1.26 using a Go 1.25-built
+  executable; baseline comparison also had absolute/relative path mismatches and
+  unrelated Ampel/OpenSCAP violations. Those limitations were disclosed to the
+  council; no baseline or threshold was changed. Windows server tests additionally
+  cross-compiled successfully; this is not a Windows-native test run.
 
 ## Initial implementation workflow record
 

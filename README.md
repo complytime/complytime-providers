@@ -34,6 +34,20 @@ cp bin/complyctl-provider-* ~/.local/share/complytime/providers/
 
 Providers are discovered automatically by complyctl using the `complyctl-provider-` naming convention.
 
+## OPA input safety
+
+OPA directory scans exclude the host workspace base joined with `.complytime` and, when different,
+the provider's artifact directory. This changes enclosing-directory results, including for user-owned
+workspace files. Explicit local workspace targets fail; copy intended input outside both directories
+rather than using a hard link. Empty or fully ignored local directories and remote clones or scan
+paths with no confirmed evaluated input produce errors, not passing assessments.
+For a remote target selecting multiple branches, one input-safety or empty-input
+rejection suppresses assessments for that entire target; other targets retain their results.
+
+Install conftest on `PATH`. Compatibility is tested by behavior, not an exact runtime version check.
+For workspace boundaries, link handling, conftest configuration remedies, and traversal
+limitations, see the [OPA provider man page](docs/man/complyctl-provider-opa.md#selecting-scan-input).
+
 ## Test
 
 ```bash

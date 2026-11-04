@@ -22,7 +22,7 @@ opa-provider/
 │ └── vars.go             # Target variable key constants
 ├── results/              # Package to parse conftest output and produce assessment logs
 │ ├── results_test.go     # Tests for functions in results.go
-│ └── results.go          # Conftest JSON parsing, OSCAL mapping, scan-status assessment
+│ └── results.go          # Conftest JSON parsing and assessment mapping
 ├── generate/             # Package for Generate RPC mapping and scan config
 │ ├── mapping_test.go     # Tests for functions in mapping.go
 │ ├── mapping.go          # MappingFile loading, validation, requirement matching
@@ -30,16 +30,27 @@ opa-provider/
 │ └── scanconfig.go       # ScanConfig read/write for Generate→Scan handoff
 ├── scan/                 # Package to execute conftest commands
 │ ├── scan_test.go        # Tests for functions in scan.go
-│ └── scan.go             # CommandRunner interface, PullBundle, EvalPolicyWithNamespaces
-├── server/               # Package implementing the gRPC provider interface
-│ ├── server_test.go      # Tests for functions in server.go
-│ └── server.go           # Describe, Generate, Scan RPCs with ServerOptions injection
+│ └── scan.go             # CommandRunner interface, PullBundle, namespace-scoped evaluation
+├── server/               # gRPC provider and workspace/input safety preflight
+│ ├── server.go           # Describe, Generate, Scan RPCs with ServerOptions injection
+│ ├── conftest_config.go  # Conftest configuration discovery
+│ ├── input_selection.go  # Target-wide rejection and evaluated-input errors
+│ ├── file_identity.go    # Filesystem identity representation
+│ ├── file_identity_unix.go, file_identity_windows.go, file_identity_other.go
+│ │                       # Platform-specific identity checks
+│ ├── workspace.go        # Workspace boundary resolution
+│ ├── workspace_alias.go  # Input alias inspection
+│ ├── workspace_context.go # Cancellation handling
+│ ├── workspace_identity.go # Workspace identity collection
+│ ├── workspace_ignore.go # Conftest workspace ignore expressions
+│ ├── workspace_remote.go # Remote clone input checks
+│ └── *_test.go           # Unit, real-conftest, CLI, and benchmark tests
 ├── targets/              # Package for URL parsing and path validation
 │ ├── targets_test.go     # Tests for functions in targets.go
 │ └── targets.go          # ParseRepoURL, SanitizeRepoURL, ValidateInputPath
 ├── toolcheck/            # Package to verify required external tools are available
-│ ├── toolcheck_test.go   # Tests for functions in toolcheck.go
-│ └── toolcheck.go        # Checks conftest and git availability on PATH
+│ ├── toolcheck.go        # Checks conftest and git availability on PATH
+│ └── toolcheck_test.go   # Tool availability tests
 ├── main.go               # Plugin entry point
 └── README.md             # This file
 ```
@@ -74,8 +85,8 @@ Each target entry supports the following variables:
 | Variable | Required | Description |
 |:---------|:---------|:------------|
 | `url` | One of `url` or `input_path` | HTTPS URL to a git repository |
-| `input_path` | One of `url` or `input_path` | Absolute local filesystem path to scan |
-| `opa_bundle_ref` | Yes | OCI reference for the conftest policy bundle (e.g., `ghcr.io/org/bundle:v1`) |
+| `input_path` | One of `url` or `input_path` | Local filesystem path to scan |
+| `opa_bundle_ref` | When no complypack is available | OCI reference for the conftest policy bundle (e.g., `ghcr.io/org/bundle:v1`) |
 | `branches` | No | Comma-separated branch names to scan. Default: `main` |
 | `access_token` | No | Git authentication token. Injected via `GIT_CONFIG_COUNT` credential helper |
 | `scan_path` | No | Subdirectory within the cloned repository to scan |
@@ -132,15 +143,19 @@ When the plugin receives the `scan` command from complyctl, it will:
 4. For each target:
    - Pull the OPA policy bundle from the OCI registry (cached per unique `opa_bundle_ref`)
    - Load input data (clone git repo with `--depth 1`, or validate local path)
-   - Run `conftest test <path> --policy <dir> --output json --namespace <id1> --namespace <id2> ... --no-fail` using the IDs from the scan config
+   - Run `conftest test` with `--policy`, `--output json`, `--no-fail`, and one `--namespace` per scan-config ID. For a local directory enclosing a workspace, add a composed `--ignore` expression to exclude workspace paths while preserving an effective `CONFTEST_IGNORE` rule.
    - Parse conftest JSON output into findings grouped by requirement ID
    - Resolve Rego-derived IDs to Gemara requirement IDs using the reverse mapping from the scan config
    - Write per-target result files as JSON to the results directory
-5. Return assessment results to complyctl with a `scan-status` summary prepended. Operational errors (failed clones, bundle-pull failures, write errors) are reported via `ScanResponse.Errors`.
+5. Return assessment results to complyctl. Operational errors are reported via `ScanResponse.Errors`.
 
 **Requirement ID resolution:** Generate provides a reverse mapping that resolves Rego-derived IDs (e.g., `kubernetes.run_as_root`) to Gemara requirement IDs (from `AssessmentConfiguration.RequirementID`, e.g., `CIS-K8S-5.2.6`) in the scan response.
 
-**Error handling:** Per-target errors (clone failures, policy evaluation errors) are reported via `ScanResponse.Errors` and the scan continues with remaining targets. Global errors (missing tools, no targets) return a gRPC-level error immediately.
+**Error handling:** Per-target errors, including missing conftest, are reported via
+`ScanResponse.Errors`; the scan continues with remaining targets. If any selected remote branch
+fails input-safety preflight or has no confirmed evaluated directory input, no branch of that
+configured target contributes assessments. Other configured targets retain their results.
+Other global errors, such as a missing git executable or no targets, return a gRPC-level error.
 
 ### Workspace Layout
 
@@ -158,22 +173,19 @@ Directories are created with mode `0750`. Result files are written with mode `06
 
 ### Prerequisites
 
-- **Go** version 1.25 or higher
-- **conftest** CLI tool ([install guide](https://www.conftest.dev/install/))
+- **Go** version 1.26 or higher
+- **conftest** CLI ([releases](https://github.com/open-policy-agent/conftest/releases))
 - **git** CLI tool
 - Access to an OCI registry hosting OPA policy bundles
 
 ### Installing conftest
 
-```bash
-# macOS
-brew install conftest
-
-# Linux (download binary)
-LATEST=$(curl -s https://api.github.com/repos/open-policy-agent/conftest/releases/latest | grep tag_name | cut -d '"' -f 4 | sed 's/v//')
-curl -L "https://github.com/open-policy-agent/conftest/releases/download/v${LATEST}/conftest_${LATEST}_Linux_x86_64.tar.gz" | tar xz
-sudo mv conftest /usr/local/bin/
-```
+Install conftest from its [releases](https://github.com/open-policy-agent/conftest/releases)
+or build it from source, and ensure it is on `PATH`. The provider does not require an exact
+version string or embedded module metadata. Real-tool contracts exercise input isolation and
+result handling; a source build reporting `dev` is not rejected for that reason.
+See the [OPA man page](../../docs/man/complyctl-provider-opa.md#external-tools) for tested versions
+and the limits of compatibility coverage.
 
 ### Build
 
@@ -216,12 +228,24 @@ go test ./cmd/opa-provider/... -race -count=1
 
 | Symptom | Cause | Fix |
 |:--------|:------|:----|
-| `required tools not found: conftest` | conftest not installed or not on PATH | Install conftest and ensure it is in your PATH |
+| `required tools not found: conftest` | Conftest is missing or not on `PATH` | Install conftest and put it on `PATH` |
 | `required tools not found: git` | git not installed or not on PATH | Install git |
-| `opa_bundle_ref variable is required but not set` | Missing `opa_bundle_ref` in target variables | Add `opa_bundle_ref` to the target's variables in `complytime.yaml` |
-| `url must use HTTPS scheme` | Target URL uses `http://` or `ssh://` | Change the URL to use `https://` |
+| One branch errors and the target has no assessments | An input-safety or evaluated-input rejection invalidates all branches of that configured target | Fix the rejected branch's input or select only the intended eligible branches; other configured targets retain their results |
+| `is inside workspace` | The selected local file or directory is reserved workspace content | Copy the intended input outside both workspace boundaries and select the copy |
+| `resolves to workspace` or `shares filesystem identity with workspace` | A symlink or hard link reaches workspace content | Remove the alias or copy the intended input outside the workspace; do not use a hard link |
+| `no files found`, `no eligible input could be confirmed`, or `no eligible input was confirmed` | Local or remote directory input is empty, workspace-only, or fully ignored | Add a supported input file or adjust the effective ignore rule |
+| `may define an ignore rule` | A local directory overlaps a workspace and `CONFTEST_IGNORE` is empty or unset | Select a non-overlapping target or set `CONFTEST_IGNORE` to the existing effective ignore rule; use `^$` only if the file defines none |
+| `cannot determine conftest configuration` | The provider cannot establish whether a conftest configuration file applies | Check the configuration path and access, select a non-overlapping target, or set `CONFTEST_IGNORE` to the effective rule |
+| `invalid CONFTEST_IGNORE expression` | The environment variable contains an invalid regular expression | Correct `CONFTEST_IGNORE` to a valid expression that preserves the intended ignore rule |
+| `cannot establish remote clone root` | `scan_path` does not reconcile with the cloned input path | Set `scan_path` to a subdirectory of the cloned repository that matches the cloned input path |
+| `directory symlink cycle` or `resolving input path` | An input or remote clone contains a cyclic or unresolved symlink | Repair or remove the link, or select input outside the workspace |
+| `cannot establish workspace boundaries` | A configured workspace path cannot be resolved | Check that workspace paths exist and are accessible, then retry |
+| `either run Generate first or set opa_bundle_ref variable` | No generated policy configuration or `opa_bundle_ref` is available | Run Generate or add `opa_bundle_ref` to the target's variables in `complytime.yaml` |
+| `must use HTTPS scheme` | Target URL uses `http://` or `ssh://` | Change the URL to use `https://` |
 | `specify either url or input_path, not both` | Both `url` and `input_path` set on the same target | Use one or the other per target |
 | `branch name contains path traversal` | Branch name contains `..` | Use a valid branch name |
-| `input path contains directory traversal` | `input_path` contains `..` | Use an absolute path without traversal sequences |
-| `pulling policy bundle: ...` | OCI registry authentication failure | Run `docker login <registry>` before scanning |
-| `cloning repository: ...` | Git clone failed (auth, network, or bad URL) | Verify the URL and access token; check network connectivity |
+| `contains directory traversal` | `input_path` contains `..` | Use a path without traversal sequences |
+| `pulling policy bundle` | OCI registry authentication failure | Run `docker login <registry>` before scanning |
+| `cloning repository` | Git clone failed (auth, network, or bad URL) | Verify the URL and access token; check network connectivity |
+
+For workspace boundaries, remote-clone checks, traversal, and concurrent-change limitations, see the [OPA man page](../../docs/man/complyctl-provider-opa.md#selecting-scan-input).
