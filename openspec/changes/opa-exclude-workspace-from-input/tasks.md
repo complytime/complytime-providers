@@ -92,6 +92,57 @@ of the pending revision.
   council; no baseline or threshold was changed. Windows server tests additionally
   cross-compiled successfully; this is not a Windows-native test run.
 
+## Cyclic-clone review follow-up
+
+- Reopened task 4.4 on 2026-11-04 against `cdbe413` and completed its correction
+  in this follow-up commit to enforce the existing configured-target
+  isolation requirement after PR review reproduced a rejected clone's directory
+  cycle blocking unrelated targets. No new capability or specification requirement
+  was introduced.
+- Workspace identity collection now bounds traversal with its existing complete
+  and clone-excluding partial visit sets. A complete alias walk can still collect
+  identities omitted by a partial walk. Selected-input traversal continues to
+  reject cycles; permission, resolution, identity, and cancellation errors still
+  propagate. Rejected clones remain on disk.
+- The cycle-rejection wording at `design.md:67-68` applies to selected-input
+  inspection. Comparison-set collection bounds resolvable directory revisits
+  without rejecting them. This note clarifies the two traversals without changing
+  the committed specification or adding a new requirement during review fixes.
+- Unresolvable link loops and workspace permission or identity failures remain
+  fail-closed: workspace inspection rejects every local and remote target using
+  that boundary, including all branches of each remote target. An ancestor alias
+  that exposes a selected clone's files at another workspace path still causes an
+  identity rejection, as required by the existing outside-clone alias contract.
+- Earlier revisions of the regressions failed before the fix for both branch
+  orders, mixed valid local and remote targets, subsequent scans, and workspace
+  identity collection.
+  They now pass, including retention of assessments, evidence, mapping references,
+  regular-file identities, and identity matches reachable through cyclic aliases
+  outside the selected clone.
+- `make build`, `make test`, `go test -race -count=1 ./...`, `make lint`, and
+  `openspec validate opa-exclude-workspace-from-input --strict` passed, as did
+  `git diff --check`. Man-page sources are unchanged, so regeneration is unnecessary.
+- The real-tool suite recorded above was rerun for this follow-up and passed
+  without skips against the existing release binaries reporting conftest 0.68.2
+  and 0.71.1. Offline
+  `TestComplyctlScan_Offline` regressions passed with the rebuilt OPA provider,
+  an existing locally built complyctl, conftest 0.71.1, and Linux `bwrap`.
+- Gaze v1.8.0 rebuilt with Go 1.26 reported 88.2% average function line coverage
+  and 82.1% for `collectDirectory`, whose complexity decreased by one. The internal
+  identity-map contract is not mechanically measurable by Gaze; the direct map
+  assertions provide its regression coverage. The existing baseline is not
+  comparable to this package. No baseline, threshold, or CI gate was changed.
+- All nine council reviewers approved this follow-up after two review iterations.
+  Scope clarifications and documentation corrections resolved the blocking findings;
+  no source or test changes followed the initial source review or final approval.
+- Documentation impact: added a CHANGELOG fix entry. README, AGENTS, and man-page
+  changes are unnecessary because this correction restores their existing
+  independent-target guarantee without changing configuration, commands, or
+  structure. Migration guidance remains covered by website#189.
+- Hosted security/release checks and the cross-repository integration harness
+  were not rerun locally for this follow-up; their prior results above are
+  historical, not verification of this incremental fix.
+
 ## Initial implementation workflow record
 
 - Commit the untracked `openspec/specs/target-scoped-generation/spec.md` baseline

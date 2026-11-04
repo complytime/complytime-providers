@@ -19,7 +19,8 @@ import (
 
 func TestScan_RemoteBranchRejectionDiscardsTargetAssessments(t *testing.T) {
 	for _, scenario := range []string{
-		"symlink", "hardlink", "empty", "fully ignored", "missing evidence", "invalid output", "valid",
+		"symlink", "hardlink", "directory cycle", "empty", "fully ignored", "missing evidence",
+		"invalid output", "valid",
 	} {
 		for _, order := range []string{"main,second", "second,main"} {
 			t.Run(scenario+"/"+order, func(t *testing.T) {
@@ -43,6 +44,8 @@ func TestScan_RemoteBranchRejectionDiscardsTargetAssessments(t *testing.T) {
 							return clone, os.Symlink(artifact, input)
 						case "hardlink":
 							return clone, os.Link(artifact, input)
+						case "directory cycle":
+							return clone, os.Symlink(".", filepath.Join(clone, "cycle"))
 						case "empty":
 							return clone, nil
 						}
@@ -95,6 +98,8 @@ func TestScan_RemoteBranchRejectionDiscardsTargetAssessments(t *testing.T) {
 					cause = "resolves to workspace"
 				case "hardlink":
 					cause = "shares filesystem identity"
+				case "directory cycle":
+					cause = "directory symlink cycle"
 				case "invalid output":
 					cause = "parsing conftest output"
 				}
@@ -107,5 +112,77 @@ func TestScan_RemoteBranchRejectionDiscardsTargetAssessments(t *testing.T) {
 				assert.Len(t, response.MappingReferences, 1)
 			})
 		}
+	}
+}
+
+func TestScan_RejectedCloneCyclePreservesIndependentTargets(t *testing.T) {
+	workspace := t.TempDir()
+	writeScanConfig(t, workspace)
+	localFile := filepath.Join(t.TempDir(), "input.json")
+	require.NoError(t, os.WriteFile(localFile, []byte(`{}`), 0600))
+	rejectedClone := filepath.Join(workspace, "rejected-clone")
+	validClone := filepath.Join(workspace, "valid-clone")
+	runner := conftestRunner(conftestAllSuccessJSON)
+	ldr := &mockLoader{loadFn: func(target provider.Target, _ string) (string, error) {
+		if path := target.Variables[loader.VarInputPath]; path != "" {
+			return path, nil
+		}
+		if target.TargetID == "rejected-target" {
+			require.NoError(t, os.Mkdir(rejectedClone, 0750))
+			require.NoError(t, os.Symlink(".", filepath.Join(rejectedClone, "cycle")))
+			return rejectedClone, nil
+		}
+		require.NoError(t, os.MkdirAll(validClone, 0750))
+		require.NoError(t, os.WriteFile(filepath.Join(validClone, "input.json"), []byte(`{}`), 0600))
+		return validClone, nil
+	}}
+	srv := New(ServerOptions{Runner: runner, Loader: ldr, WorkspaceDir: workspace,
+		ToolChecker: func() ([]string, error) { return nil, nil }})
+	rejected := remoteTarget("", "https://example.com/org/rejected")
+	rejected.TargetID = "rejected-target"
+	local := localTarget(t, localFile, "")
+	local.TargetID = "valid-local"
+	remote := remoteTarget("", "https://example.com/org/valid")
+	remote.TargetID = "valid-remote"
+
+	for _, repeated := range []bool{false, true} {
+		targets := []provider.Target{local, remote}
+		if !repeated {
+			targets = append([]provider.Target{rejected}, targets...)
+		}
+		response, err := srv.Scan(context.Background(), makeScanRequest(t, targets))
+		require.NoError(t, err)
+		if repeated {
+			assert.Empty(t, response.Errors)
+		} else {
+			require.Len(t, response.Errors, 1)
+			assert.Contains(t, response.Errors[0], "rejected-target@main:")
+			assert.Contains(t, response.Errors[0], "directory symlink cycle")
+		}
+		require.Len(t, response.Assessments, 1)
+		assessment := response.Assessments[0]
+		assert.Equal(t, "test-req", assessment.RequirementID)
+		assert.ElementsMatch(t, []provider.Step{
+			{Name: localFile, Result: provider.ResultPassed, Message: "all checks passed"},
+			{Name: "https://example.com/org/valid@main", Result: provider.ResultPassed,
+				Message: "all checks passed"},
+		}, assessment.Steps)
+		var coordinates []string
+		for _, evidence := range assessment.Evidence {
+			require.NotNil(t, evidence.Source)
+			coordinates = append(coordinates, evidence.Source.Coordinate)
+		}
+		assert.ElementsMatch(t, []string{localFile, validClone}, coordinates)
+		assert.Len(t, response.MappingReferences, 2)
+		link, err := os.Readlink(filepath.Join(rejectedClone, "cycle"))
+		require.NoError(t, err, "rejected clones must remain on disk")
+		assert.Equal(t, ".", link)
+	}
+	require.Len(t, runner.calls, 4)
+	for _, call := range runner.calls {
+		assert.Equal(t, "conftest", call.name)
+		require.GreaterOrEqual(t, len(call.args), 2)
+		assert.Equal(t, "test", call.args[0])
+		assert.Contains(t, []string{localFile, validClone}, call.args[1])
 	}
 }

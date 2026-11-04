@@ -22,7 +22,7 @@ func workspaceIdentities(
 	collector := workspaceIdentityCollector{
 		ctx:       ctx,
 		cloneRoot: cloneRoot, boundaries: boundaries, traversal: traversal, identify: identify,
-		identities: make(map[fileIdentity]string), activeDirs: make(map[string]bool),
+		identities:  make(map[fileIdentity]string),
 		visitedDirs: make(map[string]bool), partialDirs: make(map[string]bool),
 	}
 	for _, boundary := range boundaries {
@@ -47,7 +47,6 @@ type workspaceIdentityCollector struct {
 	traversal   localTraversal
 	identify    identityFunc
 	identities  map[fileIdentity]string
-	activeDirs  map[string]bool
 	visitedDirs map[string]bool
 	partialDirs map[string]bool
 }
@@ -138,9 +137,6 @@ func (collector *workspaceIdentityCollector) collectDirectory(path string) error
 		}
 		return fmt.Errorf("resolving workspace directory %q: %w", path, err)
 	}
-	if collector.activeDirs[resolved] {
-		return fmt.Errorf("workspace directory cycle at %q; remove the cycle", path)
-	}
 	if collector.visitedDirs[resolved] {
 		return nil
 	}
@@ -154,15 +150,14 @@ func (collector *workspaceIdentityCollector) collectDirectory(path string) error
 	if partial && collector.partialDirs[resolved] {
 		return nil
 	}
-	// An alias outside the clone may expose files omitted by an earlier walk.
-	// Track partial and complete walks separately to retain those identities.
+	// Mark walks before descending to stop cycles without rejecting unrelated
+	// targets. An alias may expose files omitted by a partial clone-excluding
+	// walk, so only a complete walk can suppress all revisits of a directory.
 	if partial {
 		collector.partialDirs[resolved] = true
 	} else {
 		collector.visitedDirs[resolved] = true
 	}
-	collector.activeDirs[resolved] = true
-	defer delete(collector.activeDirs, resolved)
 	entries, err := collector.traversal.readDir(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) && !collector.isBoundary(path) {

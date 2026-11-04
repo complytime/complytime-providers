@@ -184,16 +184,20 @@ func TestWorkspaceIdentities_OmitClonePathsNotIdentities(t *testing.T) {
 	assert.NotContains(t, identities, identity)
 }
 
-func TestWorkspaceIdentities_RejectsUnresolvableWorkspaceTraversal(t *testing.T) {
+func TestWorkspaceIdentities_DirectoryCycleRetainsRegularFiles(t *testing.T) {
 	workspace := t.TempDir()
 	link := filepath.Join(workspace, "link")
 	require.NoError(t, os.Symlink(workspace, link))
+	file := filepath.Join(workspace, "z-artifact.json")
+	require.NoError(t, os.WriteFile(file, []byte(`{}`), 0600))
 	identities, err := workspaceIdentities(context.Background(), []string{workspace}, "",
 		localTraversal{readDir: os.ReadDir, lstat: os.Lstat}, fileIdentityOf)
-	require.Error(t, err)
-	assert.Nil(t, identities)
-	assert.Contains(t, err.Error(), link)
-	assert.Contains(t, err.Error(), "fix inaccessible or unsafe paths")
+	require.NoError(t, err)
+	info, err := os.Stat(file)
+	require.NoError(t, err)
+	identity, err := fileIdentityOf(file, info)
+	require.NoError(t, err)
+	assert.Equal(t, map[fileIdentity]string{identity: file}, identities)
 }
 
 func TestWorkspaceIdentities_ExternalSymlinksAreNotCollected(t *testing.T) {
@@ -385,4 +389,30 @@ func TestWorkspaceIdentities_AliasRetainsIdentityOutsideSelectedClone(t *testing
 	id, err := fileIdentityOf(file, info)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(alias, "clone", "file.json"), identities[id])
+}
+
+func TestWorkspaceIdentities_CycleRetainsIdentityOutsideSelectedClone(t *testing.T) {
+	workspace := t.TempDir()
+	clone := filepath.Join(workspace, "clone")
+	require.NoError(t, os.Mkdir(clone, 0750))
+	file := filepath.Join(clone, "file.json")
+	require.NoError(t, os.WriteFile(file, []byte(`{}`), 0600))
+	alias := filepath.Join(workspace, "a-cycle")
+	require.NoError(t, os.Symlink(workspace, alias))
+	traversal := localTraversal{readDir: os.ReadDir, lstat: os.Lstat}
+	identities, err := workspaceIdentities(context.Background(), []string{workspace}, clone,
+		traversal, fileIdentityOf)
+	require.NoError(t, err)
+	info, err := os.Stat(file)
+	require.NoError(t, err)
+	identity, err := fileIdentityOf(file, info)
+	require.NoError(t, err)
+	assert.Equal(t, map[fileIdentity]string{
+		identity: filepath.Join(alias, "clone", "file.json"),
+	}, identities)
+	err = inspectInput(context.Background(), clone, []string{workspace}, clone, "",
+		traversal, identities, fileIdentityOf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "shares filesystem identity")
+	assert.Contains(t, err.Error(), file)
 }
