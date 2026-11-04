@@ -37,14 +37,17 @@ type conftestResult struct {
 
 // PerTargetResult holds scan findings for a single target evaluation.
 type PerTargetResult struct {
-	Target         string            `json:"target"`
-	TargetURL      string            `json:"target_url,omitempty"`
-	Branch         string            `json:"branch,omitempty"`
-	InputPath      string            `json:"input_path,omitempty"`
-	InputDigest    string            `json:"input_digest,omitempty"`
-	ScannedAt      time.Time         `json:"scanned_at"`
-	Findings       []Finding         `json:"findings"`
-	SuccessCount   int               `json:"success_count"`
+	Target       string    `json:"target"`
+	TargetURL    string    `json:"target_url,omitempty"`
+	Branch       string    `json:"branch,omitempty"`
+	InputPath    string    `json:"input_path,omitempty"`
+	InputDigest  string    `json:"input_digest,omitempty"`
+	ScannedAt    time.Time `json:"scanned_at"`
+	Findings     []Finding `json:"findings"`
+	SuccessCount int       `json:"success_count"`
+	// EvaluatedFiles counts result records with a filename and namespace; a file
+	// can contribute more than one record when multiple namespaces are evaluated.
+	EvaluatedFiles int               `json:"-"`
 	Status         string            `json:"status"`
 	Error          string            `json:"error,omitempty"`
 	Remarks        string            `json:"remarks,omitempty"`
@@ -89,6 +92,11 @@ func ParseConftestOutput(raw []byte, target, branch string) (*PerTargetResult, e
 	}
 
 	for _, cr := range checkResults {
+		// Conftest v0.68.2 emits a per-file, per-namespace record even when
+		// no rule fires; a success count alone cannot prove input was evaluated.
+		if strings.TrimSpace(cr.Filename) != "" && strings.TrimSpace(cr.Namespace) != "" {
+			result.EvaluatedFiles++
+		}
 		result.SuccessCount += cr.Successes
 
 		for _, f := range cr.Failures {

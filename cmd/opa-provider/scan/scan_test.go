@@ -102,14 +102,14 @@ func TestConstructConftestTestCommandWithNamespaces(t *testing.T) {
 	assert.Equal(t, 2, nsCount)
 }
 
-func TestEvalPolicyWithNamespaces_Success(t *testing.T) {
+func TestEvalPolicyWithNamespacesAndIgnore_Success(t *testing.T) {
 	expectedJSON := []byte(
 		`[{"filename":"test.yaml","namespace":"kubernetes.run_as_root","successes":1}]`,
 	)
 	runner := &mockRunner{response: expectedJSON}
-	out, err := EvalPolicyWithNamespaces(
+	out, err := EvalPolicyWithNamespacesAndIgnore(
 		"/tmp/input", "/tmp/policy",
-		[]string{"kubernetes.run_as_root"}, runner,
+		[]string{"kubernetes.run_as_root"}, runner, "", nil,
 	)
 	assert.NoError(t, err)
 	assert.Equal(t, expectedJSON, out)
@@ -118,14 +118,29 @@ func TestEvalPolicyWithNamespaces_Success(t *testing.T) {
 	assert.NotContains(t, runner.calls[0].args, "--all-namespaces")
 }
 
-func TestEvalPolicyWithNamespaces_Failure(t *testing.T) {
+func TestEvalPolicyWithNamespacesAndIgnore_Failure(t *testing.T) {
 	runner := &mockRunner{
 		response: []byte("error"),
 		err:      fmt.Errorf("exit status 2"),
 	}
-	_, err := EvalPolicyWithNamespaces(
-		"/tmp/input", "/tmp/policy", []string{"ns1"}, runner,
+	output, err := EvalPolicyWithNamespacesAndIgnore(
+		"/tmp/input", "/tmp/policy", []string{"ns1"}, runner, "", nil,
 	)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "evaluating policy")
+	assert.Equal(t, []byte("error"), output)
+}
+
+func TestEvalPolicyWithNamespacesAndIgnore_UsesSnapshot(t *testing.T) {
+	runner := &mockRunner{response: []byte(`[]`)}
+	environment := []string{"CONFTEST_IGNORE=existing", "OTHER=value"}
+	output, err := EvalPolicyWithNamespacesAndIgnore(
+		"input", "policy", []string{"main"}, runner, "combined", environment,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []byte(`[]`), output)
+	require.Len(t, runner.calls, 1)
+	assert.Equal(t, environment, runner.calls[0].env)
+	assert.Contains(t, runner.calls[0].args, "--ignore")
+	assert.Contains(t, runner.calls[0].args, "combined")
 }
