@@ -171,6 +171,15 @@ input references; new evaluations declare result-file references.
 - **THEN** they share the corresponding artifact identity and mapping reference
 - **AND** the provider does not make an artifact copy per assessment
 
+#### Scenario: Retained remote branch belongs to a rejected configured target
+
+- **GIVEN** a remote branch produced retained conftest output
+- **AND** any selected branch triggers configured-target input-selection rejection
+- **WHEN** OPA aggregates the response
+- **THEN** no evidence entry or mapping reference for any branch of that target is returned
+- **AND** written artifacts remain unreferenced rather than becoming implicit evidence
+- **AND** other configured targets retain their accepted evidence/reference pairs
+
 ### Requirement: Man page documents evidence artifacts
 
 Each provider's man page MUST include an `EVIDENCE` section describing retained
@@ -318,6 +327,21 @@ digest-verify evidence in the originating workspace without packaging.
 - **WHEN** the retained workspace path contains spaces, percent signs, or non-ASCII characters
 - **THEN** the absolute file URL is properly escaped
 - **AND** decoding it identifies the same file as the coordinate resolved against the workspace root
+
+### Requirement: Output roots remain separate from OPA exclusion boundaries
+
+OPA MUST retain the host-injected `workspace` target variable's separate role in
+input-exclusion boundary resolution. It MUST NOT use that variable to override the
+retained-output/coordinate root, or remove existing dual-boundary checks when host
+and provider artifact directories differ.
+
+#### Scenario: Coordinate root and exclusion boundaries differ
+
+- **GIVEN** provider CWD is B and the host-injected workspace base is A
+- **WHEN** OPA scans eligible enclosing input under its existing safety checks
+- **THEN** retained output and evidence coordinates use B as their root
+- **AND** input selection protects both A's `.complytime` and the configured provider artifact directory
+- **AND** the injected workspace base does not select another evidence output root
 
 ### Requirement: Provider workspace root comes from process working directory
 

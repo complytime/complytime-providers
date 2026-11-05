@@ -33,6 +33,10 @@ re-evaluation, or detection of every target change.
   files, and local directories, and compute a file digest in every case.
 - Keep OPA clones as replaceable working data. Do not retain historical clones,
   snapshot local inputs, or introduce a second clone/copy for evidence retention.
+- Preserve the input-isolation contracts merged in PR #233: accumulated retained
+  outputs never become target input, and input-selection rejection of one remote
+  branch withholds assessments and evidence references from its configured target.
+  Already written artifacts remain unreferenced rather than being deleted.
 - Carry allocated artifact paths through parsing, hashing, and response construction.
   Qualify evidence and mapping-reference IDs by evaluation instance so references
   identify the retained artifact rather than a moving target.
@@ -91,6 +95,10 @@ identity must not depend on that lossy encoding being unique.
 
 - Shared allocation and metadata helpers under `internal/evidence/`; provider
   config, scan, results, and server packages; OPA command-output handling.
+- Provider configuration supplies resolved workspace/results roots and a launch-context
+  adapter supplies verified ownership context. Shared helpers validate confinement,
+  allocate artifacts, and finalize ownership without importing provider command packages
+  or independently selecting roots or interpreting identity transport.
 - OPA's loader keeps its existing replace-before-clone lifecycle. Historical
   input availability and deterministic re-evaluation are not guarantees of this
   feature; persisted conftest filenames are provenance, not retained input links.
@@ -106,6 +114,13 @@ identity must not depend on that lossy encoding being unique.
   cross-repository integration assertions and evidence documentation for the new
   coordinates and preserved absolute file URLs. Collection and packaging are not
   part of this companion compatibility work or prerequisites for this change.
+- Before implementation, identify the companion issue/spec, consumed interface,
+  identity trust model, compatibility strategy, and merge order. Record the actual
+  compatible revision/version floor and verify behavior before integration acceptance
+  and release; do not defer interface definition to end-to-end testing.
+  The design's companion contract acceptance record distinguishes required behavior
+  from an agreed interface and tested implementation. No compatible launcher or
+  supported version floor is established by this draft.
 - These OpenSpec artifacts cover provider changes with two user stories: preserve
   evaluation evidence, and locate/verify it using readable context and log links.
   The author has explicitly directed retaining OpenSpec rather than migrating to

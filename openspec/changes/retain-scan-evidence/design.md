@@ -19,6 +19,10 @@ launch context is an external integration prerequisite, not an existing SDK clai
   input paths. Raw conftest output is parsed but not separately retained.
 - OPA's command runner currently uses combined stdout/stderr. A retained JSON
   result needs stdout separated from diagnostics.
+- PR #233 is merged as `10af2fd`. Its `opa-input-selection` contracts and
+  `target-scoped-generation` aggregation delta are the implementation baseline:
+  workspace exclusion, alias checks, confirmed evaluated directory input, and
+  configured-target rejection remain in force when output retention is introduced.
 - The prior evidence-source design chose target-stable, readable IDs. It documented
   lossy encoding, now tracked by #199. Retained artifact instances need their own
   identity without making filesystem allocation depend on that encoding.
@@ -88,6 +92,22 @@ the launcher. The provider results root is
 leaf beneath that results root. Coordinates include `.complytime/` and are relative
 to the workspace root. Derive these paths from `provider.WorkspaceDir` and existing
 provider directory constants rather than duplicating the workspace name in logic.
+
+Provider initialization/configuration owns resolving the workspace root and deriving
+its absolute results root from existing provider constants. Ampel's relative path
+helpers, OpenSCAP's global result paths, and OPA's injected artifact root are adapted
+at their provider boundaries; retention paths are passed explicitly, not installed
+in mutable globals. A provider-side launch-context adapter establishes the selected
+verified owner according to the companion contract in D9.
+
+The shared allocator accepts explicit resolved workspace/results roots, verified
+ownership context, and evaluation labels. It validates root confinement and owns
+allocation, constrained artifact access, and finalization. It MUST NOT import
+`cmd/*`, rediscover CWD, select workspace precedence, interpret identity transport,
+or duplicate provider-specific directory constants. Its returned evaluation value
+carries the allocated directory, token, collection time, and artifact access needed
+by execution, parsing, hashing, and response construction. Provider orchestration
+owns tool execution and result interpretation; shared helpers own storage mechanics.
 
 Use the following workspace-relative patterns. Each label is one filesystem
 component, not an untrusted path. Local OPA and OpenSCAP use `TargetID` when
@@ -189,6 +209,20 @@ Adjust OPA's runner boundary so conftest JSON stdout is distinct from stderr;
 keep stderr available for operational diagnostics. Tests must cover valid stdout
 with diagnostic stderr and invalid stdout. Preserve `--no-fail` semantics: valid
 results with failing policy checks are evidence, not infrastructure failures.
+
+Preserve PR #233's execution-time input-selection classification when separating
+streams: inspect diagnostic stderr for the no-files condition without mixing it
+into retained JSON. Keep ordinary execution failures distinct from empty-directory
+input. Parse the retained stdout with the existing structured evaluated-input check;
+JSON validity alone, including `[]`, `null`, or records without filename/namespace,
+does not confirm directory evaluation or permit a synthetic passing assessment.
+
+Retention MUST preserve the existing `opa-input-selection` contracts rather than
+replace preflight with a new input-selection mechanism. Prior and current evaluation
+outputs, metadata, other providers' artifacts, and partial outputs remain workspace
+content excluded from enclosing local directory scans. Explicit workspace targets
+and unsafe symlink/hard-link aliases remain rejected. The selected remote clone
+remains eligible, but aliases into retained results outside that clone do not.
 
 Keep the existing `opa/repos/<repo>/<branch>` working-clone lifecycle. Do not put
 clones under retained results or copy their trees elsewhere. Local file and
@@ -308,6 +342,19 @@ failures become operational errors. Preserve these observable channels:
 Response error entries identify the failed target/evaluation without secret values.
 Exclude its assessments and references while preserving successful evaluations when
 the response channel permits continuing. Do not replace errors with empty responses.
+
+OPA input-selection rejection has a wider publication boundary than an ordinary
+per-evaluation processing failure. Preserve `inputSelectionError` classification and
+the existing preflight/cancellation rejection behavior: if any selected remote branch
+fails input-safety preflight or lacks confirmed evaluated directory input, withhold
+assessments, evidence entries, and mapping references from every branch of that
+configured target, in either branch order. Keep accumulated operational errors and
+other configured targets' successful results. Previously written branch artifacts
+remain on disk, unreferenced; do not delete them or treat their presence as evidence
+publication. Ordinary branch-scoped clone/tool/storage errors remain branch-scoped
+unless the existing input-selection contract classifies them otherwise. Stage
+branch results until target acceptance rather than publishing references eagerly.
+
 Never reuse a previous result when a tool fails to produce a new file. Attempt to
 write metadata after context is finalized; report metadata write or close failures
 through the provider's injectable logger with the evaluation token, as warnings
@@ -373,6 +420,12 @@ root, not the Evaluation Log's directory or an auditor's arbitrary current direc
 Process CWD is the workspace handoff mechanism; no additional workspace-context
 message, environment override, or duplicate root-selection mechanism is introduced.
 
+This output/coordinate root is distinct from OPA's input-exclusion boundaries.
+Preserve PR #233's host-injected `workspace` target variable as a source of the host
+`.complytime` exclusion boundary, alongside the configured provider artifact directory
+when different. That variable does not select an alternative retained-output root.
+Launcher CWD alignment MUST NOT remove the dual-boundary protection.
+
 The external complyctl compatibility change owns workspace selection, with existing
 precedence `--workspace`, then `COMPLYTIME_WORKSPACE`, then the invoking directory.
 Its proposed launch contract sets each provider subprocess's working directory to
@@ -389,8 +442,10 @@ proposed integration adjustment, not a claim about current launcher behavior.
 The companion change also owns reliable original-caller identity delivery for
 elevated execution (D9). Its implementation mechanism is external follow-up, not an
 unanswered provider product decision or an invented new protocol in this proposal.
-Task 5.4 records the companion tracking reference, compatible version and sequencing
-and verifies workspace and owner behavior before end-to-end acceptance and release.
+Task 0.1 establishes the tracked dependency, consumed interface, and compatibility
+strategy before implementation starts. Task 5.4 records the actual compatible
+revision/version floor and verifies workspace and owner behavior before acceptance
+and release.
 The companion must land before that verification; this spec-only draft does not
 claim it has landed. A provider cannot detect a different workspace selected by a
 launcher from CWD alone, so the companion integration tests must verify that handoff.
@@ -413,6 +468,12 @@ directory A with workspace B, including flag-over-environment precedence, and ve
 that provider output is beneath B rather than A. Cover the default workspace and
 environment-only selection, URL escaping for spaces, percent signs, and non-ASCII
 names, repeated scans, and agreement between coordinates and URLs.
+
+The companion contract must define resolution of caller-relative local inputs and
+conftest configuration paths as well as executable paths before changing child CWD.
+Verify configuration discovery, explicit relative configuration, ignore precedence,
+and relative input selection in the new evaluation context. Preserve PR #233's
+fail-closed behavior when an applicable ignore rule cannot be determined.
 
 Workspace-internal metadata paths use the same root-relative convention. External
 paths, such as a system datastream, remain absolute provenance hints. Absolute file
@@ -448,6 +509,13 @@ for an elevated-on-behalf invocation is an RPC error, not permission to guess an
 owner or silently keep root. Direct-root identity must be established as such,
 not inferred as a fallback when original-user identification fails.
 
+Before implementation, the companion contract MUST specify how identity provenance
+is established, how direct-root and elevated-on-behalf invocation are distinguished,
+and how the provider validates the delivered context. Numeric UID/GID values alone
+do not prove caller identity. The launch-context adapter consumes that agreed
+interface and supplies validated ownership context to the shared allocator; the
+allocator does not infer trust from transport fields or arbitrary environment values.
+
 During privileged execution, retain control of the fresh evaluation directory until
 all tool output is complete, required files are closed, validated and hashed, and
 best-effort metadata has been attempted. Finalize ownership through constrained
@@ -480,6 +548,13 @@ or automatic privilege escalation mechanism is introduced.
 - **Storage grows until explicitly managed** → Document this behavior; defer
   cleanup until after this feature merges. Never delete retained evidence during
   normal scans in this change.
+- **Retained history increases OPA preflight work** → Workspace identity collection
+  traverses retained history to detect aliases, so its cost grows with accumulated
+  files and directories, not just current target size. Measure representative
+  histories using the existing preflight benchmark approach; do not promise bounded
+  scan overhead or skip historical identities to improve timings. Cover existing
+  private evaluation directories: inaccessible history can fail preflight closed.
+  Report actionable access errors without widening permissions or changing old owners.
 - **Readable grouping can collide** → Allocate separate unique leaves and attempt
   to retain context in metadata. Metadata keys can also collide after normalization
   and are only correlation hints. #199 remains independent of storage correctness.
@@ -519,12 +594,42 @@ The author has resolved the evidence-access and runtime-reference product choice
   the Speckit instruction as outdated and explicitly declined migration.
 
 Complyctl workspace launch alignment and reliable elevated-caller identity delivery
-are separately owned implementation follow-up, verified by task 5.4. Its tracking
-reference, mechanism, compatible version and merge sequencing must be recorded for
-implementation acceptance, but are not new product choices awaiting this author's
-answer. Schema validation, actual ownership handoff and end-to-end consumer checks
-remain tests to perform, not claims that future behavior is already implemented.
+are separately owned prerequisites. Task 0.1 must record the companion issue/spec,
+consumed interface, identity trust model, compatibility strategy, and merge sequencing
+before implementation. No matching companion reference is established by this draft;
+the dependency remains blocking rather than being treated as an integration-only
+detail. Task 5.4 records the actual compatible revision/version floor and verifies the
+landed implementation before acceptance and release. These are not new product
+choices awaiting this author's answer. Schema validation, actual ownership handoff,
+and end-to-end consumer checks remain tests to perform, not claims that future
+behavior is already implemented.
 This decision record does not constitute council, implementation, or merge approval.
+
+### Companion contract acceptance record
+
+The companion launcher contract is proposed, not agreed or available in a supported
+release. Before task 0.1 can complete, record the following evidence here and link
+the accepted companion issue/spec. An issue describing the desired behavior alone
+does not establish the consumed interface or satisfy this prerequisite.
+
+| Contract element | Required acceptance evidence | Current state |
+| --- | --- | --- |
+| Tracking and ownership | Companion complyctl issue/spec, responsible owner, and accepted contract revision | No companion reference or acceptance is recorded |
+| Workspace handoff | Child CWD equals the resolved absolute workspace for Generate and Scan; document symlink resolution and caller-relative executable/input/configuration handling | D8 defines the required behavior; launcher agreement is outstanding |
+| Identity delivery | Name the consumed interface, its producer, identity provenance and validation, and how direct-root invocation differs from elevation on behalf of a user | D9 defines the required behavior; transport and trust agreement are outstanding |
+| Provider consumption | Provider adapters resolve roots and validate launch context; shared storage receives explicit roots and verified ownership without importing provider packages | Defined in D1; the identity adapter awaits the companion interface |
+| Compatibility | Define how unsupported launchers are excluded, how users identify a compatible build, and what dependency/release mechanism enforces the pairing | No compatibility mechanism or version floor is established |
+| Merge and release order | Agree the companion/provider merge order and when the compatible launcher must be available; link actual landed revisions before release acceptance | Companion landing precedes task 5.4 verification; the detailed sequence awaits agreement |
+| Verification | Link default/environment/flag workspace tests, caller-relative input/configuration tests, identity rejection tests, and a real privileged ownership-handoff result | Future verification under task 5.4; no passing result is claimed |
+
+Do not infer launcher compatibility from a valid process CWD: the provider cannot
+detect a workspace selected elsewhere by an older launcher. Do not infer identity
+trust from numeric UID/GID values or an environment variable name. The accepted
+contract must explain these guarantees rather than rely on provider guesses.
+A released version need not exist during design review; task 5.4 records the actual
+landed revision and supported version floor after the compatible implementation
+exists. Keep collection, packaging, storage, and retention-policy work outside this
+dependency.
 
 ## Repository instruction conflicts
 
@@ -549,6 +654,9 @@ these rules, their severity, or review requirements.
 
 1. Review and approve these artifacts; commit and push specifications before
    implementation begins, following repository workflow.
+   Establish task 0.1's companion contract and reconcile the reported permission-mode
+   instruction conflict before affected implementation begins. Do not make findings
+   world-readable or modify governance rules as part of retention implementation.
 2. Implement allocation and metadata helpers, then integrate each provider and
    update evidence-source tests. Keep the plugin protocol unchanged.
 3. Update man-page sources and generated pages, README guidance, and release notes
