@@ -3,7 +3,7 @@ pack_id: go
 language: Go
 version: 1.0.0
 ---
-<!-- scaffolded by uf vdev -->
+<!-- scaffolded by uf v0.21.0 -->
 
 # Convention Pack: Go
 

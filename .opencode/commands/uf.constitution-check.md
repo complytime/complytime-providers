@@ -2,9 +2,9 @@
 description: "Check a hero constitution's alignment with the Unbound Force org constitution"
 agent: constitution-check
 ---
-<!-- scaffolded by uf vdev -->
+<!-- scaffolded by uf v0.21.0 -->
 
-# Command: /constitution-check
+# Command: /uf.constitution-check
 
 ## Description
 
@@ -17,7 +17,7 @@ parent constitution reference.
 ## Usage
 
 ```
-/constitution-check [hero-constitution-path] [org-constitution-path]
+/uf.constitution-check [hero-constitution-path] [org-constitution-path]
 ```
 
 ### Arguments
@@ -33,13 +33,13 @@ parent constitution reference.
 
 ```
 # Check the current repo's constitution against the org constitution
-/constitution-check
+/uf.constitution-check
 
 # Check a specific hero constitution
-/constitution-check /path/to/hero/.specify/memory/constitution.md
+/uf.constitution-check /path/to/hero/.specify/memory/constitution.md
 
 # Check with explicit org constitution path
-/constitution-check /path/to/hero/constitution.md /path/to/org/constitution.md
+/uf.constitution-check /path/to/hero/constitution.md /path/to/org/constitution.md
 ```
 
 ## Instructions
@@ -50,7 +50,7 @@ parent constitution reference.
    - If a second argument is provided, use it as the org constitution
      path.
    - Otherwise, check if the current repository is the unbound-force
-     meta repo (look for `unbound-force.md` at the repo root). If so,
+      meta repo (look for `docs/heroes.md` at the repo root). If so,
      use `.specify/memory/constitution.md` as the org constitution.
    - If the current repo is NOT the meta repo, look for the org
      constitution at `../unbound-force/.specify/memory/constitution.md`

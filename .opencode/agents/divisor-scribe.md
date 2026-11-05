@@ -2,14 +2,11 @@
 description: "Technical documentation specialist — owns READMEs, specs, CLI help, and API docs."
 mode: subagent
 temperature: 0.1
-tools:
-  read: true
-  write: true
-  edit: true
-  bash: false
-  webfetch: false
+permission:
+  bash: deny
+  webfetch: deny
 ---
-<!-- scaffolded by uf vdev -->
+<!-- scaffolded by uf v0.21.0 -->
 
 # Role: The Scribe
 
@@ -132,4 +129,4 @@ These domains are owned by other agents — do NOT produce content for them:
 - **Blog posts and announcements** → The Herald
 - **Press releases and social media** → The Envoy
 - **Code review findings** → The Divisor review council
-- **Product decisions and prioritization** → Muti-Mind
+

@@ -25,12 +25,12 @@ Any AI agent that supports command loading can use this repository's AI tooling:
 
 ## Commands
 
-### `/review-pr <number>`
+### `/uf.review-pr <number>`
 
 Reviews a pull request for alignment, security, and compliance. Designed to be token-efficient and CI-aware.
 
 ```
-/review-pr 42
+/uf.review-pr 42
 ```
 
 **How it works:**
@@ -73,7 +73,7 @@ Commands are action-oriented prompts that the agent executes when invoked. They 
 - **Specify the output format**: Define the exact structure of the response (headings, tables, severity levels). This keeps output consistent across runs and reviewers.
 - **Reference, don't inline**: Point to `.specify/memory/constitution.md` for standards instead of copying rules into the command. This avoids drift and saves tokens.
 
-See `.opencode/commands/review-pr.md` as a reference implementation.
+See `.opencode/commands/uf.review-pr.md` as a reference implementation.
 
 ## Creating Skills
 
@@ -111,7 +111,7 @@ Skills provide domain knowledge the agent loads as context when activated. Unlik
 | `.specify/memory/constitution.md` | Organizational governance and coding standards                        |
 | `docs/AI_TOOLING.md`              | This file — AI tooling documentation                                  |
 | `.agents/skills/`                 | Directory for AI skills — agent-agnostic, auto-discovered by OpenCode |
-| `.opencode/commands/review-pr.md` | PR review command                                                     |
+| `.opencode/commands/uf.review-pr.md` | PR review command                                                    |
 | `specs/`                          | Feature specifications — SpecKit output                               |
 | `openspec/`                       | Feature specifications — OpenSpec output                              |
 

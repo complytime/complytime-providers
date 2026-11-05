@@ -3,7 +3,7 @@ pack_id: default-custom
 language: Any
 version: 1.0.0
 ---
-<!-- scaffolded by uf vdev -->
+<!-- scaffolded by uf v0.21.0 -->
 
 # Custom Rules: Default
 
