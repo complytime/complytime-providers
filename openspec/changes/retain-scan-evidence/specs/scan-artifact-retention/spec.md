@@ -3,13 +3,20 @@
 ## Purpose
 
 Preserve provider evaluation outputs across scans in discoverable locations so
-users can inspect the artifacts referenced by historical Evaluation Logs.
+users can inspect the artifacts referenced by historical Gemara Evaluation Logs.
+Retention means local preservation, not a managed storage lifecycle. Providers
+decide which preserved files to report as evidence; the Evaluation Log defines the
+evidence set, while unreferenced files remain supporting outputs. Collection,
+validation of collected copies, and optional packaging belong to a separate future
+complyctl capability that must map moved artifacts without modifying the log.
+Storage backends and long-term retention remain customer-owned; none are required
+to use the evidence mapping delivered by this change.
 
 ## ADDED Requirements
 
 ### Requirement: Exclusive per-evaluation artifact storage
 
-Providers MUST allocate a fresh directory beneath their results root for each
+Providers MUST allocate a fresh directory beneath their provider results root for each
 executed evaluation. The directory name MUST include a UTC timestamp and a unique
 suffix. Allocation MUST NOT overwrite or reuse an existing evaluation directory,
 including when timestamps or readable target labels collide.
@@ -45,6 +52,131 @@ including when timestamps or readable target labels collide.
 - **WHEN** a request includes repeated targets, multiple branches, or multiple Ampel specs
 - **THEN** every executed target/branch/spec or target/branch evaluation has its own directory
 - **AND** all assessments from one evaluation share that evaluation's artifacts
+
+### Requirement: Defined storage roots and allocation naming
+
+The provider results root MUST be `<workspace>/.complytime/<provider>/results`,
+derived from existing workspace/provider constants. Each evaluation directory MUST
+use `evaluation-<time>-<token>`, with UTC time formatted as `20060102T150405Z` and
+at least 128 bits of cryptographic token entropy. Allocation MUST use atomic
+no-replace creation with a bounded retry limit centralized in one documented
+constant and overridable for deterministic tests.
+
+#### Scenario: Fixed clock gives a defined workspace-relative coordinate
+
+- **GIVEN** a fixed allocation clock and a test-controlled retry limit
+- **WHEN** an OPA evaluation allocates its output directory
+- **THEN** its coordinate starts with `.complytime/opa/results/`
+- **AND** its evaluation component uses the documented UTC format and token
+- **AND** a forced collision retries without overwriting existing files
+- **AND** exhausting the configured test limit returns an operational error
+
+### Requirement: Constrained artifact access throughout evaluation
+
+Providers MUST constrain allocation, writes, parsing, hashing, and ownership
+finalization to the intended evaluation storage. They MUST reject symlinked context
+components beneath the resolved provider results root, artifact symlinks, and
+non-regular required outputs. Validated and hashed bytes MUST belong to the same
+artifact; a pathname check followed by an unconstrained reopen is insufficient.
+
+#### Scenario: Tool output is replaced by a symlink
+
+- **GIVEN** a fresh evaluation contains a required output path
+- **WHEN** that output is a symlink to a file outside the evaluation directory
+- **THEN** the provider rejects the output before parsing, hashing, or changing its ownership
+- **AND** it publishes no assessments or references backed by that output
+- **AND** the external file remains unchanged
+
+#### Scenario: Output is not a regular file
+
+- **WHEN** a required output path is a directory or another non-regular file
+- **THEN** the evaluation reports an operational error without publishing its evidence
+
+#### Scenario: Workspace itself is reached through a symlink
+
+- **GIVEN** the launcher supplies a workspace whose root path contains a symlink
+- **WHEN** the provider resolves that root before evaluation
+- **THEN** its resolved root is used consistently for constrained access and URL construction
+- **AND** symlinked context components beneath its provider results root are still rejected
+
+### Requirement: Evidence ownership follows the original invoking user
+
+Providers MUST finalize each new evaluation directory and its files to the original
+invoking user's verified UID/GID before publication. Normal
+invocation keeps caller ownership; elevated-on-behalf execution restores that
+user's ownership; direct root invocation remains root-owned. Providers MUST reject
+unverified identities and MUST NOT guess ownership from arbitrary environment or
+target values. Trusted identity delivery is an external prerequisite in design D9.
+
+#### Scenario: Normal user invocation
+
+- **GIVEN** operating-system identity identifies the current non-root caller
+- **WHEN** an evaluation completes
+- **THEN** its new directory and files remain owned by that caller's UID/GID
+- **AND** no privileged ownership change is needed
+- **AND** the caller can traverse the path, read the evidence, and verify its digest
+
+#### Scenario: Elevated scan on behalf of a user
+
+- **GIVEN** verified launch context identifies the original non-root caller
+- **AND** the provider executes with elevated privileges
+- **WHEN** tools finish and required outputs are closed, validated, and hashed
+- **THEN** files are finalized to that caller's UID/GID before the directory is handed off
+- **AND** present supporting metadata and required XCCDF results receive the same ownership
+- **AND** the original caller can read and hash the reported evidence without elevation
+
+#### Scenario: Direct root invocation
+
+- **GIVEN** verified launch context identifies a direct root invocation without an originating user
+- **WHEN** an evaluation completes
+- **THEN** its directory and files remain owned by UID/GID 0
+
+#### Scenario: Missing or invalid original-caller identity during elevation
+
+- **GIVEN** elevated execution lacks a verified direct-root or original-caller identity
+- **WHEN** the provider prepares to evaluate a target
+- **THEN** the RPC returns an operational error before evaluation or ownership changes
+- **AND** arbitrary `SUDO_UID`, `SUDO_GID`, or target values do not select an owner
+
+### Requirement: Private evidence directory and file modes
+
+Providers MUST use 0700 evaluation directories and 0600 files, including required
+tool outputs and any supporting metadata. They MUST verify these modes and the
+selected original-caller ownership before publishing evidence. A failed mode or
+ownership finalization MUST return an RPC error without a response. These are the
+author-selected access semantics; the conflicting repository rule is reported
+separately in the design and is not waived by this requirement.
+
+#### Scenario: Owner reads private finalized evidence
+
+- **GIVEN** a completed normal or elevated-on-behalf evaluation
+- **WHEN** its ownership and modes are finalized
+- **THEN** the evaluation directory has mode 0700 and each file has mode 0600
+- **AND** the selected original caller can traverse, read, and digest-verify the evidence
+- **AND** metadata and required tool outputs have the same private access policy
+- **AND** the provider does not add world or group permissions to avoid a failed handoff
+
+### Requirement: Ownership finalization is bounded and publication-critical
+
+Providers MUST limit ownership changes to the fresh evaluation directory and its
+contents, using constrained handles after tools stop writing. They MUST NOT
+recursively chown existing workspace parents, inputs, clones, legacy files, or
+earlier evaluations. Required evidence MUST be readable through its full path by
+the selected owner under 0700/0600 modes. Finalization or traversal failures MUST
+return an RPC error without publishing a response.
+
+#### Scenario: Ownership handoff fails
+
+- **WHEN** finalizing a required file's owner or verifying directory ownership fails
+- **THEN** the RPC returns an operational error and publishes no scan response
+- **AND** earlier evaluation ownership and bytes remain unchanged
+
+#### Scenario: Existing parent prevents the owner from reading evidence
+
+- **GIVEN** an existing parent directory cannot be traversed by the selected owner
+- **WHEN** the evaluation is finalized
+- **THEN** the RPC returns an actionable access error instead of publishing inaccessible evidence
+- **AND** it does not change ownership of that existing parent
 
 ### Requirement: Readable and bounded evaluation context
 
@@ -100,6 +232,7 @@ outcomes as well as passing outcomes.
 - **WHEN** OpenSCAP completes with valid results reporting failed checks
 - **THEN** the evaluation directory retains `arf.xml` and `results.xml`
 - **AND** assessments reference that evaluation's ARF
+- **AND** the unreferenced XCCDF result remains a supporting output, not implicit evidence
 
 #### Scenario: OPA retains exact result output
 
@@ -178,10 +311,16 @@ Metadata is supporting information rather than evidence authority.
 - **THEN** provider-generated labels and metadata do not persist those credentials
 - **AND** the provider does not serialize the entire target-variable map
 
+#### Scenario: Credentials appear in configuration URLs or reference context
+
+- **WHEN** target or configuration context contains URL userinfo, query, or fragment values
+- **THEN** metadata, labels, mapping titles, and descriptions omit those URL components
+- **AND** arbitrary target/configuration maps and environment values are not serialized
+
 ### Requirement: No publication of incomplete evidence
 
-Providers MUST report allocation, required artifact write/close, parse, or digest
-failures as operational errors. They MUST NOT publish assessments or mapping
+Providers MUST report allocation, required artifact write/close, parse, digest, or
+ownership-finalization failures as operational errors. They MUST NOT publish assessments or mapping
 references backed by incomplete evidence for the affected evaluation, substitute
 an earlier artifact, or mutate previously completed evaluations. Unreferenced
 partial outputs MAY remain for diagnosis.
@@ -198,11 +337,41 @@ partial outputs MAY remain for diagnosis.
 - **THEN** the provider does not read a previous evaluation's output as a fallback
 - **AND** the failed evaluation's partial artifacts are not referenced as valid evidence
 
+#### Scenario: OpenSCAP evaluation fails operationally
+
+- **WHEN** allocation, required output, parsing, hashing, or ownership finalization fails
+- **THEN** the Scan RPC returns a non-nil error and no response
+
+#### Scenario: Ampel per-evaluation output processing fails
+
+- **WHEN** a target/branch/spec evaluation fails allocation, required writes/closes, or parsing
+- **THEN** `ScanResponse.Errors` identifies the failed target/evaluation
+- **AND** no assessments or references are published for that evaluation
+- **AND** unrelated successful evaluations may remain in the response
+
+#### Scenario: Ampel digest processing fails
+
+- **WHEN** hashing an Ampel evidence artifact fails
+- **THEN** the Scan RPC returns a non-nil error and no response
+
+#### Scenario: OPA per-evaluation processing fails
+
+- **WHEN** a target evaluation fails allocation, required writes/closes, parsing, or hashing
+- **THEN** `ScanResponse.Errors` identifies the failed target/evaluation
+- **AND** no assessments or references are published for that evaluation
+- **AND** unrelated successful evaluations may remain in the response
+
+#### Scenario: Common workspace, identity, or finalization fails
+
+- **WHEN** required workspace/identity context validation or ownership finalization fails
+- **THEN** the Scan RPC returns a non-nil error and no response for any provider
+
 #### Scenario: Supporting metadata cannot be written
 
 - **GIVEN** the required outputs are valid and evidence digests have been computed
 - **WHEN** writing or closing supporting metadata fails
-- **THEN** the provider logs a warning and publishes the completed evaluation
+- **THEN** the provider's injectable logger records a warning identifying the evaluation token
+- **AND** otherwise complete evidence is published after successful ownership finalization
 - **AND** metadata may be missing or incomplete and is not an evidence authority
 - **AND** earlier evaluations remain readable and unchanged
 

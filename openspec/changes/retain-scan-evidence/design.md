@@ -4,7 +4,8 @@
 
 See [proposal.md](proposal.md) for motivation and scope. The existing implementation
 already carries evidence fields through the complyctl SDK into the Evaluation Log;
-this change does not need an RPC extension.
+the evidence mapping itself does not need an RPC extension. Delivery of trusted
+launch context is an external integration prerequisite, not an existing SDK claim.
 
 - Ampel constructs attestation paths in `scan.ScanRepository`, then hashes them in
   `server.Scan`. Its summary writer currently omits spec identity from the filename.
@@ -41,6 +42,8 @@ this change does not take ownership of that unrelated working-tree content.
   without storing input copies.
 - Reuse the existing plugin and result-mapping architecture with shared allocation,
   naming constants, and small metadata primitives in `internal/evidence`.
+- Make every reported evidence artifact locatable and digest-verifiable from the
+  Gemara Evaluation Log in the originating workspace without packaging or uploads.
 
 **Non-Goals:**
 
@@ -51,12 +54,42 @@ this change does not take ownership of that unrelated working-tree content.
   Artifact allocation is concurrency-safe; input acquisition races remain a
   separate concern and must not be disguised by the retention documentation.
 - Implementing cleanup, including a new post-scan clone deletion lifecycle.
+- Collecting evidence sets, validating collected copies, or designing an export
+  package, relocation index, storage backend, or managed retention lifecycle.
+
+## Responsibility boundary
+
+Retention in this change means local preservation across scans. The Gemara
+Evaluation Log is the source of truth for the evidence set. Providers select the
+files they report as evidence and preserve their bytes, coordinates, digests, and
+reference identities. A file's presence in an evaluation directory does not make
+it evidence: OpenSCAP's XCCDF result and optional metadata remain supporting outputs
+unless explicitly reported as evidence. The output requirements in D1 remain intact.
+
+A separate future complyctl core feature can collect, validate, and optionally
+package every artifact referenced as evidence in the log. It must use the log's
+evidence mappings rather than infer evidence from directory contents. If packaging
+moves files, that feature must map the moved artifacts to the original references
+without modifying the Evaluation Log. The format and mechanism are outside this
+change, and packaging is not required for the default local paper trail.
+
+Customer integrations own storage backends, transfers, credentials, access policies,
+archival, and longevity. Customers may keep evidence locally without any integration.
+This contract enables future collection work; it does not require that work to be
+designed or implemented before providers preserve and map their evidence.
 
 ## Decisions
 
 ### D1: Group by readable context; allocate one directory per evaluation
 
-Use the following provider-relative patterns. Each label is one filesystem
+The workspace root is the absolute provider process working directory supplied by
+the launcher. The provider results root is
+`<workspace>/.complytime/<provider>/results`; an evaluation directory is one fresh
+leaf beneath that results root. Coordinates include `.complytime/` and are relative
+to the workspace root. Derive these paths from `provider.WorkspaceDir` and existing
+provider directory constants rather than duplicating the workspace name in logic.
+
+Use the following workspace-relative patterns. Each label is one filesystem
 component, not an untrusted path. Local OPA and OpenSCAP use `TargetID` when
 available, with a source-derived or `system` fallback. Remote labels identify the
 repository host and path; branches and Ampel spec references have their own labels.
@@ -93,11 +126,20 @@ non-empty fallback. Strip URL userinfo, query, and fragment before deriving labe
 Attempt to preserve non-secret context in metadata. Label collisions can share a
 parent, but must never share an evaluation directory.
 
-Use root-constrained filesystem operations for allocation and provider-owned
-writes; reject symlinked context parents instead of following them outside the
-results root. Use private evaluation directories (0700) and provider-written
-files (0600). Tool-written files are protected by the private evaluation directory.
-Centralize modes, label limits, time format, and artifact basenames.
+Use root-constrained filesystem operations for allocation, writes, parsing, hashing,
+and ownership finalization. Resolve the workspace root once, including a symlinked
+workspace root, then reject symlinked context components beneath the provider
+results root. Reject artifact symlinks and non-regular outputs before parsing or
+hashing; use constrained handles rather than a pathname check followed by an
+unconstrained reopen. Confirm validated and hashed bytes belong to the same artifact.
+
+The author has selected private evaluation directories (0700) and files (0600),
+including tool outputs and metadata, with original-caller ownership per D9. This is
+the evidence-access product decision, not an open mode choice. Centralize these
+values, label limits, time format, and basenames in focused allocation/metadata
+files; leave pure ID helpers free of filesystem I/O. The conflicting convention-pack
+instruction is reported separately under `Repository instruction conflicts`; this
+spec records the selected design without changing or waiving that instruction.
 
 **Alternatives:** Flat opaque directories obscure target/spec context. Suffixing
 every existing filename repeats naming logic and keeps long unsafe branch/spec
@@ -113,12 +155,14 @@ not tool completion or an attestation's internal timestamp.
 
 Use a standard-library cryptographically random token with at least 128 bits of
 entropy. Atomically create the evaluation directory without replacement. Retry an
-existing-name collision with a fresh token using a bounded shared retry limit;
+existing-name collision with a fresh token using a bounded shared retry limit,
+centralized in one documented constant with a deterministic test override;
 return an operational error on exhaustion or any other allocation failure. Do not
 use an existence-check-then-create sequence. Pass an evaluation value carrying
 time, token, and allocated directory to provider-specific operations; avoid globals.
 
-The artifact-instance identity includes provider, token, and artifact kind, so
+The artifact-instance identity uses the provider/artifact-specific prefix from D4
+and the token; no additional provider field is implied by this wording. Thus
 distinct evaluations do not collapse when labels or timestamps match. Filesystem
 exclusive creation protects existing evidence even if a candidate name collides.
 The token is generated independently of target labels and is not a globally
@@ -173,9 +217,9 @@ Use matching source/reference identities such as `openscap-arf_<token>` and
 same allocated artifact data. Titles and descriptions carry readable target,
 branch, spec, or profile context; identity does not require a lossy target encoding.
 
-Include a properly escaped workspace-relative URL reference for every retained
-evidence artifact, including OPA, with the base defined in D8. Reuse the same
-identity when multiple assessments cite one artifact. Different
+Include a properly escaped absolute `file://` URL for every reported evidence
+artifact, including OPA, identifying the same file as its coordinate per D8. Reuse
+the same identity when multiple assessments cite one artifact. Different
 evaluations receive different identities even if they evaluated identical inputs.
 
 This deliberately supersedes the old design's cross-run ID stability: an ID is
@@ -204,6 +248,10 @@ allowlist and this common envelope with provider-specific fields:
 evidence IDs, coordinates, and digests; metadata is supporting context and MUST NOT
 duplicate artifact digests. Metadata does not attest to the identity or integrity
 of policy and input bytes, and its presence does not prove publication succeeded.
+This existing supporting-metadata scope is retained for human discovery and
+correlation, not as a second inventory for future collection. The documented target
+and configuration fields below form the allowlist; arbitrary map entries are not
+serialized.
 
 Include a readable `target_key` as a correlation aid: `url:` plus a URL's host and
 escaped path without scheme, userinfo, query, or fragment for remote targets;
@@ -245,14 +293,26 @@ outputs, close provider-written files, and compute digests before adding the
 evaluation's assessments to the response. The required OpenSCAP XCCDF result remains
 part of the retained output set, although the ARF is the referenced evidence.
 
-Allocation, required writes/closes, parsing, and hashing failures become operational
-errors. Multi-evaluation providers can continue their existing per-target error
-behavior, but must exclude the failed evaluation's assessments and references.
-A provider-level error can still fail the RPC where that is the established path.
+Allocation, required writes/closes, parsing, hashing, and ownership-finalization
+failures become operational errors. Preserve these observable channels:
+
+- OpenSCAP: a non-nil RPC error, with no published scan response.
+- Ampel: per-evaluation allocation, tool-output, write/close, and parse failures
+  become `ScanResponse.Errors`; digest failures retain the existing non-nil RPC
+  error behavior. Common workspace/identity setup and ownership-finalization
+  failures are RPC errors.
+- OPA: per-evaluation allocation, tool-output, write/close, parse, and digest failures
+  become `ScanResponse.Errors`. Common workspace/identity setup and
+  ownership-finalization failures are RPC errors.
+
+Response error entries identify the failed target/evaluation without secret values.
+Exclude its assessments and references while preserving successful evaluations when
+the response channel permits continuing. Do not replace errors with empty responses.
 Never reuse a previous result when a tool fails to produce a new file. Attempt to
 write metadata after context is finalized; report metadata write or close failures
-as warnings without suppressing otherwise complete evidence. Correlation context
-may be unavailable for such an evaluation.
+through the provider's injectable logger with the evaluation token, as warnings
+without suppressing otherwise complete evidence. Correlation context may be
+unavailable. Any metadata file left behind still undergoes D9 ownership finalization.
 
 An interrupted evaluation can leave unreferenced files. Leave them in place for
 diagnosis in this change; do not add cleanup or a new recovery database. The
@@ -262,7 +322,8 @@ durability or tamper-proof storage guarantee is introduced.
 ### D7: Three-scan example and storage model
 
 The following illustrative tree shows three successive scans. Tokens are shortened
-for readability; every evaluation directory contains the output set from D1.
+for readability; each completed evaluation contains the required outputs from D1
+and best-effort metadata. Interrupted evaluations can contain incomplete outputs.
 
 ```text
 .complytime/
@@ -302,26 +363,114 @@ tree storage. Identical outputs are stored separately. Many assessments
 can reference one output without creating additional file copies. Failed attempts
 can consume space too. No fixed size estimate or storage bound is promised.
 
-### D8: Workspace-relative evidence references
+### D8: Resolved workspace coordinates and absolute file URLs
 
-Express coordinates as paths relative to the workspace root containing
-`.complytime`. Express mapping-reference URLs as escaped relative URI references
-to the same artifacts, without a `file:` scheme. Interpret both against that
-workspace root, not against the Evaluation Log's directory or the auditor's
-arbitrary current directory. Document this base and how to locate the workspace.
-For example, a log in `.complytime/scan/` does not by itself define the URI base;
-generic document-relative URL resolution will not work without the workspace base.
+The provider-side contract is to resolve the supplied process working directory
+once as an absolute workspace root and use it for writes and evidence coordinates.
+Providers do not independently interpret `--workspace` or `COMPLYTIME_WORKSPACE`.
+They MUST fail the RPC if root resolution fails. Coordinates are relative to that
+root, not the Evaluation Log's directory or an auditor's arbitrary current directory.
+Process CWD is the workspace handoff mechanism; no additional workspace-context
+message, environment override, or duplicate root-selection mechanism is introduced.
 
-Transfer the Evaluation Log with the referenced workspace tree, retaining their
-relative layout; moving the log alone is insufficient. Workspace-internal metadata
-paths follow the same root-relative convention. External paths, such as a system
-datastream, remain absolute provenance hints and need not survive relocation.
-Test URI escaping for spaces, percent signs, and non-ASCII names and verify both
-references resolve to the same file using the explicit workspace base.
+The external complyctl compatibility change owns workspace selection, with existing
+precedence `--workspace`, then `COMPLYTIME_WORKSPACE`, then the invoking directory.
+Its proposed launch contract sets each provider subprocess's working directory to
+the resolved absolute workspace root, so existing `.complytime`-relative provider
+paths use the selected workspace without a new RPC field. Resolve executable and
+other caller-relative launch inputs before changing the child working directory;
+do not change the parent's process-wide working directory. The inspected complyctl
+launcher in `pkg/provider/initialization.go` (also present under
+`vendor/github.com/complytime/complyctl/`) currently constructs `exec.Command`
+without setting its working directory. A companion compatibility change must
+establish this contract and verify Generate and Scan use the same root. This is a
+proposed integration adjustment, not a claim about current launcher behavior.
 
-**Alternative:** Absolute file URLs resolve on the original host but embed its
-filesystem layout and do not follow a workspace moved to another host. Keeping
-absolute URLs alongside relative coordinates leaves two incompatible bases.
+The companion change also owns reliable original-caller identity delivery for
+elevated execution (D9). Its implementation mechanism is external follow-up, not an
+unanswered provider product decision or an invented new protocol in this proposal.
+Task 5.4 records the companion tracking reference, compatible version and sequencing
+and verifies workspace and owner behavior before end-to-end acceptance and release.
+The companion must land before that verification; this spec-only draft does not
+claim it has landed. A provider cannot detect a different workspace selected by a
+launcher from CWD alone, so the companion integration tests must verify that handoff.
+
+Keep mapping-reference URLs as properly escaped absolute `file://` URLs. Build each
+URL from the actual preserved artifact's already-absolute path; reuse `FileURL`
+only after validating that input, so its relative-path fallback is not relied upon.
+Resolving the coordinate against the selected workspace
+and decoding its mapping URL MUST identify the same file. This retains the existing
+URL representation rather than introducing scheme-less references for a future
+export feature. Validate converted logs against the applicable Gemara schema and
+exercise a downstream consumer with the retained URL representation.
+
+The in-place workflow for the evidence owner or another authorized reader is:
+establish the selected workspace root, read the log's
+evidence mappings, resolve each coordinate against that root or use its absolute
+file URL, and verify the file against its recorded digest. This workflow MUST work
+without collection, packaging, or a storage integration. Test invocation from
+directory A with workspace B, including flag-over-environment precedence, and verify
+that provider output is beneath B rather than A. Cover the default workspace and
+environment-only selection, URL escaping for spaces, percent signs, and non-ASCII
+names, repeated scans, and agreement between coordinates and URLs.
+
+Workspace-internal metadata paths use the same root-relative convention. External
+paths, such as a system datastream, remain absolute provenance hints. Absolute file
+URLs describe the originating filesystem and are not promised to survive workspace
+relocation. Coordinates can be resolved against a copied workspace with its layout
+preserved, but that does not relocate the original absolute URLs. A future optional
+complyctl packaging feature must map moved artifacts without changing the log; this
+change neither implements that mechanism nor depends on it.
+
+**Alternative launch mechanism:** Exporting the workspace only through an
+environment variable would require changing every existing `.complytime`-relative
+provider path. Child CWD preserves that convention and is the sole provider-side
+workspace input. No extra workspace-confirmation protocol is needed for that choice.
+
+**Alternative:** Scheme-less relative URLs would require establishing Gemara schema
+and consumer support and an external resolution base. Export portability alone is
+not a reason to change the runtime URL representation. Copying an entire workspace
+is not a substitute for an explicitly designed future evidence package.
+
+### D9: Finalize evidence for the original invoking user
+
+The author-confirmed access policy is 0700 evaluation directories and 0600 files,
+owned by the original invoking user's numeric UID and GID,
+not necessarily the effective account running an elevated scan. Normal invocation
+uses the invoking account. Elevated execution on a user's behalf uses that original
+user; direct root invocation with no originating user remains UID/GID 0. Complyctl's
+companion launch contract owns reliable identity establishment and delivery for
+elevated execution. Non-elevated execution uses the operating system's invoking
+UID/GID without requiring a new caller-identity message.
+Providers MUST NOT infer an owner from arbitrary `SUDO_UID`, `SUDO_GID`, `USER`,
+target variables, or workspace metadata. Missing, malformed, or unverified identity
+for an elevated-on-behalf invocation is an RPC error, not permission to guess an
+owner or silently keep root. Direct-root identity must be established as such,
+not inferred as a fallback when original-user identification fails.
+
+During privileged execution, retain control of the fresh evaluation directory until
+all tool output is complete, required files are closed, validated and hashed, and
+best-effort metadata has been attempted. Finalize ownership through constrained
+handles, then verify the required files and directory have the selected UID/GID
+and 0700/0600 modes before returning assessments/references. Hand off the evaluation
+directory last, after its files; tools must have stopped writing before handoff.
+Normal non-root execution verifies ownership without requiring privileged chown.
+Failed ownership finalization returns an RPC error and publishes no response.
+
+Changes are limited to the newly allocated evaluation directory and its contents.
+Never recursively chown an existing workspace, shared context parent, legacy file,
+clone, input, or earlier evaluation. Resolve any required new parent-directory
+access in the companion workspace-setup contract; verify the intended owner can
+traverse the full path. If existing parents prevent access, fail with an actionable
+error rather than changing unrelated ownership or publishing inaccessible evidence.
+Caller ownership does not grant other auditors access or promise immutable storage.
+
+Use injected identity/filesystem operations to exercise normal, elevated-on-behalf,
+direct-root, invalid identity, symlink substitution, and handoff/traversal failure
+paths in unprivileged unit tests. A controlled privileged integration test must
+also verify real UID/GID results and reading/hashing as the original non-root user;
+record that prerequisite when it cannot run locally. No implicit ACL, shared-group,
+or automatic privilege escalation mechanism is introduced.
 
 ## Risks / Trade-offs
 
@@ -335,9 +484,9 @@ absolute URLs alongside relative coordinates leaves two incompatible bases.
   to retain context in metadata. Metadata keys can also collide after normalization
   and are only correlation hints. #199 remains independent of storage correctness.
 - **Existing consumers expect fixed paths or IDs** → Mark the path and OPA
-  evidence semantics, including workspace-relative coordinates and scheme-less
-  reference URLs, as breaking changes; direct consumers to returned coordinates
-  and the explicit workspace base.
+  evidence semantics, including workspace-relative coordinates, as breaking changes;
+  direct consumers to returned coordinates and the explicit workspace base. Absolute
+  file URLs retain their representation but identify the newly allocated artifacts.
 - **Global mutable OpenSCAP paths** → Pass evaluation paths explicitly through
   scan, parser, hash, and mapping functions rather than changing package globals
   around a scan, which would introduce a race.
@@ -345,38 +494,56 @@ absolute URLs alongside relative coordinates leaves two incompatible bases.
   allocation independently; do not claim serialized input acquisition. No new
   concurrent execution is introduced by this change.
 - **Raw outputs may contain sensitive findings** → Keep private evaluation
-  directories and existing access expectations. Metadata excludes credentials;
+  directories and files at the author-selected 0700/0600 modes, and
+  finalize ownership for the invoking user per D9. Metadata excludes credentials;
   raw evidence is not rewritten or redacted because that would change its bytes.
-- **Workspace relocation and manual edits** → Preserve the workspace layout and
-  resolve relative references against its root. Digests detect artifact changes,
-  but this change does not create immutable archives or authenticate the log.
+- **Workspace relocation and manual edits** → Absolute file URLs remain specific to
+  the originating filesystem. Relative coordinates need an explicit workspace root;
+  future packaging must supply relocation mapping without rewriting the log. Digests
+  detect artifact changes, but do not authenticate the log or create immutable archives.
 - **Metadata failure** → Warn and publish complete evidence; contextual correlation
   may be unavailable, but the Evaluation Log still identifies and verifies it.
 
-## Open review decisions
+## Decision record and external follow-up
 
-This proposal remains a draft. Review identified the following decisions for
-maintainers; the text above records the proposed design, not settled approval.
+The author has resolved the evidence-access and runtime-reference product choices:
 
-- **Workspace base (HIGH):** Define how providers determine the coordinate base
-  when complyctl's `--workspace` or `COMPLYTIME_WORKSPACE` selects a directory other
-  than the plugin process's current directory. Confirm the launcher/runtime
-  contract and add a non-default-workspace acceptance case before implementation;
-  documentation of the intended base alone does not align differing write roots.
-- **Elevated OpenSCAP access (HIGH):** Decide whether private evidence from `sudo`
-  scans requires elevated reading/verification, or needs a supported shared-access
-  model. Reconcile D1's proposed 0700/0600 modes with the invoking auditor's access,
-  document ownership and metadata readability, and verify the chosen workflow.
-- **Workflow tier (HIGH):** Decide whether required companion complyctl work makes
-  this a strategic cross-repository change requiring Speckit, or should become an
-  independently scoped follow-up with explicit sequencing. The current tactical
-  classification and task 5.4 coupling require reconciliation before implementation.
-- **Downstream relative-URL compatibility (HIGH):** Establish whether the Gemara /
-  Evaluation Log schema permits scheme-less relative `MappingReference.url` values.
-  Verify a converted log against that schema and a downstream consumer; preserving
-  strings through serialization alone does not establish schema validity or usable
-  resolution. If unsupported, revisit D8 with maintainers rather than silently
-  shipping an incompatible reference representation.
+- **Workspace:** use the provider process CWD supplied by complyctl as the workspace
+  root, with coordinates relative to it. Do not add a second root-selection protocol.
+- **URLs:** retain absolute `file://` mapping URLs identifying the same files.
+- **Ownership:** finalize files for the original invoking user; elevated-on-behalf
+  scans do not require that user to read evidence as root. Direct root stays root.
+- **Modes:** use 0700 evaluation directories and 0600 files, including supporting
+  metadata and tool-written outputs. The author explicitly confirmed these modes.
+- **Workflow direction:** retain these OpenSpec artifacts; the author identified
+  the Speckit instruction as outdated and explicitly declined migration.
+
+Complyctl workspace launch alignment and reliable elevated-caller identity delivery
+are separately owned implementation follow-up, verified by task 5.4. Its tracking
+reference, mechanism, compatible version and merge sequencing must be recorded for
+implementation acceptance, but are not new product choices awaiting this author's
+answer. Schema validation, actual ownership handoff and end-to-end consumer checks
+remain tests to perform, not claims that future behavior is already implemented.
+This decision record does not constitute council, implementation, or merge approval.
+
+## Repository instruction conflicts
+
+The selected design and author direction are explicit. The following loaded rules
+still conflict with them and are reported for governance handling, not re-presented
+as unanswered evidence-design questions. Recording the decisions does not change
+these rules, their severity, or review requirements.
+
+- **Permission-mode instruction conflict (HIGH):** The selected 0700/0600 modes
+  conflict with `.opencode/uf/packs/go.md` SC-005's 0755/0644 rule. Caller ownership
+  does not waive that rule. Obtain reconciliation through the applicable governance
+  process before implementing modes. Do not edit convention packs or
+  make findings world-readable to clear review in this change.
+- **Workflow instruction conflict (HIGH):** The user has identified the Speckit
+  tier instruction as outdated and requested no migration. The loaded AGENTS.md
+  still requires Speckit for cross-repository work. These provider artifacts remain
+  in OpenSpec, with complyctl changes externally owned; no governance rule is changed
+  or treated as waived. Maintainer reconciliation of the conflicting instructions
+  remains outstanding rather than being presented as implementation approval.
 
 ## Migration Plan
 
