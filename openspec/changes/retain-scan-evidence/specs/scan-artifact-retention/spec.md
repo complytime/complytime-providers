@@ -71,6 +71,22 @@ constant and overridable for deterministic tests.
 - **AND** a forced collision retries without overwriting existing files
 - **AND** exhausting the configured test limit returns an operational error
 
+### Requirement: Provider-owned allocation context
+
+Provider initialization/configuration MUST supply the shared allocator with explicit
+resolved workspace/results roots, derived from existing provider constants, and
+verified ownership context from the launch-context adapter. Shared storage helpers
+MUST validate confinement and MUST NOT import `cmd/*`, independently select roots,
+interpret identity transport, or require mutable global result paths.
+
+#### Scenario: Provider supplies storage context
+
+- **GIVEN** Ampel, OpenSCAP, or OPA has resolved its workspace/results roots and verified owner
+- **WHEN** its provider adapter invokes the shared allocator
+- **THEN** allocation uses that explicit context and validates root confinement
+- **AND** execution, parsing, hashing, and publication use the returned evaluation paths
+- **AND** shared helpers do not import provider command packages or rediscover CWD
+
 ### Requirement: Constrained artifact access throughout evaluation
 
 Providers MUST constrain allocation, writes, parsing, hashing, and ownership
@@ -271,6 +287,37 @@ working data rather than retained evidence.
 - **THEN** evidence still resolves to the retained conftest JSON result
 - **AND** retention has not copied the directory or its nested provider workspace
 
+### Requirement: Retention preserves OPA input isolation
+
+OPA MUST preserve the `opa-input-selection` contracts introduced by PR #233.
+Retained artifacts and partial outputs MUST NOT become target input during enclosing
+local directory scans. Explicit workspace targets and unsafe aliases MUST remain
+rejected. The selected remote clone MUST remain eligible under the existing checks,
+without allowing aliases into workspace content outside that clone. Output-root
+selection MUST NOT remove host/provider input-exclusion boundaries when they differ.
+
+#### Scenario: Repeated enclosing-directory scans accumulate evidence
+
+- **GIVEN** a local directory contains eligible input and the provider workspace
+- **WHEN** three scans create retained results and supporting metadata
+- **THEN** only eligible non-workspace input contributes to each evaluation
+- **AND** current/prior results, partial outputs, and other providers' artifacts remain excluded
+- **AND** earlier retained evidence bytes and digests remain unchanged
+
+#### Scenario: Retained evidence is selected through an alias
+
+- **WHEN** local input or a remote clone outside the retained results contains an unsafe
+  symlink or hard link to retained workspace evidence
+- **THEN** the existing input-safety checks reject the affected configured target
+- **AND** no evidence-backed assessments from that rejected target are published
+
+#### Scenario: Existing private history cannot be inspected
+
+- **GIVEN** an earlier private evaluation directory is inaccessible to OPA preflight
+- **WHEN** workspace identities cannot be established reliably
+- **THEN** OPA reports an actionable input-safety error and fails closed
+- **AND** it does not skip historical identity checks, widen permissions, or change earlier owners
+
 ### Requirement: Evaluation context metadata
 
 Each provider MUST attempt to write `metadata.json` for each completed evaluation
@@ -316,6 +363,32 @@ Metadata is supporting information rather than evidence authority.
 - **WHEN** target or configuration context contains URL userinfo, query, or fragment values
 - **THEN** metadata, labels, mapping titles, and descriptions omit those URL components
 - **AND** arbitrary target/configuration maps and environment values are not serialized
+
+### Requirement: Target acceptance precedes OPA evidence publication
+
+OPA MUST preserve target rejection from `opa-input-selection`: input-safety/preflight
+rejection, including preflight cancellation, or unconfirmed directory input in any
+remote branch MUST withhold all branches' assessments, evidence, and references for
+that configured target. It MUST retain operational errors and other targets' accepted
+results. Retention MUST NOT broaden ordinary branch-scoped processing failures.
+
+#### Scenario: Successful retained branch precedes a rejected branch
+
+- **GIVEN** one remote branch has written complete retained output
+- **AND** another selected branch fails input-safety preflight or lacks confirmed directory input
+- **WHEN** the provider constructs the response in either branch order
+- **THEN** it publishes no assessments, evidence entries, or mapping references for that target
+- **AND** previously written branch artifacts remain on disk without published references
+- **AND** target/branch operational errors and other targets' accepted evidence remain
+
+#### Scenario: Separated diagnostic output reports no eligible directory input
+
+- **WHEN** conftest reports empty effective directory input on stderr or stdout lacks
+  structured records confirming evaluated directory input
+- **THEN** OPA preserves the existing input-selection error classification and actionable remedy
+- **AND** diagnostic stderr is not mixed into retained `conftest.json`
+- **AND** no synthetic passing assessment or evidence reference is published for the rejected target
+- **AND** unrelated execution failures remain distinguishable from empty-input errors
 
 ### Requirement: No publication of incomplete evidence
 
