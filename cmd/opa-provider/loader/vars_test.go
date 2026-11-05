@@ -17,4 +17,5 @@ func TestVarConstants_Values(t *testing.T) {
 	assert.Equal(t, "scan_path", VarScanPath)
 	assert.Equal(t, "platform", VarPlatform)
 	assert.Equal(t, "opa_bundle_ref", VarOPABundleRef)
+	assert.Equal(t, "workspace", VarWorkspace)
 }

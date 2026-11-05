@@ -48,19 +48,31 @@ func constructConftestPullCommand(bundleRef, policyDir string) (string, []string
 	}
 }
 
-// EvalPolicyWithNamespaces evaluates configuration files against OPA policies
-// using conftest, restricted to the specified Rego namespaces.
-func EvalPolicyWithNamespaces(
+// EvalPolicyWithNamespacesAndIgnore evaluates input with an optional conftest
+// ignore expression and environment snapshot. A nil environment is inherited.
+// It returns the command output, including on failure, and a contextual error.
+func EvalPolicyWithNamespacesAndIgnore(
 	inputPath, policyDir string,
 	namespaces []string,
 	runner CommandRunner,
+	ignore string,
+	environment []string,
 ) ([]byte, error) {
 	name, args := constructConftestTestCommandWithNamespaces(
 		inputPath, policyDir, namespaces,
 	)
-	output, err := runner.Run(name, args...)
+	if ignore != "" {
+		args = append(args, "--ignore", ignore)
+	}
+	var output []byte
+	var err error
+	if environment == nil {
+		output, err = runner.Run(name, args...)
+	} else {
+		output, err = runner.RunWithEnv(environment, name, args...)
+	}
 	if err != nil {
-		return nil, fmt.Errorf(
+		return output, fmt.Errorf(
 			"evaluating policy on %q: %w (output: %s)",
 			inputPath, err, string(output),
 		)

@@ -12,4 +12,5 @@ const (
 	VarScanPath     = "scan_path"
 	VarPlatform     = "platform"
 	VarOPABundleRef = "opa_bundle_ref"
+	VarWorkspace    = "workspace"
 )

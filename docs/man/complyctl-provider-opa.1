@@ -57,6 +57,12 @@ Subdirectory within the cloned repository to scan.
 Path traversal sequences (\f[B]../\f[R]) are rejected.
 Default: root of the cloned repository.
 .TP
+\f[B]workspace\f[R] (injected by complyctl)
+Workspace base directory.
+The provider excludes this base joined with \f[B].complytime\f[R], as
+well as its own artifact directory when different.
+When absent, the provider uses its configured artifact directory.
+.TP
 \f[B]platform\f[R] (optional)
 Platform hint for self\-hosted git instances (e.g., \f[B]github\f[R],
 \f[B]gitlab\f[R]).
@@ -73,7 +79,108 @@ Example: \f[B]oci://ghcr.io/org/policies:v1\f[R]
 The OCI policy bundle must include a \f[B]complytime\-mapping.json\f[R]
 file that maps requirement IDs to Rego namespaces.
 The provider returns an error if this file is missing.
+.SH SELECTING SCAN INPUT
+Keep target files outside the complyctl workspace so generated artifacts
+and prior results do not affect OPA assessments.
+For a local directory target that contains a workspace, the provider
+excludes the workspace files, including user\-owned files.
+Files outside the excluded directories remain eligible subject to the
+link and input checks below.
+.PP
+The provider resolves the host workspace as the \f[B]workspace\f[R] base
+injected by complyctl joined with \f[B].complytime\f[R].
+It also excludes its own artifact directory, normally
+\f[B].complytime\f[R] relative to the provider\(cqs working directory,
+when that directory differs.
+For example, a host base of \f[I]/srv/team\f[R] and a provider working
+directory of \f[I]/srv/scan\f[R] create two boundaries:
+\f[I]/srv/team/.complytime\f[R] and \f[I]/srv/scan/.complytime\f[R].
+If the host does not provide a workspace base, the provider uses its
+configured artifact directory.
+The provider resolves both paths through symbolic links.
+If it cannot resolve a boundary, it rejects the target.
+Check that both workspace directories exist and that the provider can
+access their paths, then retry the scan.
+.PP
+The provider rejects an explicitly selected local workspace file or
+directory.
+To scan such a file, copy it to a directory outside both workspace
+boundaries and set \f[B]input_path\f[R] to the copy.
+Use a copy, not a hard link: the provider checks filesystem identity and
+rejects a hard link to workspace content when it cannot exclude it
+safely.
+It also rejects unsafe symbolic links and unresolved paths.
+.PP
+An intentional remote clone remains eligible, even though it is stored
+inside the workspace.
+The provider rejects clone files hard\-linked to other workspace
+content.
+It also rejects a remote scan path or traversed link that reaches other
+workspace content or matches its file identity.
+The provider rejects unresolved paths and link cycles.
+Non\-cyclic links within the selected clone remain eligible.
+Fix or remove unsafe links, or copy the intended input outside the
+workspace.
+.PP
+Local directories and remote clones or \f[B]scan_path\f[R] directories
+with no confirmed evaluated input produce an operational error and no
+assessments for that target.
+This includes empty, workspace\-only, and fully ignored inputs.
+Add a supported input file or adjust the effective ignore rule; other
+targets retain their results.
+.PP
+For a remote target selecting multiple branches, an input\-safety
+rejection or lack of confirmed evaluated directory input in any branch
+suppresses assessments from every branch of that configured target.
+This applies in either branch order.
+The error identifies the rejected target and branch; other configured
+targets retain their assessments.
+Repair the rejected branch\(cqs input or select only the intended
+eligible branches.
+Previously written per\-branch result files are not deleted.
+.PP
+Workspace exclusion does not prune directories from traversal.
+An unreadable directory or broken link can still cause an operational
+error; fix the path or its permissions before retrying.
+Preflight is not a sandbox: concurrent filesystem changes between
+preflight and conftest traversal can defeat isolation.
+.SS Conftest ignore configuration
+For a local directory that contains a workspace, the provider combines a
+nonempty \f[B]CONFTEST_IGNORE\f[R] with the workspace exclusion.
+If the variable is empty or unset and an applicable conftest
+configuration file exists, or the provider cannot determine whether one
+exists, it rejects the target rather than discarding a possible user
+ignore rule.
+Non\-overlapping local targets and remote clones do not need this
+workspace ignore rule.
+.PP
+To resolve this error, select a file or directory outside both workspace
+boundaries that does not contain either boundary.
+Alternatively, set \f[B]CONFTEST_IGNORE\f[R] to the effective ignore
+expression, including the file\(cqs existing \f[B]ignore\f[R] value.
+If the file defines no ignore rule, use a valid expression that matches
+no file paths:
+.IP
+.EX
+export CONFTEST_IGNORE=\(aq\(ha$\(aq
+.EE
+.PP
+Other conftest configuration settings continue to apply.
+The provider checks configuration in conftest\(cqs working directory and
+resolves a relative \f[B]CONFTEST_CONFIG_FILE\f[R] from that directory.
 .SH ENVIRONMENT
+.TP
+\f[B]CONFTEST_IGNORE\f[R]
+Conftest ignore regular expression.
+For local directory targets that contain a workspace, the provider
+combines a nonempty value with the workspace exclusion.
+See \f[B]Conftest ignore configuration\f[R] above.
+.TP
+\f[B]CONFTEST_CONFIG_FILE\f[R]
+Path to the conftest configuration file.
+The provider resolves a relative path from conftest\(cqs working
+directory when checking for a configuration that may define an ignore
+rule.
 .TP
 \f[B]COMPLYTIME_MACHINE_ID_FILE\f[R]
 Path to the machine\-id file used for host identification in evidence
@@ -87,10 +194,37 @@ Requires the following tools at runtime:
 .TP
 \f[B]conftest\f[R]
 Open Policy Agent test runner for structured data.
-Not currently packaged in Fedora; must be installed separately.
-See: \c
-.UR https://www.conftest.dev
+Install conftest and make it available on \f[B]PATH\f[R].
+The provider uses behavior\-based compatibility rather than an
+exact\-version runtime check.
+It does not require successful version detection or embedded module
+metadata; a source build reporting \f[B]dev\f[R] is not rejected for
+that reason.
+Input\-safety, execution, and structured\-output validation still apply.
+.RS
+.PP
+The real\-tool regression suite has been exercised against
+\f[B]0.68.2\f[R] and \f[B]0.71.1\f[R].
+It runs against any installed executable, without skipping based on
+version.
+These runs establish tested behavior, not compatibility with every
+future release.
+Local CI does not install conftest, so recurring changing\-release
+coverage remains a tracked follow\-up: \c
+.UR https://github.com/complytime/complyctl/issues/957
 .UE \c
+\&.
+.PP
+To record the installed version when diagnosing an issue:
+.IP
+.EX
+conftest \-\-version
+.EE
+.PP
+Releases: \c
+.UR https://github.com/open-policy-agent/conftest/releases
+.UE \c
+.RE
 .TP
 \f[B]git\f[R]
 Required for cloning remote repositories when \f[B]url\f[R] is

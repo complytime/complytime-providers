@@ -266,6 +266,17 @@ func TestDescribe_Variables(t *testing.T) {
 		"url and input_path should be declared as an optional group")
 }
 
+func TestDescribe_UsesToolPresenceOnly(t *testing.T) {
+	runner := &mockRunner{}
+	srv := New(ServerOptions{Runner: runner,
+		ToolChecker: func() ([]string, error) { return nil, nil }})
+	response, err := srv.Describe(context.Background(), &provider.DescribeRequest{})
+	require.NoError(t, err)
+	assert.True(t, response.Healthy)
+	assert.Empty(t, response.ErrorMessage)
+	assert.Empty(t, runner.calls)
+}
+
 // --- Generate tests ---
 
 func TestGenerate_EmptyConfiguration(t *testing.T) {
@@ -1043,11 +1054,15 @@ func TestScan_LocalPath_StatFailure(t *testing.T) {
 	workDir := t.TempDir()
 	writeScanConfig(t, workDir)
 
-	nonexistentPath := filepath.Join(t.TempDir(), "vanished")
-	runner := conftestRunner(conftestHappyJSON)
+	inputPath := filepath.Join(t.TempDir(), "vanished")
+	require.NoError(t, os.WriteFile(inputPath, []byte("{}"), 0600))
+	runner := &mockRunner{callFn: func(_ string, _ []string) ([]byte, error) {
+		require.NoError(t, os.Remove(inputPath))
+		return []byte(conftestHappyJSON), nil
+	}}
 	ldr := &mockLoader{
 		loadFn: func(_ provider.Target, _ string) (string, error) {
-			return nonexistentPath, nil
+			return inputPath, nil
 		},
 	}
 
@@ -1058,7 +1073,7 @@ func TestScan_LocalPath_StatFailure(t *testing.T) {
 		WorkspaceDir: workDir,
 	})
 	req := makeScanRequest(t, []provider.Target{
-		localTarget(t, nonexistentPath, "ghcr.io/org/bundle:dev"),
+		localTarget(t, inputPath, "ghcr.io/org/bundle:dev"),
 	})
 	resp, err := srv.Scan(context.Background(), req)
 	require.NoError(t, err)
@@ -1317,6 +1332,7 @@ func TestScan_RemoteURL_WithScanPath(t *testing.T) {
 	writeScanConfig(t, workDir)
 
 	scanSubPath := filepath.Join(t.TempDir(), "configs", "k8s")
+	require.NoError(t, os.MkdirAll(scanSubPath, 0750))
 	var conftestTestPath string
 	runner := &mockRunner{
 		callFn: func(name string, args []string) ([]byte, error) {
@@ -1449,9 +1465,12 @@ func TestScan_ToolCheckFailure(t *testing.T) {
 	})
 	target := localTarget(t, t.TempDir(), "ghcr.io/org/bundle:dev")
 	req := makeScanRequest(t, []provider.Target{target})
-	_, err := srv.Scan(context.Background(), req)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "conftest")
+	resp, err := srv.Scan(context.Background(), req)
+	require.NoError(t, err)
+	require.Len(t, resp.Errors, 1)
+	assert.Contains(t, resp.Errors[0], target.TargetID)
+	assert.Contains(t, resp.Errors[0], "install conftest and make it available on PATH")
+	assert.Empty(t, resp.Assessments)
 }
 
 func TestScan_MissingBundleRef(t *testing.T) {

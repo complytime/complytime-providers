@@ -28,6 +28,8 @@ import (
 
 var safeBranchPattern = regexp.MustCompile(`^[a-zA-Z0-9._/-]+$`)
 
+const conftestNoFilesFound = "Error: running test: parse files: no files found"
+
 var _ provider.Provider = (*ProviderServer)(nil)
 
 // ServerOptions configures the ProviderServer dependencies. Zero-value fields
@@ -41,7 +43,10 @@ type ServerOptions struct {
 
 // ProviderServer implements the provider.Provider interface for the OPA provider.
 type ProviderServer struct {
-	opts ServerOptions
+	opts                 ServerOptions
+	detectConftestConfig func(string) (string, error)
+	localTraversal       localTraversal
+	identifyFile         identityFunc
 }
 
 // New returns a new ProviderServer with the given options. Zero-value fields
@@ -59,7 +64,11 @@ func New(opts ServerOptions) *ProviderServer {
 	if opts.WorkspaceDir == "" {
 		opts.WorkspaceDir = provider.WorkspaceDir
 	}
-	return &ProviderServer{opts: opts}
+	return &ProviderServer{
+		opts: opts, detectConftestConfig: detectConftestConfig,
+		localTraversal: localTraversal{readDir: os.ReadDir, lstat: os.Lstat},
+		identifyFile:   fileIdentityOf,
+	}
 }
 
 // Describe returns the provider metadata and health status.
@@ -276,7 +285,7 @@ func mergeVariables(global, target map[string]string) map[string]string {
 
 // Scan evaluates configuration files against OPA policies using conftest.
 func (s *ProviderServer) Scan(
-	_ context.Context, req *provider.ScanRequest,
+	ctx context.Context, req *provider.ScanRequest,
 ) (*provider.ScanResponse, error) {
 	logger := hclog.Default()
 
@@ -290,6 +299,17 @@ func (s *ProviderServer) Scan(
 	}
 	if len(missing) > 0 {
 		logger.Warn("required tools missing", "tools", missing)
+		for _, tool := range missing {
+			if tool == "conftest" {
+				response := &provider.ScanResponse{}
+				for _, target := range req.Targets {
+					response.Errors = append(response.Errors, fmt.Sprintf(
+						"%s: install conftest and make it available on PATH; %v",
+						target.TargetID, toolcheck.FormatMissingToolsError(missing)))
+				}
+				return response, nil
+			}
+		}
 		return nil, toolcheck.FormatMissingToolsError(missing)
 	}
 
@@ -328,7 +348,7 @@ func (s *ProviderServer) Scan(
 			return nil, err
 		}
 		targetResults, writeErr := s.processTarget(
-			logger, target, cfg, bundleCache, scanCfg,
+			ctx, logger, target, cfg, bundleCache, scanCfg,
 		)
 		if writeErr != nil {
 			writeErrs = append(writeErrs, writeErr)
@@ -376,13 +396,27 @@ func resolveTargetScanConfig(
 	return scanCfg, nil
 }
 
+func targetError(target, targetURL, branch string, err error) *results.PerTargetResult {
+	return &results.PerTargetResult{
+		Target: target, TargetURL: targetURL, Branch: branch, Status: "error", Error: err.Error(),
+	}
+}
+
+func targetErrors(target string, err error) []*results.PerTargetResult {
+	return []*results.PerTargetResult{targetError(target, "", "", err)}
+}
+
 func (s *ProviderServer) processTarget(
+	ctx context.Context,
 	logger hclog.Logger,
 	target provider.Target,
 	cfg *config.Config,
 	bundleCache map[string]string,
 	scanCfg *generate.ScanConfig,
 ) ([]*results.PerTargetResult, error) {
+	if err := preflightCancellation(ctx); err != nil {
+		return targetErrors(target.TargetID, err), nil
+	}
 	repoURL := target.Variables[loader.VarURL]
 	inputPath := target.Variables[loader.VarInputPath]
 	branchesStr := target.Variables[loader.VarBranches]
@@ -396,11 +430,11 @@ func (s *ProviderServer) processTarget(
 	if err := validateTargetVariables(
 		repoURL, inputPath, branchesStr, scanPath, accessToken,
 	); err != nil {
-		return []*results.PerTargetResult{{
-			Target: target.TargetID,
-			Status: "error",
-			Error:  err.Error(),
-		}}, nil
+		return targetErrors(target.TargetID, err), nil
+	}
+
+	if repoURL == "" {
+		return s.processLocalInput(ctx, logger, target, cfg, bundleCache, scanCfg)
 	}
 
 	// Resolve policy directory: use scan config's PolicyDir (set by
@@ -410,23 +444,16 @@ func (s *ProviderServer) processTarget(
 		logger, target, cfg, bundleCache, scanCfg,
 	)
 	if err != nil {
-		return []*results.PerTargetResult{{
-			Target: target.TargetID,
-			Status: "error",
-			Error:  err.Error(),
-		}}, nil
+		return targetErrors(target.TargetID, err), nil
 	}
 
-	if repoURL != "" {
-		return s.processRemoteBranches(
-			logger, target, splitCSV(branchesStr), policyDir, cfg, scanCfg,
-		)
-	}
-
-	return s.processLocalInput(logger, target, policyDir, cfg, scanCfg)
+	return s.processRemoteBranches(
+		ctx, logger, target, splitCSV(branchesStr), policyDir, cfg, scanCfg,
+	)
 }
 
 func (s *ProviderServer) processRemoteBranches(
+	ctx context.Context,
 	logger hclog.Logger,
 	target provider.Target,
 	branches []string,
@@ -439,6 +466,10 @@ func (s *ProviderServer) processRemoteBranches(
 	repoURL := target.Variables[loader.VarURL]
 
 	for _, branch := range branches {
+		if err := preflightCancellation(ctx); err != nil {
+			return rejectTargetResults(targetResults, targetError(target.TargetID, repoURL, branch, err)),
+				errors.Join(writeErrs...)
+		}
 		branchTarget := provider.Target{
 			TargetID:  target.TargetID,
 			Variables: copyVars(target.Variables),
@@ -450,13 +481,7 @@ func (s *ProviderServer) processRemoteBranches(
 		if err != nil {
 			logger.Warn("data load failed",
 				"target", target.TargetID, "branch", branch, "error", err)
-			errResult := &results.PerTargetResult{
-				Target:    targets.RepoDisplayName(repoURL),
-				TargetURL: repoURL,
-				Branch:    branch,
-				Status:    "error",
-				Error:     err.Error(),
-			}
+			errResult := targetError(targets.RepoDisplayName(repoURL), repoURL, branch, err)
 			if writeErr := results.WritePerTargetResult(
 				errResult, cfg.ResultsDirPath(),
 			); writeErr != nil {
@@ -466,24 +491,31 @@ func (s *ProviderServer) processRemoteBranches(
 			continue
 		}
 
+		if err := s.inspectRemoteInput(ctx, inputPath, target.Variables, cfg.WorkspaceDir); err != nil {
+			errResult := targetError(target.TargetID, repoURL, branch, err)
+			// A rejected branch invalidates the configured target as a whole.
+			return rejectTargetResults(targetResults, errResult), errors.Join(writeErrs...)
+		}
+		if err := preflightCancellation(ctx); err != nil {
+			return rejectTargetResults(targetResults, targetError(target.TargetID, repoURL, branch, err)),
+				errors.Join(writeErrs...)
+		}
 		result, evalErr := s.evalAndParse(
 			logger, inputPath, policyDir,
-			targets.RepoDisplayName(repoURL), branch, cfg, scanCfg,
+			targets.RepoDisplayName(repoURL), branch, cfg, scanCfg, "", nil,
 		)
 		if result == nil && evalErr != nil {
 			logger.Warn("eval failed",
 				"target", target.TargetID, "branch", branch, "error", evalErr)
-			errResult := &results.PerTargetResult{
-				Target:    targets.RepoDisplayName(repoURL),
-				TargetURL: repoURL,
-				Branch:    branch,
-				Status:    "error",
-				Error:     evalErr.Error(),
-			}
+			errResult := targetError(target.TargetID, repoURL, branch, evalErr)
 			if writeErr := results.WritePerTargetResult(
 				errResult, cfg.ResultsDirPath(),
 			); writeErr != nil {
 				writeErrs = append(writeErrs, writeErr)
+			}
+			var selectionErr *inputSelectionError
+			if errors.As(evalErr, &selectionErr) {
+				return rejectTargetResults(targetResults, errResult), errors.Join(writeErrs...)
 			}
 			targetResults = append(targetResults, errResult)
 			continue
@@ -501,19 +533,17 @@ func (s *ProviderServer) processRemoteBranches(
 }
 
 func (s *ProviderServer) processLocalInput(
+	ctx context.Context,
 	logger hclog.Logger,
 	target provider.Target,
-	policyDir string,
 	cfg *config.Config,
+	bundleCache map[string]string,
 	scanCfg *generate.ScanConfig,
 ) ([]*results.PerTargetResult, error) {
 	inputPath, err := s.opts.Loader.Load(target, "")
 	if err != nil {
-		errResult := &results.PerTargetResult{
-			Target: target.TargetID,
-			Status: "error",
-			Error:  err.Error(),
-		}
+		errResult := targetError(target.TargetID, "", "", fmt.Errorf(
+			"cannot load local input; check the input path and filesystem access: %w", err))
 		if writeErr := results.WritePerTargetResult(
 			errResult, cfg.ResultsDirPath(),
 		); writeErr != nil {
@@ -522,15 +552,46 @@ func (s *ProviderServer) processLocalInput(
 		return []*results.PerTargetResult{errResult}, nil
 	}
 
+	if err := validateLocalWorkspaceTarget(inputPath, target.Variables, cfg.WorkspaceDir); err != nil {
+		return targetErrors(target.TargetID, err), nil
+	}
+
+	ignore, environment, overlapping, err := s.localWorkspaceIgnore(inputPath, target.Variables, cfg.WorkspaceDir)
+	if err != nil {
+		return targetErrors(target.TargetID, fmt.Errorf(
+			"cannot configure workspace exclusion; check input and workspace paths: %w", err)), nil
+	}
+	boundaries, err := workspaceBoundaries(target.Variables, cfg.WorkspaceDir)
+	if err != nil {
+		err = fmt.Errorf("cannot establish workspace boundaries; check workspace paths: %w", err)
+	} else {
+		var identities map[fileIdentity]string
+		identities, err = workspaceIdentities(ctx, boundaries, "", s.localTraversal, s.identifyFile)
+		if err == nil {
+			err = inspectInput(ctx, inputPath, boundaries, "", ignore, s.localTraversal, identities, s.identifyFile)
+		}
+	}
+	if err != nil {
+		return targetErrors(target.TargetID, err), nil
+	}
+	for _, boundary := range overlapping {
+		logger.Info("excluding workspace from local input", "workspace", boundary)
+	}
+
+	policyDir, err := s.resolveScanPolicyDir(logger, target, cfg, bundleCache, scanCfg)
+	if err != nil {
+		return targetErrors(target.TargetID, err), nil
+	}
+	if err := preflightCancellation(ctx); err != nil {
+		return targetErrors(target.TargetID, err), nil
+	}
+
 	result, evalErr := s.evalAndParse(
-		logger, inputPath, policyDir, inputPath, "", cfg, scanCfg,
+		logger, inputPath, policyDir, inputPath, "", cfg, scanCfg, ignore, environment,
 	)
 	if result == nil && evalErr != nil {
-		return []*results.PerTargetResult{{
-			Target: target.TargetID,
-			Status: "error",
-			Error:  evalErr.Error(),
-		}}, nil
+		return targetErrors(target.TargetID, fmt.Errorf(
+			"local evaluation failed; check input paths, filesystem access, and conftest output: %w", evalErr)), nil
 	}
 	if evalErr != nil {
 		return []*results.PerTargetResult{result}, evalErr
@@ -544,6 +605,8 @@ func (s *ProviderServer) evalAndParse(
 	inputPath, policyDir, displayName, branch string,
 	cfg *config.Config,
 	scanCfg *generate.ScanConfig,
+	ignore string,
+	environment []string,
 ) (*results.PerTargetResult, error) {
 	logger.Info("evaluating policies", "path", inputPath)
 
@@ -553,17 +616,35 @@ func (s *ProviderServer) evalAndParse(
 			generate.MappingFileName,
 		)
 	}
+	inputInfo, err := os.Stat(inputPath)
+	if err != nil {
+		return nil, fmt.Errorf("checking input %q; verify the input path and access: %w", inputPath, err)
+	}
 
-	raw, err := scan.EvalPolicyWithNamespaces(
-		inputPath, policyDir, scanCfg.IDs, s.opts.Runner,
+	raw, err := scan.EvalPolicyWithNamespacesAndIgnore(
+		inputPath, policyDir, scanCfg.IDs, s.opts.Runner, ignore, environment,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("evaluating policies: %w", err)
+		if inputInfo.IsDir() && containsConftestNoFilesFound(raw) {
+			return nil, &inputSelectionError{err: fmt.Errorf(
+				"no eligible input could be confirmed for directory %q; "+
+					"add a supported input or adjust ignore settings: %w", inputPath, err)}
+		}
+		return nil, fmt.Errorf("evaluating policies; check conftest output and policy configuration: %w", err)
 	}
 
 	result, err := results.ParseConftestOutput(raw, displayName, branch)
 	if err != nil {
-		return nil, fmt.Errorf("parsing conftest output: %w", err)
+		err = fmt.Errorf("parsing conftest output; check conftest output and policy configuration: %w", err)
+		if inputInfo.IsDir() {
+			return nil, &inputSelectionError{err: err}
+		}
+		return nil, err
+	}
+	if inputInfo.IsDir() && result.EvaluatedFiles == 0 {
+		return nil, &inputSelectionError{err: fmt.Errorf(
+			"no eligible input was confirmed for directory %q; "+
+				"add a supported input or adjust ignore settings", inputPath)}
 	}
 	result.InputPath = inputPath
 
@@ -603,6 +684,18 @@ func (s *ProviderServer) evalAndParse(
 	}
 
 	return result, nil
+}
+
+// Conftest v0.68.2 reports an empty effective input set as this exact line.
+// Matching the line, rather than arbitrary error text, avoids misclassifying
+// policy or filesystem errors that merely mention the same words.
+func containsConftestNoFilesFound(output []byte) bool {
+	for _, line := range strings.Split(string(output), "\n") {
+		if strings.TrimSpace(line) == conftestNoFilesFound {
+			return true
+		}
+	}
+	return false
 }
 
 // splitCSV splits a comma-separated string into trimmed, non-empty parts.
