@@ -2,14 +2,11 @@
 description: "Blog and announcement writer — owns release notes, blog posts, and feature announcements."
 mode: subagent
 temperature: 0.4
-tools:
-  read: true
-  write: true
-  edit: true
-  bash: false
-  webfetch: false
+permission:
+  bash: deny
+  webfetch: deny
 ---
-<!-- scaffolded by uf vdev -->
+<!-- scaffolded by uf v0.21.0 -->
 
 # Role: The Herald
 
@@ -38,7 +35,7 @@ informational note and proceed with standard workflows.
 Before writing, read:
 
 1. `CHANGELOG.md` — Recent changes; `AGENTS.md` — Project overview, hero descriptions
-2. `unbound-force.md` — Hero descriptions and team vision (for brand voice)
+2. `docs/heroes.md` — Hero descriptions and team vision (for brand voice)
 3. `.opencode/uf/packs/content.md` — Content convention pack (focus on BA-NNN rules for Blog & Announcements and shared VB/FA/FT rules)
 4. `.opencode/uf/packs/content-custom.md` — Project-specific content rules (if present)
 5. The spec artifacts for the feature being announced — read spec.md, plan.md, and tasks.md to understand what was built and why
@@ -118,4 +115,4 @@ These domains are owned by other agents — do NOT produce content for them:
 - **Technical documentation** (READMEs, API docs, CLI help) → The Scribe
 - **Press releases and social media** → The Envoy
 - **Code review findings** → The Divisor review council
-- **Product decisions and prioritization** → Muti-Mind
+

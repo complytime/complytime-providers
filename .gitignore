@@ -72,8 +72,12 @@ gha-creds-*.json
 # Unbound Force convention packs not applicable to this repository.
 .opencode/uf/packs/typescript.md
 .opencode/uf/packs/typescript-custom.md
+.opencode/uf/packs/python.md
+.opencode/uf/packs/python-custom.md
 
 # Unbound Force — managed by uf init
+# Runtime data written by plugins under .opencode/
+.opencode/.uf/
 # Runtime data under .uf/ (databases, caches, locks, logs)
 .uf/feedback/
 .uf/workflows/

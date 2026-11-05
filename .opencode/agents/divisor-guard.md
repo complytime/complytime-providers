@@ -2,12 +2,12 @@
 description: "Intent drift detector — owns plan alignment, zero-waste, constitution, and cross-component value."
 mode: subagent
 temperature: 0.1
-tools:
-  write: false
-  edit: false
-  bash: false
+permission:
+  edit: deny
+  bash: deny
+  webfetch: deny
 ---
-<!-- scaffolded by uf vdev -->
+<!-- scaffolded by uf v0.21.0 -->
 
 # Role: The Guard
 
@@ -103,6 +103,18 @@ Evaluate all recent changes (staged, unstaged, and untracked files). Use `git di
   - Was README.md updated if project description or install steps changed?
 - If documentation updates were needed but missing, flag as MEDIUM.
 - Skip for internal-only changes (refactoring, test-only, CI-only).
+
+#### 7. Deterministic Delegation Discipline
+
+Delegated mechanical work is bound to repo tooling through the delegation tools' parameter contracts, not through prose: `uf_delegate_command` takes `task_classification` (`deterministic` or `judgment`), and work classified `deterministic` must carry either `skill` (a repo skill or script reference the tool verifies to exist before spawning) or `skill_absent_reason` (a recorded reason no repo skill or script applies). The Swarm path's spawn tool, `replicator_forge_spawn_subtask`, takes the same `task_classification`, `skill`, and `skill_absent_reason` fields. The two skill fields are mutually exclusive and valid only on deterministic-classified calls.
+
+`uf_delegate_command` records the classification, the resolved skill reference, and any recorded reason in its checkpoint data and success envelope -- that record, not prompt reconstruction, is the audit source for delegated work.
+
+- Does any new or modified delegation instruction (in commands, agents, or skills) bind mechanical work to a skill or script through prose only, instead of through the parameter contract? Flag prose-only binding -- it has no enforcement behind it.
+- Does a delegation classified `deterministic` carry neither a `skill` reference nor a `skill_absent_reason` -- in `uf_delegate_command` call sites in the diff, or in delegations audited through their checkpoint data? Flag it; the tool rejects deterministic calls that supply neither, before any child session spawns.
+- Is a recorded `skill_absent_reason` vacuous -- a reason that does not state what was searched for or what was found (`n/a` and `not needed` are vacuous; a reason naming the searched locations and the absence found is substantive)? Flag vacuous reasons; the absence record is an auditable justification, not a free pass.
+- Does a Swarm-path spawn call for a deterministic `[P]` task -- parallel delegation through the forge subtask tool, which enforces the same fail-closed parameter contract as `uf_delegate_command` -- omit `task_classification`, or omit the `skill` reference or `skill_absent_reason` that deterministic work requires? Audit the call's parameters, not the subtask prompt's prose. Flag the omission.
+- Do not flag judgment-classified delegations, or delegations that pass `command_path` (where the command file is itself the procedure of record), for carrying no skill fields -- the skill requirement binds deterministic-classified work only.
 
 ### Out of Scope
 

@@ -9,7 +9,7 @@ tools:
   bash: false
   webfetch: false
 ---
-<!-- scaffolded by uf vdev -->
+<!-- scaffolded by uf v0.21.0 -->
 
 # Constitution Alignment Checker
 

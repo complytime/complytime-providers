@@ -17,7 +17,4 @@
 ## Risks / Trade-offs
 
 <!-- Known risks and accepted trade-offs -->
-<!-- scaffolded by uf vv0.6.1 -->
-<!-- scaffolded by uf vdev -->
-<!-- scaffolded by uf vdev -->
-<!-- scaffolded by uf vv0.12.0 -->
+<!-- scaffolded by uf v0.21.0 -->
