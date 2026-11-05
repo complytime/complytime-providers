@@ -59,6 +59,9 @@ replaceable input location.
 
 #### Scenario: OPA coordinate points to evaluated input
 
+Legacy-log compatibility only: this baseline scenario name is retained for OpenSpec
+delta matching. New evaluations reference preserved output, not input.
+
 - **GIVEN** a legacy Evaluation Log whose OPA coordinate points to evaluated input
 - **WHEN** the upgraded provider performs a new evaluation
 - **THEN** it leaves the legacy log unchanged
@@ -97,6 +100,9 @@ regardless of whether its evaluated input was a file or directory.
 
 #### Scenario: OPA omits digest for directory inputs
 
+Legacy-log compatibility only: the unchanged scenario name does not exempt new
+evaluations from the retained-result digest requirement.
+
 - **GIVEN** a legacy OPA Evaluation Log omitting a digest for directory input evidence
 - **WHEN** the upgraded provider evaluates that directory again
 - **THEN** it leaves the legacy log unchanged
@@ -114,8 +120,8 @@ regardless of whether its evaluated input was a file or directory.
 Each `Evidence.Source.ReferenceID` MUST match a `MappingReference.ID` in the same
 response. References and evidence IDs MUST distinguish artifact instances using
 provider-specific artifact kind and evaluation identity. A mapping reference's URL
-MUST resolve to the same retained file as the coordinate when both are interpreted
-against the workspace root. Repeated use of the
+MUST be a properly escaped absolute `file://` URL identifying the same retained
+file as the coordinate resolved against the workspace root. Repeated use of the
 same artifact across assessments MUST share its identity and mapping reference.
 
 `Evidence.ID` is provider-internal and need not equal `MappingReference.ID`.
@@ -145,6 +151,9 @@ use `ampel_<token>`, `snappy_<token>`, `openscap-arf_<token>`, or
 
 #### Scenario: OPA declares input mapping reference
 
+Legacy-log compatibility only: the unchanged scenario name describes historical
+input references; new evaluations declare result-file references.
+
 - **GIVEN** a legacy OPA Evaluation Log declaring an input mapping reference
 - **WHEN** the upgraded provider evaluates the target again
 - **THEN** it leaves the legacy reference unchanged
@@ -166,8 +175,13 @@ use `ampel_<token>`, `snappy_<token>`, `openscap-arf_<token>`, or
 
 Each provider's man page MUST include an `EVIDENCE` section describing retained
 artifacts, their production, their representation in the Evaluation Log, and
-the preservation guarantee. It MUST explain that output retention is enabled
-by default and has no automatic cleanup in this feature.
+the preservation guarantee. It MUST explain that output retention means local
+preservation across scans, is always on, and has no automatic cleanup in
+this feature. It MUST identify the Gemara Evaluation Log as the source of truth for
+the evidence set and distinguish reported evidence from unreferenced supporting
+outputs. It MUST explain that collection, validation of collected copies, and
+optional packaging are a separate future complyctl capability, while storage and
+long-term retention remain customer-owned.
 
 #### Scenario: OpenSCAP man page describes ARF evidence
 
@@ -189,6 +203,13 @@ by default and has no automatic cleanup in this feature.
   re-evaluation is not guaranteed
 - **AND** explains that unchanged findings do not prove the evaluated input was unchanged
 - **AND** distinguishes embedded conftest input filenames from retained evidence coordinates
+
+#### Scenario: Owner reads evidence from an elevated scan
+
+- **WHEN** a user reads the provider's evidence documentation
+- **THEN** it explains original-caller ownership, approved modes, and directory traversal needs
+- **AND** it distinguishes elevated execution on behalf of a user from direct root invocation
+- **AND** it describes verifying owned evidence without elevating the reader
 
 ### Requirement: Expanded FILES section in man pages
 
@@ -215,7 +236,36 @@ including readable context directories, timestamped evaluation directories, and
   scan configuration, mapping, and generated directories
 - **AND** identifies the clone directory as replaceable working data
 
+#### Scenario: Legacy normalized summaries are documented as discontinued
+
+- **WHEN** a user reads Ampel or OPA artifact documentation
+- **THEN** it states legacy normalized summaries are no longer written
+- **AND** existing summary files remain untouched and are not current scan results
+
 ## ADDED Requirements
+
+### Requirement: Evaluation Log defines the evidence set
+
+Providers MUST explicitly report the files selected as evidence through the
+`Evidence` entries and linked mapping references carried into the Gemara Evaluation
+Log. Every reported evidence artifact MUST be preserved and have a coordinate,
+digest, and matching mapping reference. A file MUST NOT be treated as reported
+evidence solely because it is stored beside an evidence artifact. Supporting
+outputs MUST NOT implicitly extend the evidence set defined by the log.
+
+#### Scenario: Supporting outputs accompany reported evidence
+
+- **GIVEN** an OpenSCAP evaluation preserves ARF, XCCDF results, and supporting metadata
+- **WHEN** the provider reports only the ARF as evidence in the Evaluation Log
+- **THEN** the log's evidence set includes the ARF, not the unreferenced supporting files
+- **AND** retaining supporting files does not require adding implicit evidence entries
+
+#### Scenario: Historical log identifies every reported artifact
+
+- **GIVEN** a completed evaluation with evidence recorded in a Gemara Evaluation Log
+- **WHEN** later scans evaluate the same targets
+- **THEN** every evidence entry in the earlier log still identifies its original preserved file
+- **AND** each file matches the earlier log's recorded digest without packaging or uploads
 
 ### Requirement: Consistent evaluation collection timestamp
 
@@ -239,21 +289,63 @@ on clock precision or ordering.
 
 ### Requirement: Workspace-relative evidence references
 
-Evidence coordinates MUST be filesystem paths relative to the workspace root
-containing `.complytime`. Mapping-reference URLs MUST be escaped relative URI
-references to the same artifacts, interpreted against that root rather than the
-Evaluation Log's directory. Documentation MUST explain the base and that the log
-and referenced workspace layout must travel together to preserve resolution.
+Evidence coordinates MUST be filesystem paths relative to complyctl's resolved
+workspace root containing `.complytime`. Mapping-reference URLs MUST remain escaped
+absolute `file://` URLs identifying the same artifacts. Documentation MUST explain
+coordinate resolution against the selected root, not the log's directory or the
+consumer's current directory. The evidence owner MUST be able to locate and
+digest-verify evidence in the originating workspace without packaging.
 
-#### Scenario: Relocated workspace
+#### Scenario: In-place evidence resolution
 
-- **GIVEN** an Evaluation Log and its referenced workspace tree are copied together
-- **WHEN** an auditor resolves a coordinate and its mapping-reference URL against the copied workspace root
+- **GIVEN** an Evaluation Log and its evidence remain in the originating workspace
+- **WHEN** the evidence owner resolves a coordinate against that root and reads its absolute file URL
 - **THEN** both identify the same retained artifact
 - **AND** the artifact's digest matches the Evaluation Log
+- **AND** resolution does not depend on the log's directory or the auditor's current directory
+- **AND** no collection, package, or storage integration is required
+
+#### Scenario: Copied workspace does not relocate absolute URLs
+
+- **GIVEN** a log and its referenced workspace tree are copied to a different root
+- **WHEN** a consumer resolves a coordinate against the copied workspace root
+- **THEN** the coordinate identifies the copied artifact with the recorded digest
+- **AND** the unchanged absolute file URL still describes the originating filesystem
+- **AND** this change does not promise automatic URL relocation or implement packaging
 
 #### Scenario: URL contains special characters
 
 - **WHEN** the retained workspace path contains spaces, percent signs, or non-ASCII characters
-- **THEN** the relative URI reference is properly escaped
-- **AND** resolving it against the workspace root identifies the same file as the coordinate
+- **THEN** the absolute file URL is properly escaped
+- **AND** decoding it identifies the same file as the coordinate resolved against the workspace root
+
+### Requirement: Provider workspace root comes from process working directory
+
+Providers MUST resolve their process working directory once to an absolute workspace
+root and use it for generated artifacts and evidence coordinates. Providers MUST
+return an RPC error before evaluation if root resolution fails. They MUST NOT
+independently select another root from environment variables or require an
+additional workspace-confirmation message. Launcher alignment is an external
+compatibility prerequisite defined in design D8.
+
+#### Scenario: Non-default workspace
+
+- **GIVEN** a compatible launcher supplies directory B as child CWD
+- **AND** the launcher itself was invoked from a different directory A
+- **WHEN** the provider runs Generate and Scan
+- **THEN** it writes generated artifacts and evidence beneath B's `.complytime`
+- **AND** every evidence coordinate resolves against B to its preserved artifact
+- **AND** every absolute file URL identifies that same artifact with the recorded digest
+- **AND** the providers do not write their generated artifacts or evidence beneath A
+
+#### Scenario: Environment does not override the supplied working directory
+
+- **GIVEN** the provider's process CWD is B and an inherited workspace variable names A
+- **WHEN** the provider initializes the evaluation workspace
+- **THEN** it uses B as the coordinate base and generated-artifact root
+- **AND** it does not reinterpret complyctl's workspace-selection precedence
+
+#### Scenario: Workspace root cannot be resolved
+
+- **WHEN** resolving the provider process working directory fails
+- **THEN** the RPC returns an operational error before evaluation or evidence publication
