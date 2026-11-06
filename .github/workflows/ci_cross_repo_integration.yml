@@ -33,6 +33,12 @@ jobs:
                   go-version-file: './go.mod'
                   cache: false
 
+            - name: Run released-baseline shell tests
+              run: |
+                  bash .github/scripts/test/resolve-complyctl-release-baseline_test.sh
+                  bash .github/scripts/test/validate-released-complyctl-checkout_test.sh
+                  bash .github/scripts/test/released-baseline-diagnostics_test.sh
+
             - name: Resolve released complyctl baseline
               id: resolve
               run: bash .github/scripts/resolve-complyctl-release-baseline.sh
@@ -67,17 +73,6 @@ jobs:
                   repository: complytime/complyctl
                   ref: ${{ needs.resolve-released-baseline.outputs.commit }}
                   path: _released_complyctl
-                  persist-credentials: false
-
-            # The current provider stores generated artifacts in content-keyed
-            # directories. The v1.1.0 harness predates that contract, so use a
-            # pinned current harness while retaining the released CLI binary.
-            - name: Checkout compatibility integration harness
-              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-              with:
-                  repository: complytime/complyctl
-                  ref: d4ff7cc563d6b60dc725c25da225042dd03363ce
-                  path: _compatibility_harness
                   persist-credentials: false
 
             - name: Verify released complyctl checkout
@@ -145,6 +140,17 @@ jobs:
                       exit 1
                   fi
 
+            - name: Test providers against released complyctl baseline
+              working-directory: _released_providers
+              env:
+                  COMPLYCTL_TAG: ${{ needs.resolve-released-baseline.outputs.tag }}
+              run: |
+                  if ! GOFLAGS=-mod=mod make test; then
+                      printf 'released-provider-test: provider test failed for %s\n' \
+                          "$COMPLYCTL_TAG" >&2
+                      exit 1
+                  fi
+
             - name: Build released complyctl baseline
               working-directory: _released_complyctl
               env:
@@ -195,9 +201,7 @@ jobs:
                   PROVIDERS_BIN_DIR: ${{ github.workspace }}/_released_providers/bin
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
-                  cp ../_compatibility_harness/tests/cross-repo/cross_repo_integration_test.sh \
-                      ../_released_complyctl/tests/cross-repo/
-                  if ! timeout 120 bash ../_released_complyctl/tests/cross-repo/cross_repo_integration_test.sh; then
+                  if ! make -C ../_released_complyctl test-cross-repo; then
                       printf 'released-integration: cross-repo integration failed for %s\n' \
                           "$COMPLYCTL_TAG" >&2
                       exit 1

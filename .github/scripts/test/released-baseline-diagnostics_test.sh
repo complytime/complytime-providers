@@ -19,8 +19,15 @@ require_workflow_text() {
 
 require_workflow_text 'validate-released-complyctl-checkout.sh'
 require_workflow_text 'released-provider-build: provider build failed for %s\n'
+require_workflow_text 'released-provider-test: provider test failed for %s\n'
 require_workflow_text 'released-integration: cross-repo integration failed for %s\n'
+require_workflow_text 'make -C ../_released_complyctl test-cross-repo'
 # shellcheck disable=SC2016 # The GitHub Actions expression must remain literal.
 require_workflow_text 'COMPLYCTL_TAG: ${{ needs.resolve-released-baseline.outputs.tag }}'
+
+if grep -Fq '_compatibility_harness' "$WORKFLOW"; then
+    printf 'temporary compatibility harness checkout is still present\n' >&2
+    exit 1
+fi
 
 printf 'released baseline diagnostic tests passed\n'
