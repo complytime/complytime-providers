@@ -30,4 +30,10 @@ if grep -Fq '_compatibility_harness' "$WORKFLOW"; then
     exit 1
 fi
 
+if [[ $(grep -Fc 'CONFTEST_ARCHIVE_SHA256:' "$WORKFLOW") != 1 ]] || \
+    [[ $(grep -Fc 'CONFTEST_VERSION:' "$WORKFLOW") != 1 ]]; then
+    printf 'conftest release metadata must have one workflow-level definition\n' >&2
+    exit 1
+fi
+
 printf 'released baseline diagnostic tests passed\n'

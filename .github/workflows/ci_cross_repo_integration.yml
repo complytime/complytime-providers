@@ -13,6 +13,10 @@ on:
 permissions:
     contents: read
 
+env:
+    CONFTEST_ARCHIVE_SHA256: e8144c6d6d2ae0260b869caa60c7c262a1f95ac63ec1e5d2fb19be452d606347
+    CONFTEST_VERSION: 0.68.2
+
 jobs:
     resolve-released-baseline:
         name: Resolve released complyctl baseline
@@ -181,9 +185,6 @@ jobs:
                   version: v1.4.2
 
             - name: Install conftest
-              env:
-                  CONFTEST_ARCHIVE_SHA256: e8144c6d6d2ae0260b869caa60c7c262a1f95ac63ec1e5d2fb19be452d606347
-                  CONFTEST_VERSION: 0.68.2
               run: |
                   archive="conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
                   curl --fail --location --proto '=https' --tlsv1.2 --output "$archive" \
@@ -269,9 +270,6 @@ jobs:
                   version: v1.4.2
 
             - name: Install conftest
-              env:
-                  CONFTEST_ARCHIVE_SHA256: e8144c6d6d2ae0260b869caa60c7c262a1f95ac63ec1e5d2fb19be452d606347
-                  CONFTEST_VERSION: 0.68.2
               run: |
                   archive="conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
                   curl --fail --location --proto '=https' --tlsv1.2 --output "$archive" \
