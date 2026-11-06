@@ -13,24 +13,21 @@ build and runtime validation called out by that work.
 
 ## Upstream Verification
 
-On 2026-11-02, `gh pr view 944 --repo complytime/complyctl` reported that PR
-#944 is `OPEN`. A structured query returned `mergedAt: null` and
-`mergeCommit: null`, so there is no merged commit to record. The PR summary
-states that the documentation hands downstream validation to
-`complytime-providers#187`, but that documentation is not merged. Task 1.1
-remains incomplete until the PR merges and its merged documentation can be
-verified.
+On 2026-11-03, `gh pr view 944 --repo complytime/complyctl` reported that PR
+#944 merged at `b6aebd721deebf05d48a17c8e5fb25b3c2e271ee`. Its merged summary
+retains downstream provider build and runtime validation for
+`complytime-providers#187`, while complyctl owns static public API compatibility
+analysis. Task 1.1 is complete.
 
 ## Released Harness Verification
 
-On 2026-11-02, the direct dependency in this repository's `go.mod` was
-`github.com/complytime/complyctl v1.1.0`. GitHub's releases API identified
-`v1.1.0` as the latest stable release, published on 2026-10-02. The tag
-resolves to commit `f10129ea815298cea24d337ac0a0399237a07566`; it is the
-highest stable tag in the required v1 compatibility line. Older v1 release
-`v1.0.0` and v1 prerelease tags exist, but none supersede `v1.1.0`.
+On 2026-11-06, the direct dependency in this repository's `go.mod` was
+`github.com/complytime/complyctl v1.1.0`. The release resolver selected
+`v1.2.0`, published on 2026-11-06, as the highest stable tag in the required
+v1 compatibility line. The tag resolves to commit
+`f10c1426f3674bbcb967a8aad8ca529b32e21212`.
 
-The `v1.1.0` source tree contains the required release-side interface:
+The `v1.2.0` source tree contains the required release-side interface:
 
 - `Makefile` defines `build`, which compiles `./cmd/...` into `bin/`, including
   `complyctl` and `mock-oci-registry`.
@@ -44,10 +41,10 @@ The `v1.1.0` source tree contains the required release-side interface:
   Go version from both repositories, so the providers' declared Go `1.26.10`
   remains suitable.
 
-The current integration workflow already meets the harness's non-runner
+The current integration workflow meets the harness's non-runner
 prerequisites: it builds both repositories, installs Snappy, Ampel, and
 conftest, and provides `PROVIDERS_BIN_DIR` plus `GITHUB_TOKEN`. Therefore,
-`v1.1.0` can provide the required build target and test harness. The released
+`v1.2.0` can provide the required build target and test harness. The released
 baseline job must check all prerequisites, including `jq` and `curl`, so a
 future selected release fails with a preparation diagnostic rather than a shell
 error.
@@ -102,9 +99,11 @@ major, or a breaking v0 minor, with intentionally incompatible APIs.
 ### Reuse the existing integration harness with prerequisite checks
 
 The released checkout remains the source of the `test-cross-repo` harness. The
-job verifies that its checkout HEAD equals the resolved commit and verifies
-required scripts and build targets before running it, so older releases fail
-with a clear preparation diagnostic instead of an ambiguous shell failure.
+job verifies that its checkout HEAD equals the resolved commit, verifies required
+scripts and build targets, and invokes its `make test-cross-repo` target. This
+ensures the selected release supplies both the CLI and harness, while older
+releases fail with a clear preparation diagnostic instead of an ambiguous shell
+failure.
 
 Copying the harness into this repository would decouple it from released
 complyctl, but would duplicate cross-repository test ownership and risk drift.
@@ -143,9 +142,8 @@ change:
   released-checkout prerequisite, and workflow diagnostics.
 - `yamllint .github/workflows/ci_cross_repo_integration.yml` exited 0.
 
-`actionlint` is not installed in the local environment. Task 2.4 remains
-pending until an available GitHub Actions workflow linter and CI run can verify
-the released baseline tag and commit.
+Task 2.4 remains pending until a CI run verifies that the released-baseline job
+publishes the selected tag and commit.
 
 ## Migration Plan
 
