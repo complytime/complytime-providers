@@ -96,6 +96,14 @@ $COMMIT_B	refs/tags/v2.3.0
 EOF
     assert_output "tag=v2.3.0
 commit=$COMMIT_B"
+
+    GITHUB_OUTPUT="$temporary_directory/github-output" \
+        bash "$RESOLVER" --module-file "$temporary_directory/go.mod" \
+        --tags-file "$temporary_directory/tags" > /dev/null
+    grep -Fxq 'module=github.com/complytime/complyctl/v2' "$temporary_directory/github-output" || {
+        printf 'expected resolver to emit the v2 module path\n' >&2
+        exit 1
+    }
 }
 
 test_no_baseline_fails_closed() {

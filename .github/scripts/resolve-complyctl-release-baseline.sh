@@ -47,16 +47,16 @@ done
 
 # go mod edit provides the authoritative module parser, avoiding fragile parsing
 # of require blocks and comments in go.mod.
-dependency_version=$(go mod edit -json "$module_file" | awk -v module="$COMPLYCTL_MODULE" '
-    function emit_version() {
+dependency=$(go mod edit -json "$module_file" | awk -v module="$COMPLYCTL_MODULE" '
+    function emit_dependency() {
         if (wanted && !indirect && version != "") {
-            print version
+            print path "\t" version
             found = 1
             exit
         }
     }
     /"Path":/ {
-        emit_version()
+        emit_dependency()
         path = $2
         gsub(/[",]/, "", path)
         wanted = path == module || path ~ ("^" module "/v[2-9][0-9]*$")
@@ -68,10 +68,12 @@ dependency_version=$(go mod edit -json "$module_file" | awk -v module="$COMPLYCT
         gsub(/[",]/, "", version)
     }
     wanted && /"Indirect": true/ { indirect = 1 }
-    END { if (!found) emit_version() }
+    END { if (!found) emit_dependency() }
 ')
 
-[[ -n "$dependency_version" ]] || die "missing direct $COMPLYCTL_MODULE dependency"
+IFS=$'\t' read -r dependency_module dependency_version <<< "$dependency"
+[[ -n "$dependency_module" && -n "$dependency_version" ]] || \
+    die "missing direct $COMPLYCTL_MODULE dependency"
 
 if [[ ! "$dependency_version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
     die "dependency version is not a stable semantic version: $dependency_version"
@@ -132,5 +134,6 @@ selected_commit=$(awk -v tag="$selected_tag" '
 
 printf 'tag=%s\ncommit=%s\n' "$selected_tag" "$selected_commit"
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-    printf 'tag=%s\ncommit=%s\n' "$selected_tag" "$selected_commit" >> "$GITHUB_OUTPUT"
+    printf 'module=%s\ntag=%s\ncommit=%s\n' \
+        "$dependency_module" "$selected_tag" "$selected_commit" >> "$GITHUB_OUTPUT"
 fi

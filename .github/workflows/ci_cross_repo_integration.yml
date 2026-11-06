@@ -22,6 +22,7 @@ jobs:
         name: Resolve released complyctl baseline
         runs-on: ubuntu-latest
         outputs:
+            module: ${{ steps.resolve.outputs.module }}
             tag: ${{ steps.resolve.outputs.tag }}
             commit: ${{ steps.resolve.outputs.commit }}
 
@@ -120,9 +121,10 @@ jobs:
             - name: Replace complyctl dependency in isolated workspace
               working-directory: _released_providers
               env:
+                  COMPLYCTL_MODULE: ${{ needs.resolve-released-baseline.outputs.module }}
                   COMPLYCTL_TAG: ${{ needs.resolve-released-baseline.outputs.tag }}
               run: |
-                  if ! go mod edit -replace=github.com/complytime/complyctl=../_released_complyctl; then
+                  if ! go mod edit -replace="$COMPLYCTL_MODULE"=../_released_complyctl; then
                       printf 'released-provider-build: could not configure providers for %s\n' \
                           "$COMPLYCTL_TAG" >&2
                       exit 1
