@@ -11,6 +11,9 @@
 
 ### Fixed
 
+- **ci**: Reject indirect, excluded, and replacement-only complyctl entries when resolving the
+  release baseline, report module parse failures with stage context, restore Renovate tracking
+  for the checksum-pinned Conftest release, and fix the shell-test lint failure.
 - **opa-provider**: Stop rejecting workspace identity collection merely because a resolvable directory symlink cycle revisits a directory, such as `cycle -> .` in a retained clone. Unrelated local and remote targets can then retain their results, including on subsequent scans, subject to the existing selected-input and identity checks. Unresolvable link loops still fail workspace inspection for every target using that workspace boundary. (Spec: `openspec/changes/opa-exclude-workspace-from-input/`)
 - **opa-provider**: Validate conftest compatibility through real-tool behavior tests rather than an exact-version runtime restriction. Release and source builds do not need version or module metadata to scan; actual execution, input-safety, and output-validation errors still fail the scan. (Spec: `openspec/changes/opa-exclude-workspace-from-input/`)
 - **opa-provider**: Discard all branch assessments for a configured remote target when any selected branch fails input-safety preflight or has no confirmed evaluated directory input. Preserve operational errors and other configured targets' assessments instead of reporting a partial passing target. (Spec: `openspec/changes/opa-exclude-workspace-from-input/`)

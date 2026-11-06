@@ -45,31 +45,19 @@ done
 
 [[ -r "$module_file" ]] || die "cannot read module file: $module_file"
 
-# go mod edit provides the authoritative module parser, avoiding fragile parsing
-# of require blocks and comments in go.mod.
-dependency=$(go mod edit -json "$module_file" | awk -v module="$COMPLYCTL_MODULE" '
-    function emit_dependency() {
-        if (wanted && !indirect && version != "") {
-            print path "\t" version
-            found = 1
-            exit
-        }
-    }
-    /"Path":/ {
-        emit_dependency()
-        path = $2
-        gsub(/[",]/, "", path)
-        wanted = path == module || path ~ ("^" module "/v[2-9][0-9]*$")
-        indirect = 0
-        version = ""
-    }
-    wanted && /"Version":/ {
-        version = $2
-        gsub(/[",]/, "", version)
-    }
-    wanted && /"Indirect": true/ { indirect = 1 }
-    END { if (!found) emit_dependency() }
-')
+command -v jq > /dev/null 2>&1 || die 'missing required command: jq'
+
+# Only Require entries define the compatibility line; Exclude and Replace
+# entries can contain the same module path without a direct dependency.
+module_json=$(go mod edit -json "$module_file") || \
+    die "could not parse module file: $module_file"
+dependency=$(jq -r --arg module_path "$COMPLYCTL_MODULE" '
+    [.Require[]?
+        | select(.Indirect != true)
+        | select(.Path == $module_path or
+            (.Path | ltrimstr($module_path) | test("^/v([2-9]|[1-9][0-9]+)$")))
+    ][0] // empty | [.Path, .Version] | @tsv
+' <<< "$module_json") || die "could not read module requirements: $module_file"
 
 IFS=$'\t' read -r dependency_module dependency_version <<< "$dependency"
 [[ -n "$dependency_module" && -n "$dependency_version" ]] || \

@@ -20,6 +20,7 @@ require_workflow_text() {
 require_workflow_text 'validate-released-complyctl-checkout.sh'
 require_workflow_text 'released-provider-build: provider build failed for %s\n'
 require_workflow_text 'released-provider-test: provider test failed for %s\n'
+# shellcheck disable=SC2016 # The GitHub Actions expression must remain literal.
 require_workflow_text 'COMPLYCTL_MODULE: ${{ needs.resolve-released-baseline.outputs.module }}'
 require_workflow_text 'released-integration: cross-repo integration failed for %s\n'
 require_workflow_text 'make -C ../_released_complyctl test-cross-repo'

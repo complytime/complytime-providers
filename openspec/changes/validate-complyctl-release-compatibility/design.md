@@ -92,6 +92,10 @@ same major for v1+ dependencies or the same minor for v0 dependencies. It
 rejects malformed and prerelease tags, emits the selected tag and commit, and
 fails closed when no baseline exists.
 
+The resolver uses `go mod edit -json` and `jq` to read only direct entries in
+`Require`. It ignores `Exclude` and `Replace` entries and reports malformed
+module files with a `release-baseline:` diagnostic.
+
 Using the declared dependency makes the check follow the compatibility promise
 being validated. Selecting the unrestricted latest tag could test a future
 major, or a breaking v0 minor, with intentionally incompatible APIs.
@@ -142,8 +146,24 @@ change:
   released-checkout prerequisite, and workflow diagnostics.
 - `yamllint .github/workflows/ci_cross_repo_integration.yml` exited 0.
 
-Task 2.4 remains pending until a CI run verifies that the released-baseline job
-publishes the selected tag and commit.
+On 2026-11-06, CI run `42226391757` passed the released-baseline resolution and
+integration jobs at provider commit `9f7cdd44787c770257ff3174e35791dea57d0bec`.
+Its report step published tag `v1.2.0` and commit
+`f10c1426f3674bbcb967a8aad8ca529b32e21212`. The CI actionlint check also passed.
+This supplies the CI reporting evidence for task 2.4.
+
+After the review fixes on 2026-11-06, local validation passed:
+
+- All three released-baseline shell test scripts, including regression cases
+  for exclusion-only, replacement-only, indirect, and malformed module files.
+- `shellcheck .github/scripts/*.sh .github/scripts/test/*.sh`.
+- `yamllint .github/workflows/ci_cross_repo_integration.yml` and actionlint
+  `v1.7.9` on the same workflow.
+- `make build`, `make test`, and `make lint`.
+- The configured Renovate regex extracts exactly one Conftest pin from the
+  workflow. Version updates require a matching archive checksum before merge.
+
+These are local results; the modified working tree has not run in GitHub CI.
 
 ## Migration Plan
 

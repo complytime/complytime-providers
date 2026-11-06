@@ -126,11 +126,81 @@ EOF
     }
 }
 
+assert_failure() {
+    local expected_message=$1
+
+    : > "$temporary_directory/github-output"
+    if GITHUB_OUTPUT="$temporary_directory/github-output" \
+        bash "$RESOLVER" --module-file "$temporary_directory/go.mod" \
+        --tags-file "$temporary_directory/tags" \
+        > "$temporary_directory/output" 2> "$temporary_directory/error"; then
+        printf 'expected resolver to fail: %s\n' "$expected_message" >&2
+        exit 1
+    fi
+    grep -Fxq "$expected_message" "$temporary_directory/error" || {
+        cat "$temporary_directory/error" >&2
+        exit 1
+    }
+    [[ ! -s "$temporary_directory/output" && ! -s "$temporary_directory/github-output" ]] || {
+        printf 'failed resolver must not publish a baseline\n' >&2
+        exit 1
+    }
+}
+
+test_non_direct_entries_are_rejected() {
+    local directive
+
+    write_tags_file <<EOF
+$COMMIT_A	refs/tags/v1.2.0
+EOF
+    for directive in \
+        'exclude github.com/complytime/complyctl v1.0.0' \
+        'replace github.com/complytime/complyctl v1.1.0 => example.com/fork v1.2.0' \
+        'require github.com/complytime/complyctl v1.1.0 // indirect'; do
+        cat > "$temporary_directory/go.mod" <<EOF
+module example.com/test
+
+go 1.26.10
+
+$directive
+exclude github.com/complytime/complyctl v0.9.0
+EOF
+        assert_failure 'release-baseline: missing direct github.com/complytime/complyctl dependency'
+    done
+}
+
+test_direct_requirement_ignores_other_sections() {
+    write_module_file 'v1.1.0'
+    cat >> "$temporary_directory/go.mod" <<'EOF'
+
+exclude github.com/complytime/complyctl v0.9.0
+replace github.com/complytime/complyctl => example.com/fork v2.0.0+incompatible
+EOF
+    write_tags_file <<EOF
+$COMMIT_A	refs/tags/v1.2.0
+$COMMIT_B	refs/tags/v0.9.0
+$COMMIT_C	refs/tags/v2.0.0
+EOF
+    assert_output "tag=v1.2.0
+commit=$COMMIT_A"
+}
+
+test_malformed_module_reports_resolution_stage() {
+    printf 'module example.com/test\ninvalid-directive\n' > "$temporary_directory/go.mod"
+    write_tags_file <<EOF
+$COMMIT_A	refs/tags/v1.2.0
+EOF
+    assert_failure "release-baseline: could not parse module file: $temporary_directory/go.mod"
+}
+
 test_normal_release_selection
 test_prerelease_tags_are_excluded
 test_malformed_tags_are_excluded
 test_v0_requires_matching_minor_version
 test_v2_uses_semantic_import_path
 test_no_baseline_fails_closed
+test_non_direct_entries_are_rejected
+test_direct_requirement_ignores_other_sections
+test_malformed_module_reports_resolution_stage
 
 printf 'release baseline resolver tests passed\n'

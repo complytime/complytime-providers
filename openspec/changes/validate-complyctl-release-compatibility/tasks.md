@@ -10,7 +10,7 @@
 - [x] 2.1 Add a fail-closed workflow step or job that derives the direct complyctl dependency compatibility line from `go.mod` (major for v1+, minor for v0), selects the highest stable matching tag, and reports its tag and commit; verify normal, prerelease, malformed-tag, v0 minor-boundary, and no-baseline behavior.
 - [x] 2.2 Add a released-baseline integration job that checks out and verifies the selected complyctl commit, preserves the existing main-branch integration job, builds and tests all providers from an isolated workspace with a temporary replacement to that checkout, then runs the released checkout's Ampel-focused cross-repository integration target; verify the workflow identifies the release checkout separately and rejects a commit mismatch.
 - [x] 2.3 Add explicit released-checkout prerequisite validation and stage-specific failure diagnostics; verify missing prerequisites, provider build failures, and integration failures report distinct messages with the selected tag.
-- [ ] 2.4 Validate the modified workflow with `yamllint .github/workflows/ci_cross_repo_integration.yml` and an available GitHub Actions workflow linter, then verify a CI run publishes the baseline tag and commit.
+- [x] 2.4 Validate the modified workflow with `yamllint .github/workflows/ci_cross_repo_integration.yml` and an available GitHub Actions workflow linter, then verify a CI run publishes the baseline tag and commit.
 
 ## 3. Verification and Documentation Assessment
 
