@@ -19,13 +19,14 @@ trap cleanup EXIT
 
 write_module_file() {
     local version=$1
+    local module_path=${2:-github.com/complytime/complyctl}
 
     cat > "$temporary_directory/go.mod" <<EOF
 module example.com/test
 
 go 1.26.10
 
-require github.com/complytime/complyctl $version
+require $module_path $version
 EOF
 }
 
@@ -87,6 +88,16 @@ EOF
 commit=$COMMIT_A"
 }
 
+test_v2_uses_semantic_import_path() {
+    write_module_file 'v2.1.0' 'github.com/complytime/complyctl/v2'
+    write_tags_file <<EOF
+$COMMIT_A	refs/tags/v1.9.0
+$COMMIT_B	refs/tags/v2.3.0
+EOF
+    assert_output "tag=v2.3.0
+commit=$COMMIT_B"
+}
+
 test_no_baseline_fails_closed() {
     write_module_file 'v1.1.0'
     write_tags_file <<EOF
@@ -111,6 +122,7 @@ test_normal_release_selection
 test_prerelease_tags_are_excluded
 test_malformed_tags_are_excluded
 test_v0_requires_matching_minor_version
+test_v2_uses_semantic_import_path
 test_no_baseline_fails_closed
 
 printf 'release baseline resolver tests passed\n'

@@ -6,6 +6,7 @@ set -euo pipefail
 
 readonly COMPLYCTL_MODULE='github.com/complytime/complyctl'
 readonly COMPLYCTL_REPOSITORY='https://github.com/complytime/complyctl.git'
+readonly GIT_TIMEOUT_SECONDS=60
 
 die() {
     printf 'release-baseline: %s\n' "$*" >&2
@@ -58,7 +59,7 @@ dependency_version=$(go mod edit -json "$module_file" | awk -v module="$COMPLYCT
         emit_version()
         path = $2
         gsub(/[",]/, "", path)
-        wanted = path == module
+        wanted = path == module || path ~ ("^" module "/v[2-9][0-9]*$")
         indirect = 0
         version = ""
     }
@@ -93,7 +94,7 @@ trap cleanup EXIT
 if [[ -z "$tags_file" ]]; then
     temporary_tags_file=$(mktemp)
     tags_file=$temporary_tags_file
-    git ls-remote --tags "$COMPLYCTL_REPOSITORY" > "$tags_file" || \
+    timeout "$GIT_TIMEOUT_SECONDS" git ls-remote --tags "$COMPLYCTL_REPOSITORY" > "$tags_file" || \
         die 'could not list complyctl release tags'
 fi
 
