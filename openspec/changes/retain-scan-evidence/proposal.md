@@ -1,10 +1,10 @@
 # Proposal
 
-Status: Draft for design feedback, not approved for implementation. The author has
-selected the workspace/file-URL contract in D8 and original-caller ownership with
-private 0700/0600 modes in D9. These product decisions are recorded, not open
-questions. Complyctl integration follow-up and conflicting repository instructions
-are listed separately in the design; no governance rule is changed or waived here.
+Status: Implementation proposal awaiting approval. The selected contract uses
+complyctl's existing workspace variables, workspace-relative inputs/configuration,
+absolute file URLs, and execution-account ownership with private 0700/0600 modes.
+No complyctl changes are required. The permission-rule conflict remains reported
+in the design; no governance rule is changed or waived here.
 
 ## Why
 
@@ -53,13 +53,16 @@ re-evaluation, or detection of every target change.
   workspace differs from the invoking directory. Keep properly escaped absolute
   `file://` mapping-reference URLs identifying the same preserved files. Evidence is
   locatable and digest-verifiable in the originating workspace without packaging.
-- Finalize new evaluation directories and their files for the original invoking
-  user's UID and GID, including elevated scans on that user's behalf. Direct root
-  invocation remains root-owned. Reject unverified owner identities and failed
-  ownership handoffs rather than publishing inaccessible evidence.
+- **BREAKING**: Resolve relative provider input/configuration paths against the
+  selected workspace, not the invoking directory. Absolute paths remain absolute.
+  Tool configuration discovery uses the workspace without process-wide chdir.
+- Keep new evaluation directories and files owned by the provider's execution
+  account. Normal user scans are user-owned; root-run scans, including sudo, remain
+  root-owned and require authorized elevated access for other readers. Automatic
+  original-user ownership handoff is deferred.
 - Use private 0700 evaluation directories and 0600 evidence/supporting files,
-  including tool-written outputs and metadata. Caller ownership makes these files
-  accessible to the user who initiated the scan without granting world read access.
+  including tool-written outputs and metadata. Execution-account ownership does not
+  grant the original non-root user access after a root-run scan.
 - Attempt to record non-secret target and configuration context in a small
   per-evaluation metadata file. It supports discovery and correlation but is not
   the authority for evidence identity or digests, and a write failure is a warning.
@@ -95,38 +98,28 @@ identity must not depend on that lossy encoding being unique.
 
 - Shared allocation and metadata helpers under `internal/evidence/`; provider
   config, scan, results, and server packages; OPA command-output handling.
-- Provider configuration supplies resolved workspace/results roots and a launch-context
-  adapter supplies verified ownership context. Shared helpers validate confinement,
-  allocate artifacts, and finalize ownership without importing provider command packages
-  or independently selecting roots or interpreting identity transport.
+- Provider configuration supplies resolved workspace/results roots and OS-derived
+  execution identity. Shared helpers validate confinement, allocate artifacts, and
+  verify ownership/modes without importing provider command packages, selecting
+  workspace precedence, or interpreting caller identity transport.
 - OPA's loader keeps its existing replace-before-clone lifecycle. Historical
   input availability and deterministic re-evaluation are not guarantees of this
   feature; persisted conftest filenames are provenance, not retained input links.
 - The existing Evaluation Log conversion preserves the required evidence fields.
   No evidence-mapping RPC extension, new user flags, or new dependencies are
-  proposed. The separately scoped complyctl launcher work owns workspace selection
-  and trusted caller-identity delivery for elevated execution. Its mechanism and
-  compatibility sequencing belong to companion work, not a new protocol designed
-  by these provider artifacts. End-to-end implementation acceptance verifies it.
+  proposed. Existing Generate global variables and Scan target variables supply
+  `workspace`; no launcher CWD change, caller-identity interface, new handshake, or
+  paired complyctl release is required.
 - Documentation implementation includes `docs/man/*.md` and generated man pages,
   README guidance, and assessment of `CHANGELOG.md` and `AGENTS.md` impact.
-- Coordinate with complyctl to establish D8/D9's launch prerequisites and update
-  cross-repository integration assertions and evidence documentation for the new
-  coordinates and preserved absolute file URLs. Collection and packaging are not
-  part of this companion compatibility work or prerequisites for this change.
-- Before implementation, identify the companion issue/spec, consumed interface,
-  identity trust model, compatibility strategy, and merge order. Record the actual
-  compatible revision/version floor and verify behavior before integration acceptance
-  and release; do not defer interface definition to end-to-end testing.
-  The design's companion contract acceptance record distinguishes required behavior
-  from an agreed interface and tested implementation. No compatible launcher or
-  supported version floor is established by this draft.
+- Verify integration with unchanged complyctl, recording the tested revision and
+  its existing workspace-variable delivery and evidence conversion. Integration
+  verification does not require companion implementation or release sequencing.
 - These OpenSpec artifacts cover provider changes with two user stories: preserve
   evaluation evidence, and locate/verify it using readable context and log links.
-  The author has explicitly directed retaining OpenSpec rather than migrating to
-  Speckit. That decision is recorded in the design alongside the still-conflicting
-  loaded instruction; this proposal does not change governance rules or claim that
-  recording the direction satisfies those rules.
+  Implementation is confined to this repository; complyctl is an unchanged
+  integration consumer. The single-repository scope retains OpenSpec without
+  changing the workflow-tier rules.
 - This commit contains specification artifacts for review. Implementation follows
   approval and the repository's spec commit/push prerequisite. A website issue is
   required before the eventual user-facing implementation PR merges.

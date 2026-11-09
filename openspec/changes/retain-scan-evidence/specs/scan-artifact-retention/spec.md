@@ -75,7 +75,7 @@ constant and overridable for deterministic tests.
 
 Provider initialization/configuration MUST supply the shared allocator with explicit
 resolved workspace/results roots, derived from existing provider constants, and
-verified ownership context from the launch-context adapter. Shared storage helpers
+execution identity obtained from the operating system. Shared storage helpers
 MUST validate confinement and MUST NOT import `cmd/*`, independently select roots,
 interpret identity transport, or require mutable global result paths.
 
@@ -115,14 +115,12 @@ artifact; a pathname check followed by an unconstrained reopen is insufficient.
 - **THEN** its resolved root is used consistently for constrained access and URL construction
 - **AND** symlinked context components beneath its provider results root are still rejected
 
-### Requirement: Evidence ownership follows the original invoking user
+### Requirement: Evidence ownership follows the execution account
 
-Providers MUST finalize each new evaluation directory and its files to the original
-invoking user's verified UID/GID before publication. Normal
-invocation keeps caller ownership; elevated-on-behalf execution restores that
-user's ownership; direct root invocation remains root-owned. Providers MUST reject
-unverified identities and MUST NOT guess ownership from arbitrary environment or
-target values. Trusted identity delivery is an external prerequisite in design D9.
+Providers MUST keep each new evaluation directory and its files owned by the
+process's effective OS UID/GID and verify ownership before publication. Root-run
+scans, including sudo, MUST remain root-owned. Providers MUST NOT infer another
+owner from environment or RPC variables or transfer ownership to an original user.
 
 #### Scenario: Normal user invocation
 
@@ -132,27 +130,26 @@ target values. Trusted identity delivery is an external prerequisite in design D
 - **AND** no privileged ownership change is needed
 - **AND** the caller can traverse the path, read the evidence, and verify its digest
 
-#### Scenario: Elevated scan on behalf of a user
+#### Scenario: Root-run scan through sudo
 
-- **GIVEN** verified launch context identifies the original non-root caller
-- **AND** the provider executes with elevated privileges
+- **GIVEN** a user starts a provider scan through sudo with root execution identity
 - **WHEN** tools finish and required outputs are closed, validated, and hashed
-- **THEN** files are finalized to that caller's UID/GID before the directory is handed off
-- **AND** present supporting metadata and required XCCDF results receive the same ownership
-- **AND** the original caller can read and hash the reported evidence without elevation
+- **THEN** evidence, supporting metadata and required XCCDF results remain root-owned
+- **AND** the original non-root user needs authorized elevated access to read and hash them
+- **AND** the scan does not require a new caller-identity message or ownership handoff
 
 #### Scenario: Direct root invocation
 
-- **GIVEN** verified launch context identifies a direct root invocation without an originating user
+- **GIVEN** the provider's effective OS UID/GID are 0
 - **WHEN** an evaluation completes
 - **THEN** its directory and files remain owned by UID/GID 0
 
-#### Scenario: Missing or invalid original-caller identity during elevation
+#### Scenario: Environment or target claims another owner
 
-- **GIVEN** elevated execution lacks a verified direct-root or original-caller identity
-- **WHEN** the provider prepares to evaluate a target
-- **THEN** the RPC returns an operational error before evaluation or ownership changes
-- **AND** arbitrary `SUDO_UID`, `SUDO_GID`, or target values do not select an owner
+- **GIVEN** SUDO_UID, SUDO_GID, USER or target variables identify another account
+- **WHEN** the provider prepares evidence
+- **THEN** the effective OS identity still selects the expected owner
+- **AND** no ownership transfer occurs
 
 ### Requirement: Private evidence directory and file modes
 
@@ -163,19 +160,18 @@ rule is not waived; maintainer reconciliation is required before implementation.
 
 #### Scenario: Owner reads private finalized evidence
 
-- **GIVEN** a completed normal or elevated-on-behalf evaluation
+- **GIVEN** a completed normal or root-run evaluation
 - **WHEN** its ownership and modes are finalized
 - **THEN** the evaluation directory has mode 0700 and each file has mode 0600
-- **AND** the selected original caller can traverse, read, and digest-verify the evidence
+- **AND** the execution account can traverse, read, and digest-verify the evidence
 - **AND** metadata and required tool outputs have the same private access policy
-- **AND** the provider does not add world or group permissions to avoid a failed handoff
+- **AND** the provider does not add world or group permissions to grant another user access
 
 ### Requirement: Traversable context parents
 
 The 0700 requirement applies to the evaluation leaf. Newly created context parents
-MUST permit the selected owner to traverse the full path under the agreed
-workspace-setup contract, without widening the leaf or changing unrelated existing
-directories.
+MUST permit the execution account to traverse the full path without widening the
+leaf or changing unrelated existing directories.
 
 #### Scenario: New parents permit evidence access
 
@@ -184,18 +180,17 @@ directories.
 - **THEN** the owner can traverse those parents and read the private evaluation leaf
 - **AND** unrelated existing directories remain unchanged
 
-### Requirement: Ownership finalization is bounded and publication-critical
+### Requirement: Ownership verification is bounded and publication-critical
 
-Providers MUST limit ownership changes to the fresh evaluation directory and its
-contents, using constrained handles after tools stop writing. They MUST NOT
-recursively chown existing workspace parents, inputs, clones, legacy files, or
-earlier evaluations. Required evidence MUST be readable through its full path by
-the selected owner under 0700/0600 modes. Finalization or traversal failures MUST
-return an RPC error without publishing a response.
+Providers MUST verify ownership and private modes using constrained handles after
+tools stop writing. They MUST reject unexpected ownership rather than transfer it,
+and MUST NOT chown workspace parents, inputs, clones, legacy files or earlier
+evaluations. Evidence MUST be readable through its full path by the execution
+account. Verification or traversal failures MUST return an RPC error without a response.
 
-#### Scenario: Ownership handoff fails
+#### Scenario: Ownership verification fails
 
-- **WHEN** finalizing a required file's owner or verifying directory ownership fails
+- **WHEN** a required file or evaluation directory has unexpected ownership
 - **THEN** the RPC returns an operational error and publishes no scan response
 - **AND** earlier evaluation ownership and bytes remain unchanged
 
@@ -405,7 +400,7 @@ results. Retention MUST NOT broaden ordinary branch-scoped processing failures.
 ### Requirement: No publication of incomplete evidence
 
 Providers MUST report allocation, required artifact write/close, parse, digest, or
-ownership-finalization failures as operational errors. They MUST NOT publish assessments or mapping
+ownership/mode-verification failures as operational errors. They MUST NOT publish assessments or mapping
 references backed by incomplete evidence for the affected evaluation, substitute
 an earlier artifact, or mutate previously completed evaluations. Unreferenced
 partial outputs MAY remain for diagnosis.
@@ -424,7 +419,7 @@ partial outputs MAY remain for diagnosis.
 
 #### Scenario: OpenSCAP evaluation fails operationally
 
-- **WHEN** allocation, required output, parsing, hashing, or ownership finalization fails
+- **WHEN** allocation, required output, parsing, hashing, or ownership/mode verification fails
 - **THEN** the Scan RPC returns a non-nil error and no response
 
 #### Scenario: Ampel per-evaluation output processing fails
@@ -446,9 +441,9 @@ partial outputs MAY remain for diagnosis.
 - **AND** no assessments or references are published for that evaluation
 - **AND** unrelated successful evaluations may remain in the response
 
-#### Scenario: Common workspace, identity, or finalization fails
+#### Scenario: Common workspace, OS identity, or verification fails
 
-- **WHEN** required workspace/identity context validation or ownership finalization fails
+- **WHEN** workspace validation, OS-identity lookup, or ownership/mode verification fails
 - **THEN** the Scan RPC returns a non-nil error and no response for any provider
 
 #### Scenario: Supporting metadata cannot be written
@@ -456,7 +451,7 @@ partial outputs MAY remain for diagnosis.
 - **GIVEN** the required outputs are valid and evidence digests have been computed
 - **WHEN** writing or closing supporting metadata fails
 - **THEN** the provider's injectable logger records a warning identifying the evaluation token
-- **AND** otherwise complete evidence is published after successful ownership finalization
+- **AND** otherwise complete evidence is published after successful ownership/mode verification
 - **AND** metadata may be missing or incomplete and is not an evidence authority
 - **AND** earlier evaluations remain readable and unchanged
 

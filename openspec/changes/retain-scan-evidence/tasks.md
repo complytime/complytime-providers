@@ -12,20 +12,15 @@ supporting outputs distinct from reported evidence. Collection, validation of a
 collected set, and optional packaging are a separate future complyctl capability,
 not tasks or release dependencies here. That future feature must map moved files
 without modifying the log; storage backends and long-term retention remain
-customer-owned. D8's launcher compatibility work is necessary for the current
-runtime mapping contract and is not the future collection feature. The companion
-complies with D9's original-caller identity contract as well as D8's workspace
-contract; this repository implements provider consumption, not the launcher.
+customer-owned. Use existing complyctl workspace-variable delivery and evidence
+conversion; no launcher, caller-identity, protocol, or release-pairing change is
+required in complyctl. Integration tests verify the unchanged consumer.
 
-Selected decisions: caller ownership, private 0700/0600 modes, process CWD as the
-provider workspace root, absolute file URLs, and no Speckit migration are recorded
-in the design. Do not ask the author to choose them again. Separately owned complyctl
-follow-up establishes launcher alignment and reliable elevated-caller identity;
-establish its reference, interface, trust model and sequencing in task 0.1 before
-implementation, then record its actual compatible revision/version floor in task 5.4.
-The companion implementation must land before end-to-end acceptance and release,
-not before publication of this design-feedback draft. The repository instruction
-conflicts remain reported for governance reconciliation; no rule is waived here.
+Selected decisions: execution-account ownership, private 0700/0600 modes, existing
+workspace variables with CWD fallback, workspace-relative input/configuration paths,
+and absolute file URLs. Root-run evidence stays root-owned; original-user handoff
+is deferred. Provider-only implementation retains the single-repository OpenSpec
+tier. The permission-rule conflict remains reported; no governance rule is waived.
 
 Test harness: use isolated Go tests alongside the shared helpers and each provider's
 server, scan, and results packages, runnable by `make test`. Reuse the existing XML
@@ -38,55 +33,37 @@ that disappear when tests run as root. Preserve each provider's established RPC
 versus `ScanResponse.Errors` channel and assert that exact channel alongside the
 absence of assessments and references for the failed evaluation.
 
-Use process-isolated provider tests with an explicit child working directory and
-injected identities for elevated cases. These tests run under `make test` without a
-complyctl checkout, credentials, privileged execution, or parent-process chdir.
+Use process-isolated provider tests with distinct invocation/workspace directories
+and injected OS identities for root/non-root cases. These tests run under `make test`
+without a complyctl checkout, credentials, privileged execution, or parent-process chdir.
 Use injected identity/filesystem operations for ownership failures and inspect real
-UID/GID results separately in controlled privileged integration tests. Preserve
+UID/GID results separately in controlled root-run integration tests. Preserve
 Ampel's existing RPC error for digest failure; do not misclassify it as a response
 error while adding the new finalization errors from D6/D9.
 
 ## 0. Implementation-readiness prerequisites
 
-- [ ] 0.1 Before implementation starts, identify the companion complyctl issue/spec
-  and agree the consumed workspace/caller-identity interface, identity provenance
-  and validation, direct-root versus elevated-on-behalf distinction, compatibility
-  strategy, and merge order. Define caller-relative input/configuration resolution
-  and conftest discovery behavior after child-CWD alignment. Numeric UID/GID values
-  alone do not establish trust. A released version need not exist at design time;
-  record the agreed interface and dependency now, then the actual compatible
-  revision/version floor in 5.4. This prerequisite remains unmet until a concrete
-  companion reference and contract are recorded; recurring conftest coverage issue
-  complytime/complyctl#957 is not that dependency.
-  Complete the design's companion contract acceptance record with the responsible
-  owner and accepted contract revision. Specify how unsupported launchers are
-  excluded without assuming the provider can detect a mismatched workspace from
-  CWD alone. Select and record the compatibility enforcement and provider release
-  sequence described in D8; version documentation alone does not enforce pairing.
-  An issue draft or unaccepted interface proposal does not complete 0.1.
-
-The selected private modes remain unchanged. Obtain the reported permission-mode
-instruction reconciliation through maintainers before affected implementation;
-record the authorized decision, scope, venue/link, and applicable instruction in the
-design without modifying convention packs in this change.
-Also obtain and reference the workflow-tier reconciliation described in the design.
-Keep both instruction conflicts unresolved until the applicable maintainer decisions
-are recorded; do not mark readiness complete based solely on author product choices.
+- [ ] 0.1 Before implementing private modes, obtain maintainer reconciliation of
+  `.opencode/uf/packs/go.md` SC-005 with the selected 0700/0600 evidence modes.
+  Record the authorized decision, scope, venue/link, and applicable instruction in
+  the design without modifying convention packs in this change. Keep this task
+  incomplete until the decision is recorded; no companion complyctl contract is
+  required to satisfy it.
 
 ## 1. Shared evaluation storage and context
 
 - [ ] 1.1 Implement evaluation allocation and centralized naming/0700/0600-mode
   constants in focused `internal/evidence` files. Provider configuration derives
   absolute workspace/results roots using `provider.WorkspaceDir` and its existing
-  constants; a launch-context adapter supplies verified ownership context. The
-  allocator accepts these explicit values, validates confinement, and returns the
+  constants; OS identity supplies the execution account for ownership verification.
+  The allocator accepts these explicit values, validates confinement, and returns the
   evaluation directory, token, collection time, and constrained artifact access.
   It must not import `cmd/*`, rediscover CWD, select workspace precedence, or
-  interpret identity transport. Share provenance-validation and rejection rules
-  across provider adapters after the companion interface is agreed; test each
-  adapter's wiring and the common trust decisions. Test all three adapters without
-  mutating global result paths or duplicating provider directory constants. Centralize and
-  document the bounded retry limit with a test override. Verify exact timestamp/path form,
+  interpret identity transport. Share root-validation and ownership/mode checks
+  across provider adapters; test each adapter's wiring and common validation.
+  Test all three adapters without mutating global result paths or duplicating provider
+  directory constants. Centralize the bounded retry limit with a test override.
+  Verify exact timestamp/path form,
   token entropy source, fixed-clock repeated allocations, concurrent allocations,
   forced collisions, clock rollback, allocation failure, and retry exhaustion.
   Assert atomic no-replace behavior deterministically, not only under `-race`.
@@ -104,25 +81,28 @@ are recorded; do not mark readiness complete based solely on author product choi
   parse, hash, and finalization. Test symlinked context parents, artifact symlink
   substitution, non-regular outputs, workspace-root symlink resolution, and
   validated/hashed file agreement without external reads or ownership changes.
-- [ ] 1.7 Implement selected caller-ownership finalization using OS identity for
-  normal invocation and verified caller identity for elevated cases. Test normal
-  invocation without privileged chown, elevated-on-behalf
-  handoff, direct root, missing/malformed/unverified identity, failed chown or owner
-  verification, and inaccessible existing parents. Include supporting files present
-  after metadata failure. Verify files are finalized before directory handoff, no
-  unrelated ownership is changed, and failures return RPC errors without a response.
+- [ ] 1.7 Implement execution-account ownership/mode verification using effective
+  OS UID/GID without original-user handoff. Test normal and root execution,
+  unexpected ownership, identity-lookup and mode-verification failures, and
+  inaccessible existing parents. Ignore SUDO_UID/SUDO_GID/USER and RPC owner claims
+  when selecting ownership; their presence must not reject an ordinary sudo scan.
+  Include supporting files present after metadata failure. Verify
+  tools stop writing before final checks, no ownership transfer occurs, and
+  failures return RPC errors without a response.
   Assert directory mode 0700 and file mode 0600 after the reported governance
   conflict has been reconciled; the intended modes are selected, not an open choice.
   Verify newly created context parents allow the selected owner to traverse the full
-  path under the companion workspace-setup contract without widening the leaf or
-  changing unrelated existing directories.
-- [ ] 1.8 Resolve process CWD once as the absolute root. Verify root-resolution
-  failure and that inherited workspace variables cannot override the supplied CWD.
-  Preserve OPA's injected `workspace` target variable for input-exclusion boundaries,
-  including distinct host/provider boundaries; it does not select the output root.
-  Use the credential-free child-process harness to prove writes, coordinates, and
-  URLs agree beneath that root without a new workspace-confirmation message or
-  independent application of complyctl's environment/flag precedence.
+  path without widening the leaf or changing unrelated existing directories.
+- [ ] 1.8 Resolve Generate global/Scan target `workspace` variables per D8 with
+  CWD fallback only for absent/empty values. Test relative and symlinked workspace
+  roots, invalid non-empty roots, conflicting Scan target roots and conflicting
+  Generate target/global roots before storage access. Preserve OPA host/provider
+  exclusion boundaries. With invocation A and workspace B, prove Generate/Scan
+  paths, coordinates, URLs, and relative inputs/configuration resolve beneath B;
+  absolute external inputs remain absolute. Place conflicting fixtures in A and B,
+  verify conftest discovery and relative CONFTEST_CONFIG_FILE use B with matching
+  ignore analysis/execution, and assert no process-wide chdir or writes beneath A.
+  Do not reapply complyctl's flag/environment precedence in providers.
 
 ## 2. Ampel retention
 
@@ -142,8 +122,8 @@ are recorded; do not mark readiness complete based solely on author product choi
 - [ ] 3.3 Add operational-error tests for allocation, missing/invalid required outputs, and digest failures; verify no prior fixed-path ARF is reused, incomplete evaluations publish no evidence, and metadata failures warn without suppressing complete evidence.
 - [ ] 3.4 Update OpenSCAP man-page FILES/EVIDENCE sections with target/profile
   grouping, retained ARF semantics, and changed coordinate/ID forms marked as
-  breaking. Document caller ownership and the supported non-root read/verify
-  workflow after elevated scans, including approved modes and parent traversal.
+  breaking. Document execution-account ownership, approved modes and parent
+  traversal, and authorized elevated reading/hashing after root-run scans.
   Regenerate its man page and verify Generate-time paths remain accurately documented.
 
 ## 4. OPA result-file evidence
@@ -185,31 +165,28 @@ are recorded; do not mark readiness complete based solely on author product choi
   or version-based skips. A missing-conftest skip is not behavior verification, and
   local CI does not install conftest. Keep the existing behavior assertions while
   replacing input-path evidence assertions with retained-result coordinates/digests.
-- [ ] 5.4 Verify the separately owned complyctl compatibility prerequisite; do not
-  implement its launcher in this repository. Verify the issue/spec and interface
-  agreed in 0.1, recording its reliable elevated caller-identity mechanism, actual
-  landed revision/version and supported version floor. Before provider release,
-  verify that the compatible companion release and agreed pairing mechanism are
-  available. Confirm workspace precedence, child CWD, original caller UID/GID delivery,
-  and caller-relative launch-input
-  resolution without parent chdir. Verify default, environment, and flag workspaces,
-  including invocation from A with workspace B, Generate/Scan root agreement, no new
-  generated artifacts or evidence beneath A, and matching coordinates/URLs/digests
-  beneath B. Run `make test-cross-repo COMPLYCTL_DIR=<built-complyctl-checkout>` with
-  the compatible checkout and required tools/credentials; record blockers honestly.
-  Verify actual elevated-to-user handoff and read/hash as the original user in a
-  controlled privileged test. No collection, packaging, or storage feature is part
-  of this companion prerequisite or this task.
-  Verify caller-relative local inputs, conftest configuration discovery and explicit
-  relative configuration paths, ignore precedence, and fail-closed ambiguity after
-  child-CWD alignment. Preserve host/provider input-exclusion boundaries when different.
+- [ ] 5.4 Verify integration with unchanged complyctl and record the tested
+  revision/version. Confirm existing workspace-variable delivery for Generate and
+  Scan under default, environment, and flag selection, including flag precedence
+  and invocation A with workspace B. Verify generated artifacts/evidence beneath B,
+  matching coordinates/URLs/digests, and no new provider artifacts beneath A without
+  changing launcher CWD. Exercise workspace-relative local input, conftest discovery,
+  explicit relative configuration, ignore precedence and fail-closed ambiguity.
+  Preserve host/provider exclusion boundaries when different. Run
+  `make test-cross-repo COMPLYCTL_DIR=<built-complyctl-checkout>` with required
+  tools/credentials; record blockers honestly. In a controlled root-run test, verify
+  root execution ownership/private modes and authorized elevated read/hash; normal
+  user scans remain user-owned. No original-user handoff or companion release is
+  required, and no skipped privileged test counts as verification.
 - [ ] 5.5 Update root `README.md`, `cmd/*-provider/README.md`, and all provider man pages with the selected workspace root as the coordinate base and absolute `file://` URLs as originating-filesystem locators. Document workspace precedence, how to locate the root, URI escaping, and the in-place workflow of reading the log's evidence mappings, resolving files, and checking digests without packaging. Explain that the Gemara Evaluation Log alone defines the evidence set, supporting files are not implicitly evidence, preservation is always on without automatic cleanup or retention settings, and future optional collection/packaging must map moved files without rewriting the log. State that storage backends and longevity remain customer-owned and absolute URLs do not automatically relocate; verify examples and regenerate affected man pages.
 
-  Also document original-caller ownership, direct-root behavior, approved modes,
+  Also document execution-account ownership, root-run/sudo behavior, approved modes,
   directory traversal and workspace writability requirements, and failures that
   leave unreferenced partial outputs. Include troubleshooting for permission and
   disk-space failures, and metadata's best-effort status. Do not promise access to
-  arbitrary other users or historical evidence that was already overwritten.
+  the original non-root user after sudo, arbitrary other users, or historical evidence
+  that was already overwritten. Explain workspace-relative inputs/configuration,
+  CWD fallback for missing workspace variables, and unchanged absolute input paths.
   Explain that OPA's workspace identity preflight traverses retained history, so
   both storage and preflight work grow. Inaccessible private historical directories
   can cause actionable fail-closed input errors; do not suggest widening permissions
@@ -219,9 +196,10 @@ are recorded; do not mark readiness complete based solely on author product choi
 
   Supersede conflicting Unreleased claims about OPA input-path evidence and old ID
   forms so the release does not announce incompatible contracts as current at once.
-  Cross-reference both capability specs and record the compatible complyctl version
-  required by the workspace/identity contract. Do not mark unrun schema, privileged,
-  or cross-repository tests passed.
+  Cross-reference both capability specs and include workspace-relative input/config
+  lookup as a breaking provider behavior; invocation-relative configurations must
+  migrate. Record the tested unchanged complyctl revision without inventing a new
+  API/version requirement. Do not mark unrun schema, privileged, or integration tests passed.
 - [ ] 5.8 Run the required review council before implementation PR submission and resolve all REQUEST CHANGES; verify approval remains valid with no intervening code changes, leaving cleanup and the broader #199 encoding work deferred.
 
 When replacing old contracts in groups 2–4, rewrite existing fixed-path ARF and

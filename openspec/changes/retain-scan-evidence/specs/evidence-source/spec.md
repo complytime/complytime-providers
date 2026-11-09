@@ -216,9 +216,9 @@ long-term retention remain customer-owned.
 #### Scenario: Owner reads evidence from an elevated scan
 
 - **WHEN** a user reads the provider's evidence documentation
-- **THEN** it explains original-caller ownership, approved modes, and directory traversal needs
-- **AND** it distinguishes elevated execution on behalf of a user from direct root invocation
-- **AND** it describes verifying owned evidence without elevating the reader
+- **THEN** it explains execution-account ownership, private modes and directory traversal needs
+- **AND** it states that sudo and direct-root scans keep root-owned evidence
+- **AND** it describes authorized elevated reading/hashing without promising original-user access
 
 ### Requirement: Expanded FILES section in man pages
 
@@ -330,46 +330,97 @@ digest-verify evidence in the originating workspace without packaging.
 
 ### Requirement: Output roots remain separate from OPA exclusion boundaries
 
-OPA MUST retain the host-injected `workspace` target variable's separate role in
-input-exclusion boundary resolution. It MUST NOT use that variable to override the
-retained-output/coordinate root, or remove existing dual-boundary checks when host
-and provider artifact directories differ.
+OPA MUST retain host `.complytime` and configured provider-artifact boundaries for
+input exclusion, including when they differ. Using the existing `workspace` variable
+for output-root resolution MUST NOT remove dual-boundary or alias checks.
 
 #### Scenario: Coordinate root and exclusion boundaries differ
 
-- **GIVEN** provider CWD is B and the host-injected workspace base is A
+- **GIVEN** the host-injected workspace base is B and the configured provider artifact directory differs
 - **WHEN** OPA scans eligible enclosing input under its existing safety checks
 - **THEN** retained output and evidence coordinates use B as their root
-- **AND** input selection protects both A's `.complytime` and the configured provider artifact directory
-- **AND** the injected workspace base does not select another evidence output root
+- **AND** input selection protects both B's `.complytime` and the configured provider artifact directory
 
-### Requirement: Provider workspace root comes from process working directory
+### Requirement: Provider workspace root uses existing workspace variables
 
-Providers MUST resolve their process working directory once to an absolute workspace
-root and use it for generated artifacts and evidence coordinates. Providers MUST
-return an RPC error before evaluation if root resolution fails. They MUST NOT
-independently select another root from environment variables or require an
-additional workspace-confirmation message. Launcher alignment is an external
-compatibility prerequisite defined in design D8.
+Providers MUST resolve Generate global/Scan target `workspace` variables to an
+absolute root for generated artifacts and evidence coordinates. Absent/empty values
+MUST fall back to process CWD. Invalid non-empty roots MUST fail the RPC before
+evaluation. Providers MUST NOT reapply host flag/environment precedence or require
+launcher CWD changes, new RPC fields, or process-wide chdir.
 
 #### Scenario: Non-default workspace
 
-- **GIVEN** a compatible launcher supplies directory B as child CWD
-- **AND** the launcher itself was invoked from a different directory A
+- **GIVEN** unchanged complyctl supplies workspace B through existing RPC variables
+- **AND** the provider process CWD is a different directory A
 - **WHEN** the provider runs Generate and Scan
 - **THEN** it writes generated artifacts and evidence beneath B's `.complytime`
 - **AND** every evidence coordinate resolves against B to its preserved artifact
 - **AND** every absolute file URL identifies that same artifact with the recorded digest
 - **AND** the providers do not write their generated artifacts or evidence beneath A
 
-#### Scenario: Environment does not override the supplied working directory
+#### Scenario: Environment does not override the supplied workspace variable
 
-- **GIVEN** the provider's process CWD is B and an inherited workspace variable names A
+- **GIVEN** the RPC workspace variable names B and COMPLYTIME_WORKSPACE names A
 - **WHEN** the provider initializes the evaluation workspace
 - **THEN** it uses B as the coordinate base and generated-artifact root
 - **AND** it does not reinterpret complyctl's workspace-selection precedence
 
 #### Scenario: Workspace root cannot be resolved
 
-- **WHEN** resolving the provider process working directory fails
+- **WHEN** resolving a supplied non-empty workspace root fails
 - **THEN** the RPC returns an operational error before evaluation or evidence publication
+- **AND** the provider does not fall back to process CWD
+
+#### Scenario: Legacy caller omits the workspace
+
+- **GIVEN** workspace is absent or empty and the provider process CWD is A
+- **WHEN** Generate or Scan resolves its root
+- **THEN** it uses A without requiring new launcher behavior
+
+### Requirement: Consistent request workspace
+
+Providers MUST resolve one workspace per RPC before storage access. Scan targets
+MUST resolve to the same root. Generate global workspace MUST be authoritative;
+a non-empty target workspace MUST agree with it. Conflicts MUST return an RPC error.
+
+#### Scenario: Scan targets disagree on workspace
+
+- **GIVEN** a request contains targets resolving to different workspace roots
+- **WHEN** Scan validates the request
+- **THEN** it returns an RPC error before evaluation or storage access
+
+#### Scenario: Generate target disagrees with global workspace
+
+- **GIVEN** Generate global workspace is B and target workspace resolves to A
+- **WHEN** the provider validates the request
+- **THEN** it returns an RPC error before storage access
+
+### Requirement: Workspace-relative input and configuration resolution
+
+Providers MUST resolve relative input/configuration paths against the selected
+workspace and leave absolute paths absolute. Tool subprocess CWD and CWD-sensitive
+configuration inspection MUST use that same workspace without process-wide chdir.
+Documentation MUST identify this as a breaking provider behavior for configurations
+that previously relied on invocation-relative paths.
+
+#### Scenario: Invocation and workspace contain different inputs
+
+- **GIVEN** process CWD is A and the supplied workspace is B
+- **AND** A and B contain different `manifests/` inputs
+- **WHEN** OPA evaluates `input_path: manifests/`
+- **THEN** it evaluates B's input without modifying A's input
+- **AND** conftest configuration discovery uses B rather than A
+
+#### Scenario: Relative explicit conftest configuration
+
+- **GIVEN** the workspace is B and CONFTEST_CONFIG_FILE is a relative path
+- **WHEN** OPA determines ignore rules and executes conftest
+- **THEN** both resolve the configuration against B with consistent precedence
+- **AND** ambiguity retains the existing fail-closed behavior
+
+#### Scenario: Absolute external input
+
+- **GIVEN** a valid absolute input path outside the workspace
+- **WHEN** the provider resolves that input
+- **THEN** it keeps the absolute path and applies existing input-safety checks

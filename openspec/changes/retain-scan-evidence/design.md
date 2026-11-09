@@ -4,8 +4,9 @@
 
 See [proposal.md](proposal.md) for motivation and scope. The existing implementation
 already carries evidence fields through the complyctl SDK into the Evaluation Log;
-the evidence mapping itself does not need an RPC extension. Delivery of trusted
-launch context is an external integration prerequisite, not an existing SDK claim.
+the evidence mapping itself does not need an RPC extension. The existing host
+supplies the resolved workspace through Generate global variables and Scan target
+variables; this design requires no new launch or identity contract.
 
 - Ampel constructs attestation paths in `scan.ScanRepository`, then hashes them in
   `server.Scan`. Its summary writer currently omits spec identity from the filename.
@@ -86,8 +87,9 @@ designed or implemented before providers preserve and map their evidence.
 
 ### D1: Group by readable context; allocate one directory per evaluation
 
-The workspace root is the absolute provider process working directory supplied by
-the launcher. The provider results root is
+The workspace root is resolved from the existing host-supplied `workspace` variable
+as D8 defines, with process CWD used only when that variable is absent or empty.
+The provider results root is
 `<workspace>/.complytime/<provider>/results`; an evaluation directory is one fresh
 leaf beneath that results root. Coordinates include `.complytime/` and are relative
 to the workspace root. Derive these paths from `provider.WorkspaceDir` and existing
@@ -97,11 +99,11 @@ Provider initialization/configuration owns resolving the workspace root and deri
 its absolute results root from existing provider constants. Ampel's relative path
 helpers, OpenSCAP's global result paths, and OPA's injected artifact root are adapted
 at their provider boundaries; retention paths are passed explicitly, not installed
-in mutable globals. A provider-side launch-context adapter establishes the selected
-verified owner according to the companion contract in D9.
+in mutable globals. Provider initialization obtains the execution identity from the
+operating system according to D9, not from RPC variables or environment claims.
 
-The shared allocator accepts explicit resolved workspace/results roots, verified
-ownership context, and evaluation labels. It validates root confinement and owns
+The shared allocator accepts explicit resolved workspace/results roots, OS-derived
+execution identity, and evaluation labels. It validates root confinement and owns
 allocation, constrained artifact access, and finalization. It MUST NOT import
 `cmd/*`, rediscover CWD, select workspace precedence, interpret identity transport,
 or duplicate provider-specific directory constants. Its returned evaluation value
@@ -110,13 +112,11 @@ by execution, parsing, hashing, and response construction. Provider orchestratio
 owns tool execution and result interpretation; shared helpers own storage mechanics.
 
 The allocator's input contract comprises the two resolved roots, evaluation labels,
-and a verified owner; its result comprises the allocated directory, token, collection
-time, and constrained artifact operations. Provider adapters extract launch context
-and supply provider-specific roots. Once the companion identity contract is agreed,
-share its provenance validation and rejection rules across adapters rather than
-implementing independent trust decisions for each provider. The allocator consumes
-the validation result; it does not treat an arbitrary UID/GID pair as proof of trust.
-Names and signatures remain implementation details until that contract is established.
+and execution identity; its result comprises the allocated directory, token,
+collection time, and constrained artifact operations. Provider adapters supply
+provider-specific roots; shared helpers implement common root validation and
+ownership/mode verification. No adapter interprets original-caller identity or
+performs an ownership handoff. Keep execution-identity lookup injectable for tests.
 
 Use the following workspace-relative patterns. Each label is one filesystem
 component, not an untrusted path. Local OPA and OpenSCAP use `TargetID` when
@@ -163,7 +163,7 @@ hashing; use constrained handles rather than a pathname check followed by an
 unconstrained reopen. Confirm validated and hashed bytes belong to the same artifact.
 
 The author has selected private evaluation directories (0700) and files (0600),
-including tool outputs and metadata, with original-caller ownership per D9. This is
+including tool outputs and metadata, with execution-account ownership per D9. This is
 the evidence-access product decision, not an open mode choice. Centralize these
 values, label limits, time format, and basenames in focused allocation/metadata
 files; leave pure ID helpers free of filesystem I/O. The conflicting convention-pack
@@ -171,8 +171,8 @@ instruction is reported separately under `Repository instruction conflicts`; thi
 spec records the selected design without changing or waiving that instruction.
 The 0700 requirement applies to the evaluation leaf, not automatically to its context
 parents. Newly created parents MUST permit the selected owner to traverse the full
-path; parent ownership and access are subject to the companion workspace-setup
-contract. An inaccessible parent is an error, not a reason to widen the evaluation
+path using the execution account's access. An inaccessible parent is an error,
+not a reason to widen the evaluation
 leaf or alter unrelated existing directories.
 
 **Alternatives:** Flat opaque directories obscure target/spec context. Suffixing
@@ -341,17 +341,17 @@ outputs, close provider-written files, and compute digests before adding the
 evaluation's assessments to the response. The required OpenSCAP XCCDF result remains
 part of the retained output set, although the ARF is the referenced evidence.
 
-Allocation, required writes/closes, parsing, hashing, and ownership-finalization
+Allocation, required writes/closes, parsing, hashing, and ownership/mode-verification
 failures become operational errors. Preserve these observable channels:
 
 - OpenSCAP: a non-nil RPC error, with no published scan response.
 - Ampel: per-evaluation allocation, tool-output, write/close, and parse failures
   become `ScanResponse.Errors`; digest failures retain the existing non-nil RPC
-  error behavior. Common workspace/identity setup and ownership-finalization
+  error behavior. Common workspace/OS-identity setup and ownership/mode-verification
   failures are RPC errors.
 - OPA: per-evaluation allocation, tool-output, write/close, parse, and digest failures
-  become `ScanResponse.Errors`. Common workspace/identity setup and
-  ownership-finalization failures are RPC errors.
+  become `ScanResponse.Errors`. Common workspace/OS-identity setup and
+  ownership/mode-verification failures are RPC errors.
 
 Response error entries identify the failed target/evaluation without secret values.
 Exclude its assessments and references while preserving successful evaluations when
@@ -426,53 +426,36 @@ can consume space too. No fixed size estimate or storage bound is promised.
 
 ### D8: Resolved workspace coordinates and absolute file URLs
 
-The provider-side contract is to resolve the supplied process working directory
-once as an absolute workspace root and use it for writes and evidence coordinates.
-Providers do not independently interpret `--workspace` or `COMPLYTIME_WORKSPACE`.
-They MUST fail the RPC if root resolution fails. Coordinates are relative to that
-root, not the Evaluation Log's directory or an auditor's arbitrary current directory.
-Process CWD is the workspace handoff mechanism; no additional workspace-context
-message, environment override, or duplicate root-selection mechanism is introduced.
+Resolve the existing `workspace` variable from Generate's global variables and
+Scan's target variables to one absolute workspace root. Complyctl already applies
+`--workspace`, then `COMPLYTIME_WORKSPACE`, then invoking-directory precedence;
+providers MUST NOT repeat that selection or read an environment override. When the
+variable is absent or empty, use process CWD for legacy/direct callers. Resolve a
+relative workspace value against process CWD, including workspace-root symlinks;
+reject an invalid non-empty value rather than silently falling back. Use the same
+resolved root for generated artifacts, retained outputs, and evidence coordinates.
+Coordinates are relative to that root, not the log's directory or an auditor's CWD.
+
+Resolve the root once per RPC before storage access. Scan targets in one request
+MUST resolve to the same root; conflicting roots are an RPC error before evaluation.
+Generate's global workspace is authoritative; reject a conflicting non-empty target
+workspace. Missing target workspace inherits the global root during Generate.
+Standalone Scan calls without a supplied workspace use the documented CWD fallback,
+not a remembered workspace from a previous request. Common validation belongs in a
+shared helper; providers supply their own directory constants at the boundary.
 
 This output/coordinate root is distinct from OPA's input-exclusion boundaries.
-Preserve PR #233's host-injected `workspace` target variable as a source of the host
-`.complytime` exclusion boundary, alongside the configured provider artifact directory
-when different. That variable does not select an alternative retained-output root.
-Launcher CWD alignment MUST NOT remove the dual-boundary protection.
+Preserve PR #233's host `.complytime` exclusion boundary alongside the configured
+provider artifact directory when different. Selecting output roots from `workspace`
+MUST NOT remove dual-boundary checks or exempt retained artifacts from alias checks.
 
-The external complyctl compatibility change owns workspace selection, with existing
-precedence `--workspace`, then `COMPLYTIME_WORKSPACE`, then the invoking directory.
-Its proposed launch contract sets each provider subprocess's working directory to
-the resolved absolute workspace root, so existing `.complytime`-relative provider
-paths use the selected workspace without a new RPC field. Resolve executable and
-other caller-relative launch inputs before changing the child working directory;
-do not change the parent's process-wide working directory. The inspected complyctl
-launcher in `pkg/provider/initialization.go` (also present under
-`vendor/github.com/complytime/complyctl/`) currently constructs `exec.Command`
-without setting its working directory. A companion compatibility change must
-establish this contract and verify Generate and Scan use the same root. This is a
-proposed integration adjustment, not a claim about current launcher behavior.
-
-The companion change also owns reliable original-caller identity delivery for
-elevated execution (D9). Its implementation mechanism is external follow-up, not an
-unanswered provider product decision or an invented new protocol in this proposal.
-Task 0.1 establishes the tracked dependency, consumed interface, and compatibility
-strategy before implementation starts. Task 5.4 records the actual compatible
-revision/version floor and verifies workspace and owner behavior before acceptance
-and release.
-The companion must land before that verification; this spec-only draft does not
-claim it has landed. A provider cannot detect a different workspace selected by a
-launcher from CWD alone, so the companion integration tests must verify that handoff.
-
-Before implementation, task 0.1 must select and document an enforceable compatibility
-strategy with the companion owners. Candidate mechanisms include dependency or
-distribution constraints that pair compatible releases, or a verified launch-contract
-signal that lets providers reject incompatible launchers. Documentation of a minimum
-version alone informs users but does not enforce the pairing. Any signal requires a
-separately agreed interface; do not assume one exists. Provider release acceptance
-requires a compatible companion release and the agreed pairing mechanism, with the
-actual supported version floor recorded in task 5.4. Neither a valid CWD nor a
-successful provider-only test establishes launcher compatibility.
+Inspection of complyctl commit `262e1ded58ade259885f9b2c14609a5b53e0dd26`
+confirms `WithWorkspaceVar` overrides user values with the selected workspace,
+Generate supplies it globally, and Scan injects it into target variables. Its
+launcher leaves child CWD unchanged. These existing maps suffice; no launcher
+change, new protobuf field, handshake change, caller-identity transport, or paired
+release is required. Task 5.4 verifies the unchanged host integration and records
+the actual tested revision; inspection alone is not a passing integration result.
 
 Keep mapping-reference URLs as properly escaped absolute `file://` URLs. Build each
 URL from the actual preserved artifact's already-absolute path; reuse `FileURL`
@@ -493,11 +476,23 @@ that provider output is beneath B rather than A. Cover the default workspace and
 environment-only selection, URL escaping for spaces, percent signs, and non-ASCII
 names, repeated scans, and agreement between coordinates and URLs.
 
-The companion contract must define resolution of caller-relative local inputs and
-conftest configuration paths as well as executable paths before changing child CWD.
-Verify configuration discovery, explicit relative configuration, ignore precedence,
-and relative input selection in the new evaluation context. Preserve PR #233's
-fail-closed behavior when an applicable ignore rule cannot be determined.
+Relative provider input/configuration paths MUST resolve against the selected
+workspace; absolute paths remain absolute. This is a provider behavioral breaking
+change for invocation-relative configurations, not a complyctl API change. Pass
+resolved paths explicitly and set tool subprocess working directories to the
+workspace where CWD-sensitive discovery is needed. Do not use process-wide chdir.
+OPA's conftest configuration inspection and execution MUST use the same workspace
+context, including relative `CONFTEST_CONFIG_FILE` paths, normal configuration
+precedence, and composed ignore rules. Preserve PR #233's fail-closed behavior
+when the effective rule cannot be determined. Workspace-internal generated paths
+must not acquire a second `.complytime` prefix when made absolute.
+
+For example, invocation from `/home/alice/project` with workspace `/srv/compliance`
+resolves `input_path: manifests/` to `/srv/compliance/manifests/` and writes evidence
+beneath `/srv/compliance/.complytime/`. Provider process CWD may remain in Alice's
+project; configuration discovery and tool execution use the explicitly selected
+workspace. Tests place conflicting input/configuration fixtures in both locations
+to prove that the workspace version is selected without writes in the invoking tree.
 
 Workspace-internal metadata paths use the same root-relative convention. External
 paths, such as a system datastream, remain absolute provenance hints. Absolute file
@@ -507,62 +502,48 @@ preserved, but that does not relocate the original absolute URLs. A future optio
 complyctl packaging feature must map moved artifacts without changing the log; this
 change neither implements that mechanism nor depends on it.
 
-**Alternative launch mechanism:** Exporting the workspace only through an
-environment variable would require changing every existing `.complytime`-relative
-provider path. Child CWD preserves that convention and is the sole provider-side
-workspace input. No extra workspace-confirmation protocol is needed for that choice.
+**Alternative:** Requiring complyctl to change provider CWD would add a launcher
+dependency and change relative lookup implicitly. Existing workspace variables
+allow provider-local path resolution with no companion implementation.
 
 **Alternative:** Scheme-less relative URLs would require establishing Gemara schema
 and consumer support and an external resolution base. Export portability alone is
 not a reason to change the runtime URL representation. Copying an entire workspace
 is not a substitute for an explicitly designed future evidence package.
 
-### D9: Finalize evidence for the original invoking user
+### D9: Keep evidence owned by the execution account
 
-The author-confirmed access policy is 0700 evaluation directories and 0600 files,
-owned by the original invoking user's numeric UID and GID,
-not necessarily the effective account running an elevated scan. Normal invocation
-uses the invoking account. Elevated execution on a user's behalf uses that original
-user; direct root invocation with no originating user remains UID/GID 0. Complyctl's
-companion launch contract owns reliable identity establishment and delivery for
-elevated execution. Non-elevated execution uses the operating system's invoking
-UID/GID without requiring a new caller-identity message.
-Providers MUST NOT infer an owner from arbitrary `SUDO_UID`, `SUDO_GID`, `USER`,
-target variables, or workspace metadata. Missing, malformed, or unverified identity
-for an elevated-on-behalf invocation is an RPC error, not permission to guess an
-owner or silently keep root. Direct-root identity must be established as such,
-not inferred as a fallback when original-user identification fails.
+Use the provider process's effective UID/GID from the operating system as the
+execution identity. Evaluation directories remain 0700 and files 0600. Normal
+user scans remain user-owned; root-run scans, whether direct or through sudo,
+remain owned by root's execution identity. They do not automatically grant the
+original non-root user access. That user needs authorized elevated access to read
+and hash root-owned evidence. No new caller-identity interface is required.
 
-Before implementation, the companion contract MUST specify how identity provenance
-is established, how direct-root and elevated-on-behalf invocation are distinguished,
-and how the provider validates the delivered context. Numeric UID/GID values alone
-do not prove caller identity. The launch-context adapter consumes that agreed
-interface and supplies validated ownership context to the shared allocator; the
-allocator does not infer trust from transport fields or arbitrary environment values.
+Providers MUST NOT select ownership from `SUDO_UID`, `SUDO_GID`, `USER`, RPC target
+variables, or workspace metadata, and MUST NOT transfer evidence to another user.
+Automatic original-user handoff, ACLs, shared-group access, and privilege escalation
+are deferred. Reject unexpected artifact ownership rather than silently changing
+owners; inherited group behavior must not bypass the selected identity check.
 
-During privileged execution, retain control of the fresh evaluation directory until
-all tool output is complete, required files are closed, validated and hashed, and
-best-effort metadata has been attempted. Finalize ownership through constrained
-handles, then verify the required files and directory have the selected UID/GID
-and 0700/0600 modes before returning assessments/references. Hand off the evaluation
-directory last, after its files; tools must have stopped writing before handoff.
-Normal non-root execution verifies ownership without requiring privileged chown.
-Failed ownership finalization returns an RPC error and publishes no response.
+After tools stop writing, close required files, validate/parse and hash their bytes,
+attempt metadata, and verify execution-account ownership and private modes through
+constrained handles before publication. Apply restrictive modes from creation and
+verify tool-written outputs before publication. Verification failures are RPC errors
+without a response. Include supporting outputs present after metadata failure.
 
-Changes are limited to the newly allocated evaluation directory and its contents.
-Never recursively chown an existing workspace, shared context parent, legacy file,
-clone, input, or earlier evaluation. Resolve any required new parent-directory
-access in the companion workspace-setup contract; verify the intended owner can
-traverse the full path. If existing parents prevent access, fail with an actionable
-error rather than changing unrelated ownership or publishing inaccessible evidence.
-Caller ownership does not grant other auditors access or promise immutable storage.
+Only fresh evaluation directories and their contents may have modes finalized.
+Never chown an existing workspace, context parent, input, clone, legacy file, or
+earlier evaluation. Newly created context parents must permit execution-account
+traversal. Fail on inaccessible existing parents rather than changing unrelated
+ownership or broadening evidence access. No immutable-storage guarantee is added.
 
-Use injected identity/filesystem operations to exercise normal, elevated-on-behalf,
-direct-root, invalid identity, symlink substitution, and handoff/traversal failure
-paths in unprivileged unit tests. A controlled privileged integration test must
-also verify real UID/GID results and reading/hashing as the original non-root user;
-record that prerequisite when it cannot run locally. No implicit ACL, shared-group,
-or automatic privilege escalation mechanism is introduced.
+Use injected OS-identity/filesystem operations for non-root and root execution,
+unexpected ownership, mode-verification failure, symlink substitution, and traversal
+failure tests without requiring privileged execution under `make test`. Verify real
+root ownership and authorized elevated reading separately in a controlled integration
+test, recording the prerequisite if unavailable. Never claim non-root access to
+root-owned private evidence or an original-user handoff result.
 
 ## Risks / Trade-offs
 
@@ -594,7 +575,8 @@ or automatic privilege escalation mechanism is introduced.
   concurrent execution is introduced by this change.
 - **Raw outputs may contain sensitive findings** → Keep private evaluation
   directories and files at the author-selected 0700/0600 modes, and
-  finalize ownership for the invoking user per D9. Metadata excludes credentials;
+  verify execution-account ownership per D9. Root-run evidence requires authorized
+  elevated reading; original-user handoff is deferred. Metadata excludes credentials;
   raw evidence is not rewritten or redacted because that would change its bytes.
 - **Workspace relocation and manual edits** → Absolute file URLs remain specific to
   the originating filesystem. Relative coordinates need an explicit workspace root;
@@ -607,72 +589,49 @@ or automatic privilege escalation mechanism is introduced.
 
 The author has resolved the evidence-access and runtime-reference product choices:
 
-- **Workspace:** use the provider process CWD supplied by complyctl as the workspace
-  root, with coordinates relative to it. Do not add a second root-selection protocol.
+- **Workspace:** use existing Generate global/Scan target `workspace` variables,
+  with CWD fallback only when absent or empty. Relative inputs and configuration
+  resolve against that root; no process-wide chdir or launcher change is required.
 - **URLs:** retain absolute `file://` mapping URLs identifying the same files.
-- **Ownership:** finalize files for the original invoking user; elevated-on-behalf
-  scans do not require that user to read evidence as root. Direct root stays root.
+- **Ownership:** keep evidence owned by the execution account. Sudo and direct-root
+  scans remain root-owned; original-user handoff is deferred.
 - **Modes:** use 0700 evaluation directories and 0600 files, including supporting
   metadata and tool-written outputs. The author explicitly confirmed these modes.
-- **Workflow direction:** retain these OpenSpec artifacts; the author identified
-  the Speckit instruction as outdated and explicitly declined migration.
+- **Workflow scope:** retain OpenSpec for two provider-only user stories. No
+  companion complyctl implementation is required; unchanged-host integration
+  verification is acceptance evidence, not cross-repository implementation scope.
 
-Complyctl workspace launch alignment and reliable elevated-caller identity delivery
-are separately owned prerequisites. Task 0.1 must record the companion issue/spec,
-consumed interface, identity trust model, compatibility strategy, and merge sequencing
-before implementation. No matching companion reference is established by this draft;
-the dependency remains blocking rather than being treated as an integration-only
-detail. Task 5.4 records the actual compatible revision/version floor and verifies the
-landed implementation before acceptance and release. These are not new product
-choices awaiting this author's answer. Schema validation, actual ownership handoff,
-and end-to-end consumer checks remain tests to perform, not claims that future
-behavior is already implemented.
+These decisions supersede the earlier CWD-only and original-caller handoff proposal.
+They remove the companion launcher/identity prerequisite rather than claiming it
+has been implemented. Task 5.4 verifies existing complyctl behavior and records the
+tested revision without requiring a paired release or introducing a new version
+floor. Provider output paths, IDs, OPA evidence semantics, summary removal, and
+workspace-relative input/configuration lookup remain breaking provider changes.
+The complyctl CLI, Go API, protobuf contract, and handshake remain unchanged.
+Schema, ownership/mode, and end-to-end consumer checks remain tests to perform,
+not claims that retention behavior is already implemented.
 This decision record does not constitute council, implementation, or merge approval.
 
-### Companion contract acceptance record
-
-The companion launcher contract is proposed, not agreed or available in a supported
-release. Before task 0.1 can complete, record the following evidence here and link
-the accepted companion issue/spec. An issue describing the desired behavior alone
-does not establish the consumed interface or satisfy this prerequisite.
-
-| Contract element | Required acceptance evidence | Current state |
-| --- | --- | --- |
-| Tracking and ownership | Companion complyctl issue/spec, responsible owner, and accepted contract revision | No companion reference or acceptance is recorded |
-| Workspace handoff | Child CWD equals the resolved absolute workspace for Generate and Scan; document symlink resolution and caller-relative executable/input/configuration handling | D8 defines the required behavior; launcher agreement is outstanding |
-| Identity delivery | Name the consumed interface, its producer, identity provenance and validation, and how direct-root invocation differs from elevation on behalf of a user | D9 defines the required behavior; transport and trust agreement are outstanding |
-| Provider consumption | Provider adapters resolve roots and validate launch context; shared storage receives explicit roots and verified ownership without importing provider packages | Defined in D1; the identity adapter awaits the companion interface |
-| Compatibility | Define how unsupported launchers are excluded, how users identify a compatible build, and what dependency/release mechanism enforces the pairing | No compatibility mechanism or version floor is established |
-| Merge and release order | Agree the companion/provider merge order and when the compatible launcher must be available; link actual landed revisions before release acceptance | Companion landing precedes task 5.4 verification; the detailed sequence awaits agreement |
-| Verification | Link default/environment/flag workspace tests, caller-relative input/configuration tests, identity rejection tests, and a real privileged ownership-handoff result | Future verification under task 5.4; no passing result is claimed |
-
-Do not infer launcher compatibility from a valid process CWD: the provider cannot
-detect a workspace selected elsewhere by an older launcher. Do not infer identity
-trust from numeric UID/GID values or an environment variable name. The accepted
-contract must explain these guarantees rather than rely on provider guesses.
-A released version need not exist during design review; task 5.4 records the actual
-landed revision and supported version floor after the compatible implementation
-exists. Keep collection, packaging, storage, and retention-policy work outside this
-dependency.
+For example, three scans keep three independent ARFs beneath the selected workspace.
+A script using the former fixed `results/arf.xml` must follow the log's returned
+coordinate instead. A root-run scan retains private root-owned files rather than
+requiring a new host identity protocol to give them to the original user.
 
 ## Repository instruction conflicts
 
-The selected design and author direction are explicit. The following loaded rules
-still conflict with them and are reported for governance handling, not re-presented
-as unanswered evidence-design questions. Recording the decisions does not change
-these rules, their severity, or review requirements.
+The permission conflict remains reported for governance handling. Recording the
+selected design does not change rules, severity, or review requirements.
 
 - **Permission-mode instruction conflict (HIGH):** The selected 0700/0600 modes
-  conflict with `.opencode/uf/packs/go.md` SC-005's 0755/0644 rule. Caller ownership
+  conflict with `.opencode/uf/packs/go.md` SC-005's 0755/0644 rule. Execution ownership
   does not waive that rule. Obtain reconciliation through the applicable governance
   process before implementing modes. Do not edit convention packs or
   make findings world-readable to clear review in this change.
-- **Workflow instruction conflict (HIGH):** The user has identified the Speckit
-  tier instruction as outdated and requested no migration. The loaded AGENTS.md
-  still requires Speckit for cross-repository work. These provider artifacts remain
-  in OpenSpec, with complyctl changes externally owned; no governance rule is changed
-  or treated as waived. Maintainer reconciliation of the conflicting instructions
-  remains outstanding rather than being presented as implementation approval.
+
+The earlier cross-repository implementation premise no longer applies: launcher and
+identity changes are removed from scope, not delegated elsewhere as prerequisites.
+This proposal keeps two user stories in one repository and therefore uses the
+existing tactical OpenSpec tier without waiving or modifying AGENTS.md.
 
 For the permission conflict, the readiness record MUST identify the authorized
 maintainer decision, its scope, the decision venue and link, and the resulting
@@ -684,7 +643,7 @@ pack, and it does not substitute broader access for the selected private modes.
 
 1. Review and approve these artifacts; commit and push specifications before
    implementation begins, following repository workflow.
-   Establish task 0.1's companion contract and reconcile the reported permission-mode
+   Complete task 0.1's permission-mode reconciliation and resolve the reported
    instruction conflict before affected implementation begins. Do not make findings
    world-readable or modify governance rules as part of retention implementation.
 2. Implement allocation and metadata helpers, then integrate each provider and
