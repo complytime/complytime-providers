@@ -156,12 +156,10 @@ target values. Trusted identity delivery is an external prerequisite in design D
 
 ### Requirement: Private evidence directory and file modes
 
-Providers MUST use 0700 evaluation directories and 0600 files, including required
-tool outputs and any supporting metadata. They MUST verify these modes and the
-selected original-caller ownership before publishing evidence. A failed mode or
-ownership finalization MUST return an RPC error without a response. These are the
-author-selected access semantics; the conflicting repository rule is reported
-separately in the design and is not waived by this requirement.
+Providers MUST use 0700 evaluation directories and 0600 files, including tool outputs
+and metadata, and verify their modes and selected owner before publication. Failed
+finalization MUST return an RPC error without a response. The conflicting repository
+rule is not waived; maintainer reconciliation is required before implementation.
 
 #### Scenario: Owner reads private finalized evidence
 
@@ -171,6 +169,20 @@ separately in the design and is not waived by this requirement.
 - **AND** the selected original caller can traverse, read, and digest-verify the evidence
 - **AND** metadata and required tool outputs have the same private access policy
 - **AND** the provider does not add world or group permissions to avoid a failed handoff
+
+### Requirement: Traversable context parents
+
+The 0700 requirement applies to the evaluation leaf. Newly created context parents
+MUST permit the selected owner to traverse the full path under the agreed
+workspace-setup contract, without widening the leaf or changing unrelated existing
+directories.
+
+#### Scenario: New parents permit evidence access
+
+- **GIVEN** evaluation allocation creates context parents
+- **WHEN** the provider finalizes evidence for the selected owner
+- **THEN** the owner can traverse those parents and read the private evaluation leaf
+- **AND** unrelated existing directories remain unchanged
 
 ### Requirement: Ownership finalization is bounded and publication-critical
 

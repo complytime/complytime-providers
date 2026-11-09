@@ -109,6 +109,15 @@ carries the allocated directory, token, collection time, and artifact access nee
 by execution, parsing, hashing, and response construction. Provider orchestration
 owns tool execution and result interpretation; shared helpers own storage mechanics.
 
+The allocator's input contract comprises the two resolved roots, evaluation labels,
+and a verified owner; its result comprises the allocated directory, token, collection
+time, and constrained artifact operations. Provider adapters extract launch context
+and supply provider-specific roots. Once the companion identity contract is agreed,
+share its provenance validation and rejection rules across adapters rather than
+implementing independent trust decisions for each provider. The allocator consumes
+the validation result; it does not treat an arbitrary UID/GID pair as proof of trust.
+Names and signatures remain implementation details until that contract is established.
+
 Use the following workspace-relative patterns. Each label is one filesystem
 component, not an untrusted path. Local OPA and OpenSCAP use `TargetID` when
 available, with a source-derived or `system` fallback. Remote labels identify the
@@ -160,6 +169,11 @@ values, label limits, time format, and basenames in focused allocation/metadata
 files; leave pure ID helpers free of filesystem I/O. The conflicting convention-pack
 instruction is reported separately under `Repository instruction conflicts`; this
 spec records the selected design without changing or waiving that instruction.
+The 0700 requirement applies to the evaluation leaf, not automatically to its context
+parents. Newly created parents MUST permit the selected owner to traverse the full
+path; parent ownership and access are subject to the companion workspace-setup
+contract. An inaccessible parent is an error, not a reason to widen the evaluation
+leaf or alter unrelated existing directories.
 
 **Alternatives:** Flat opaque directories obscure target/spec context. Suffixing
 every existing filename repeats naming logic and keeps long unsafe branch/spec
@@ -450,6 +464,16 @@ The companion must land before that verification; this spec-only draft does not
 claim it has landed. A provider cannot detect a different workspace selected by a
 launcher from CWD alone, so the companion integration tests must verify that handoff.
 
+Before implementation, task 0.1 must select and document an enforceable compatibility
+strategy with the companion owners. Candidate mechanisms include dependency or
+distribution constraints that pair compatible releases, or a verified launch-contract
+signal that lets providers reject incompatible launchers. Documentation of a minimum
+version alone informs users but does not enforce the pairing. Any signal requires a
+separately agreed interface; do not assume one exists. Provider release acceptance
+requires a compatible companion release and the agreed pairing mechanism, with the
+actual supported version floor recorded in task 5.4. Neither a valid CWD nor a
+successful provider-only test establishes launcher compatibility.
+
 Keep mapping-reference URLs as properly escaped absolute `file://` URLs. Build each
 URL from the actual preserved artifact's already-absolute path; reuse `FileURL`
 only after validating that input, so its relative-path fallback is not relied upon.
@@ -649,6 +673,12 @@ these rules, their severity, or review requirements.
   in OpenSpec, with complyctl changes externally owned; no governance rule is changed
   or treated as waived. Maintainer reconciliation of the conflicting instructions
   remains outstanding rather than being presented as implementation approval.
+
+For the permission conflict, the readiness record MUST identify the authorized
+maintainer decision, its scope, the decision venue and link, and the resulting
+applicable instruction. Until that evidence is recorded, reconciliation remains
+outstanding. This record does not authorize an agent to amend or waive a convention
+pack, and it does not substitute broader access for the selected private modes.
 
 ## Migration Plan
 

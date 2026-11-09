@@ -61,11 +61,14 @@ error while adding the new finalization errors from D6/D9.
   Complete the design's companion contract acceptance record with the responsible
   owner and accepted contract revision. Specify how unsupported launchers are
   excluded without assuming the provider can detect a mismatched workspace from
-  CWD alone. An issue draft or unaccepted interface proposal does not complete 0.1.
+  CWD alone. Select and record the compatibility enforcement and provider release
+  sequence described in D8; version documentation alone does not enforce pairing.
+  An issue draft or unaccepted interface proposal does not complete 0.1.
 
 The selected private modes remain unchanged. Obtain the reported permission-mode
 instruction reconciliation through maintainers before affected implementation;
-record the resolution without modifying convention packs in this change.
+record the authorized decision, scope, venue/link, and applicable instruction in the
+design without modifying convention packs in this change.
 Also obtain and reference the workflow-tier reconciliation described in the design.
 Keep both instruction conflicts unresolved until the applicable maintainer decisions
 are recorded; do not mark readiness complete based solely on author product choices.
@@ -79,8 +82,10 @@ are recorded; do not mark readiness complete based solely on author product choi
   allocator accepts these explicit values, validates confinement, and returns the
   evaluation directory, token, collection time, and constrained artifact access.
   It must not import `cmd/*`, rediscover CWD, select workspace precedence, or
-  interpret identity transport. Test all three provider adapters without mutating
-  global result paths or duplicating provider directory constants. Centralize and
+  interpret identity transport. Share provenance-validation and rejection rules
+  across provider adapters after the companion interface is agreed; test each
+  adapter's wiring and the common trust decisions. Test all three adapters without
+  mutating global result paths or duplicating provider directory constants. Centralize and
   document the bounded retry limit with a test override. Verify exact timestamp/path form,
   token entropy source, fixed-clock repeated allocations, concurrent allocations,
   forced collisions, clock rollback, allocation failure, and retry exhaustion.
@@ -108,6 +113,9 @@ are recorded; do not mark readiness complete based solely on author product choi
   unrelated ownership is changed, and failures return RPC errors without a response.
   Assert directory mode 0700 and file mode 0600 after the reported governance
   conflict has been reconciled; the intended modes are selected, not an open choice.
+  Verify newly created context parents allow the selected owner to traverse the full
+  path under the companion workspace-setup contract without widening the leaf or
+  changing unrelated existing directories.
 - [ ] 1.8 Resolve process CWD once as the absolute root. Verify root-resolution
   failure and that inherited workspace variables cannot override the supplied CWD.
   Preserve OPA's injected `workspace` target variable for input-exclusion boundaries,
@@ -180,8 +188,10 @@ are recorded; do not mark readiness complete based solely on author product choi
 - [ ] 5.4 Verify the separately owned complyctl compatibility prerequisite; do not
   implement its launcher in this repository. Verify the issue/spec and interface
   agreed in 0.1, recording its reliable elevated caller-identity mechanism, actual
-  landed revision/version and supported version floor. Confirm workspace precedence,
-  child CWD, original caller UID/GID delivery, and caller-relative launch-input
+  landed revision/version and supported version floor. Before provider release,
+  verify that the compatible companion release and agreed pairing mechanism are
+  available. Confirm workspace precedence, child CWD, original caller UID/GID delivery,
+  and caller-relative launch-input
   resolution without parent chdir. Verify default, environment, and flag workspaces,
   including invocation from A with workspace B, Generate/Scan root agreement, no new
   generated artifacts or evidence beneath A, and matching coordinates/URLs/digests
