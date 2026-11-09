@@ -11,6 +11,9 @@
 
 ### Fixed
 
+- **ci**: Reject indirect, excluded, and replacement-only complyctl entries when resolving the
+  release baseline, report module parse failures with stage context, restore Renovate tracking
+  for the checksum-pinned Conftest release, and fix the shell-test lint failure.
 - **opa-provider**: Stop rejecting workspace identity collection merely because a resolvable directory symlink cycle revisits a directory, such as `cycle -> .` in a retained clone. Unrelated local and remote targets can then retain their results, including on subsequent scans, subject to the existing selected-input and identity checks. Unresolvable link loops still fail workspace inspection for every target using that workspace boundary. (Spec: `openspec/changes/opa-exclude-workspace-from-input/`)
 - **opa-provider**: Validate conftest compatibility through real-tool behavior tests rather than an exact-version runtime restriction. Release and source builds do not need version or module metadata to scan; actual execution, input-safety, and output-validation errors still fail the scan. (Spec: `openspec/changes/opa-exclude-workspace-from-input/`)
 - **opa-provider**: Discard all branch assessments for a configured remote target when any selected branch fails input-safety preflight or has no confirmed evaluated directory input. Preserve operational errors and other configured targets' assessments instead of reporting a partial passing target. (Spec: `openspec/changes/opa-exclude-workspace-from-input/`)
@@ -36,6 +39,7 @@
 - Modernized RPM spec for Fedora Go Packaging Guidelines: adopted `go-vendor-tools` for vendored license handling, replaced raw `go build` with `%gobuild` macro, switched to forge macros and `%autorelease`, added aggregated vendored license expression, and introduced main `complytime-providers` package for shared license files.
 - Consolidated duplicate tar.gz extraction code from ampel and OPA providers into shared `internal/archive/` package, eliminating code duplication and ensuring consistent security behavior across providers.
 - **ci**: Pinned the `carabiner-dev/actions` install steps (`snappy`, `ampel`) in `ci_cross_repo_integration.yml` to the v1.3.1 release tag. The previous pin tracked an untagged post-v1.3.0 commit whose free-form version comment pinact v4 `--verify` rejects, which failed the `Standardized CI / Verify action versions` job on `main` and on every PR.
+- **ci**: Added released-baseline cross-repository integration validation. Each PR now builds providers against the highest stable `complyctl` release compatible with the declared module dependency and runs the existing integration harness, while retaining the `complyctl@main` integration job. (Spec: `openspec/changes/validate-complyctl-release-compatibility/`)
 
 ### Breaking Changes
 

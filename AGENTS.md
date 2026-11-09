@@ -15,8 +15,8 @@ gRPC plugin interface (hashicorp/go-plugin) with three core RPCs
 
 ## Build & Test Commands
 
-Build, test, and lint commands derived from `Makefile` and
-`.github/workflows/ci_local.yml`:
+Build, test, and lint commands derived from `Makefile`,
+`.github/workflows/ci_local.yml`, and `.github/workflows/ci_cross_repo_integration.yml`:
 
 ```bash
 # Build all provider binaries to bin/
@@ -29,6 +29,15 @@ make build-opa-provider
 
 # Run all unit tests
 make test
+
+# Run released-baseline CI helper tests (requires Go, jq, make, and curl)
+bash .github/scripts/test/resolve-complyctl-release-baseline_test.sh
+bash .github/scripts/test/validate-released-complyctl-checkout_test.sh
+bash .github/scripts/test/released-baseline-diagnostics_test.sh
+
+# Lint CI helper scripts and the cross-repo workflow
+shellcheck .github/scripts/*.sh .github/scripts/test/*.sh
+yamllint .github/workflows/ci_cross_repo_integration.yml
 
 # Run OPA's real-conftest isolation tests (requires conftest and git on PATH)
 go test -race -count=1 ./cmd/opa-provider/server -run '^TestScan_(RealConftest|.*WithRealConftest|WorkspaceIgnoreWithConftest)'
@@ -55,6 +64,7 @@ make test-devcontainer
 | Workflow | File | Triggers | Jobs |
 |----------|------|----------|------|
 | ci | `.github/workflows/ci_local.yml` | push to main, PRs | build-and-test |
+| cross-repo integration | `.github/workflows/ci_cross_repo_integration.yml` | push to main, PRs | released-baseline and `main` integration |
 | release | `.github/workflows/release.yml` | workflow_dispatch | preflight (org-infra reusable), release (org-infra reusable) |
 
 ## Project Structure
@@ -104,6 +114,7 @@ complytime-providers/
 │   └── man/                   #   Man page sources (Pandoc markdown) and generated .1 files
 ├── plans/                     # TMT/FMF RPM validation tests
 ├── .github/workflows/         # CI configuration
+├── .github/scripts/           # Release-baseline CI helpers and shell tests
 ├── openspec/                  # OpenSpec change workflow
 │   ├── archive/               #   Completed/superseded change specs
 │   └── changes/               #   Active change specs

@@ -1,7 +1,7 @@
 # Cross-repo integration test workflow.
-# Builds providers (ampel + opa) from the current PR/push, checks out
-# complyctl@main, and runs the cross-repo integration test script
-# to validate the full provider + complyctl pipeline end-to-end.
+# Builds providers from the current PR/push against both the latest compatible
+# complyctl release and complyctl@main, then runs the cross-repo integration
+# harness to validate the provider + complyctl pipeline end-to-end.
 name: Cross-Repo Integration Test
 
 on:
@@ -13,7 +13,206 @@ on:
 permissions:
     contents: read
 
+env:
+    CONFTEST_ARCHIVE_SHA256: e8144c6d6d2ae0260b869caa60c7c262a1f95ac63ec1e5d2fb19be452d606347
+    # Refresh CONFTEST_ARCHIVE_SHA256 in each Renovate version update before merging.
+    # renovate: datasource=github-releases depName=open-policy-agent/conftest
+    CONFTEST_VERSION: v0.68.2
+
 jobs:
+    resolve-released-baseline:
+        name: Resolve released complyctl baseline
+        runs-on: ubuntu-latest
+        outputs:
+            module: ${{ steps.resolve.outputs.module }}
+            tag: ${{ steps.resolve.outputs.tag }}
+            commit: ${{ steps.resolve.outputs.commit }}
+
+        steps:
+            - name: Checkout complytime-providers
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - name: Set up Go
+              uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+              with:
+                  go-version-file: './go.mod'
+                  cache: false
+
+            - name: Run released-baseline shell tests
+              run: |
+                  bash .github/scripts/test/resolve-complyctl-release-baseline_test.sh
+                  bash .github/scripts/test/validate-released-complyctl-checkout_test.sh
+                  bash .github/scripts/test/released-baseline-diagnostics_test.sh
+
+            - name: Resolve released complyctl baseline
+              id: resolve
+              run: bash .github/scripts/resolve-complyctl-release-baseline.sh
+
+            - name: Report released complyctl baseline
+              env:
+                  COMPLYCTL_TAG: ${{ steps.resolve.outputs.tag }}
+                  COMPLYCTL_COMMIT: ${{ steps.resolve.outputs.commit }}
+              run: |
+                  printf 'Released complyctl baseline: %s (%s)\n' \
+                      "$COMPLYCTL_TAG" "$COMPLYCTL_COMMIT"
+                  {
+                      printf '## Released complyctl baseline\n\n'
+                      printf -- "- Tag: \`%s\`\n" "$COMPLYCTL_TAG"
+                      printf -- "- Commit: \`%s\`\n" "$COMPLYCTL_COMMIT"
+                  } >> "$GITHUB_STEP_SUMMARY"
+
+    released-baseline-integration:
+        name: Released Complyctl Baseline Integration Test
+        needs: resolve-released-baseline
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout complytime-providers
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - name: Checkout released complyctl baseline
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  repository: complytime/complyctl
+                  ref: ${{ needs.resolve-released-baseline.outputs.commit }}
+                  path: _released_complyctl
+                  persist-credentials: false
+
+            - name: Verify released complyctl checkout
+              env:
+                  COMPLYCTL_TAG: ${{ needs.resolve-released-baseline.outputs.tag }}
+                  COMPLYCTL_COMMIT: ${{ needs.resolve-released-baseline.outputs.commit }}
+              run: |
+                  actual_commit=$(git -C _released_complyctl rev-parse HEAD)
+                  if [[ "$actual_commit" != "$COMPLYCTL_COMMIT" ]]; then
+                      printf 'release-baseline: checkout for %s resolved to %s, expected %s\n' \
+                          "$COMPLYCTL_TAG" "$actual_commit" "$COMPLYCTL_COMMIT" >&2
+                      exit 1
+                  fi
+
+            - name: Validate released complyctl checkout prerequisites
+              env:
+                  COMPLYCTL_TAG: ${{ needs.resolve-released-baseline.outputs.tag }}
+              run: |
+                  bash .github/scripts/validate-released-complyctl-checkout.sh \
+                      --checkout-dir _released_complyctl \
+                      --tag "$COMPLYCTL_TAG"
+
+            - name: Determine Go version
+              id: released-go-version
+              run: |
+                  provider_go_version=$(awk '/^go / {print $2}' go.mod)
+                  complyctl_go_version=$(awk '/^go / {print $2}' _released_complyctl/go.mod)
+                  maximum_go_version=$(printf '%s\n%s\n' "$provider_go_version" \
+                      "$complyctl_go_version" | sort -V | tail -1)
+                  echo "version=$maximum_go_version" >> "$GITHUB_OUTPUT"
+
+            - name: Set up Go
+              uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+              with:
+                  go-version: ${{ steps.released-go-version.outputs.version }}
+                  cache: false
+
+            - name: Create isolated provider workspace
+              run: git worktree add --detach _released_providers HEAD
+
+            - name: Replace complyctl dependency in isolated workspace
+              working-directory: _released_providers
+              env:
+                  COMPLYCTL_MODULE: ${{ needs.resolve-released-baseline.outputs.module }}
+                  COMPLYCTL_TAG: ${{ needs.resolve-released-baseline.outputs.tag }}
+              run: |
+                  if ! go mod edit -replace="$COMPLYCTL_MODULE"=../_released_complyctl; then
+                      printf 'released-provider-build: could not configure providers for %s\n' \
+                          "$COMPLYCTL_TAG" >&2
+                      exit 1
+                  fi
+                  if ! go mod tidy; then
+                      printf 'released-provider-build: could not resolve provider dependencies for %s\n' \
+                          "$COMPLYCTL_TAG" >&2
+                      exit 1
+                  fi
+
+            - name: Build providers against released complyctl baseline
+              working-directory: _released_providers
+              env:
+                  COMPLYCTL_TAG: ${{ needs.resolve-released-baseline.outputs.tag }}
+              run: |
+                  if ! GOFLAGS=-mod=mod make build; then
+                      printf 'released-provider-build: provider build failed for %s\n' \
+                          "$COMPLYCTL_TAG" >&2
+                      exit 1
+                  fi
+
+            - name: Test providers against released complyctl baseline
+              working-directory: _released_providers
+              env:
+                  COMPLYCTL_TAG: ${{ needs.resolve-released-baseline.outputs.tag }}
+              run: |
+                  if ! GOFLAGS=-mod=mod make test; then
+                      printf 'released-provider-test: provider test failed for %s\n' \
+                          "$COMPLYCTL_TAG" >&2
+                      exit 1
+                  fi
+
+            - name: Build released complyctl baseline
+              working-directory: _released_complyctl
+              env:
+                  COMPLYCTL_TAG: ${{ needs.resolve-released-baseline.outputs.tag }}
+              run: |
+                  if ! make build; then
+                      printf 'released-checkout-build: complyctl build failed for %s\n' \
+                          "$COMPLYCTL_TAG" >&2
+                      exit 1
+                  fi
+
+            # carabiner-dev/actions v1.3.1 resolves the default
+            # `$HOME/.carabiner` install-dir correctly, but an absolute path is
+            # kept explicit so the installed bin dir does not depend on how the
+            # composite action expands $HOME on the runner.
+            - name: Install snappy
+              uses: carabiner-dev/actions/install/snappy@63d43b57262e65927864c8f7ca0a6a8efe06acc0 # v1.3.1
+              with:
+                  install-dir: /home/runner/.carabiner
+                  # renovate: datasource=github-releases depName=carabiner-dev/snappy
+                  version: v0.2.6
+
+            - name: Install ampel
+              uses: carabiner-dev/actions/install/ampel@63d43b57262e65927864c8f7ca0a6a8efe06acc0 # v1.3.1
+              with:
+                  install-dir: /home/runner/.carabiner
+                  # renovate: datasource=github-releases depName=policylabs/ampel
+                  version: v1.4.2
+
+            - name: Install conftest
+              run: |
+                  version=${CONFTEST_VERSION#v}
+                  archive="conftest_${version}_Linux_x86_64.tar.gz"
+                  curl --fail --location --proto '=https' --tlsv1.2 --output "$archive" \
+                      "https://github.com/open-policy-agent/conftest/releases/download/${CONFTEST_VERSION}/$archive"
+                  printf '%s  %s\n' "$CONFTEST_ARCHIVE_SHA256" "$archive" | sha256sum --check --status
+                  tar --extract --gzip --file "$archive" conftest
+                  install --directory "$HOME/.local/bin"
+                  install --mode 0755 conftest "$HOME/.local/bin/conftest"
+                  printf '%s\n' "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+            - name: Run released baseline cross-repo integration test
+              working-directory: _released_providers
+              env:
+                  COMPLYCTL_TAG: ${{ needs.resolve-released-baseline.outputs.tag }}
+                  PROVIDERS_BIN_DIR: ${{ github.workspace }}/_released_providers/bin
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  if ! make -C ../_released_complyctl test-cross-repo; then
+                      printf 'released-integration: cross-repo integration failed for %s\n' \
+                          "$COMPLYCTL_TAG" >&2
+                      exit 1
+                  fi
+
     cross-repo-integration:
         name: Cross-Repo Integration Test
         runs-on: ubuntu-latest
@@ -76,8 +275,16 @@ jobs:
                   version: v1.4.2
 
             - name: Install conftest
-              # renovate: datasource=github-releases depName=open-policy-agent/conftest
-              run: go install github.com/open-policy-agent/conftest@v0.68.2
+              run: |
+                  version=${CONFTEST_VERSION#v}
+                  archive="conftest_${version}_Linux_x86_64.tar.gz"
+                  curl --fail --location --proto '=https' --tlsv1.2 --output "$archive" \
+                      "https://github.com/open-policy-agent/conftest/releases/download/${CONFTEST_VERSION}/$archive"
+                  printf '%s  %s\n' "$CONFTEST_ARCHIVE_SHA256" "$archive" | sha256sum --check --status
+                  tar --extract --gzip --file "$archive" conftest
+                  install --directory "$HOME/.local/bin"
+                  install --mode 0755 conftest "$HOME/.local/bin/conftest"
+                  printf '%s\n' "$HOME/.local/bin" >> "$GITHUB_PATH"
 
             - name: Run cross-repo integration test
               env:
