@@ -43,7 +43,7 @@ error while adding the new finalization errors from D6/D9.
 
 ## 0. Implementation-readiness prerequisites
 
-- [ ] 0.1 Before implementing private modes, obtain maintainer reconciliation of
+- [x] 0.1 Before implementing private modes, obtain maintainer reconciliation of
   `.opencode/uf/packs/go.md` SC-005 with the selected 0700/0600 evidence modes.
   Record the authorized decision, scope, venue/link, and applicable instruction in
   the design without modifying convention packs in this change. Keep this task
