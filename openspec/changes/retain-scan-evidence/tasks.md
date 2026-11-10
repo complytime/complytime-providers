@@ -180,6 +180,14 @@ error while adding the new finalization errors from D6/D9.
   required, and no skipped privileged test counts as verification.
 - [ ] 5.5 Update root `README.md`, `cmd/*-provider/README.md`, and all provider man pages with the selected workspace root as the coordinate base and absolute `file://` URLs as originating-filesystem locators. Document workspace precedence, how to locate the root, URI escaping, and the in-place workflow of reading the log's evidence mappings, resolving files, and checking digests without packaging. Explain that the Gemara Evaluation Log alone defines the evidence set, supporting files are not implicitly evidence, preservation is always on without automatic cleanup or retention settings, and future optional collection/packaging must map moved files without rewriting the log. State that storage backends and longevity remain customer-owned and absolute URLs do not automatically relocate; verify examples and regenerate affected man pages.
 
+  Explicitly distinguish preserving or uploading the Evaluation Log from preserving
+  and transferring its referenced files: a log-only upload does not transfer the
+  artifact bytes. Document that downstream collection preserves both the log and
+  its log-selected evidence files, keeps those files retrievable, verifies
+  transferred bytes against the recorded digests, and maps transferred artifacts to
+  the original references without modifying the log. Keep collection implementation
+  and storage integrations outside this provider-local change.
+
   Also document execution-account ownership, root-run/sudo behavior, approved modes,
   directory traversal and workspace writability requirements, and failures that
   leave unreferenced partial outputs. Include troubleshooting for permission and

@@ -71,12 +71,29 @@ reference identities. A file's presence in an evaluation directory does not make
 it evidence: OpenSCAP's XCCDF result and optional metadata remain supporting outputs
 unless explicitly reported as evidence. The output requirements in D1 remain intact.
 
+Preserving provider artifacts does not itself preserve the authoritative Evaluation
+Log. In the inspected complyctl v1.1.0 implementation, log filenames include the
+policy, target, and a timestamp with one-second resolution, and writes can replace
+an existing log. Scanning the same policy against the same target from the same
+host, into the same output directory, within one second is an unusual edge case,
+not an expected scan pattern, but rapid or concurrent automation can trigger it.
+The earlier artifacts survive while their log can be overwritten. Collision-safe
+log creation is a separate complyctl core follow-up, not a regression introduced by
+this proposal or a prerequisite for provider-local preservation.
+
 A separate future complyctl core feature can collect, validate, and optionally
 package every artifact referenced as evidence in the log. It must use the log's
 evidence mappings rather than infer evidence from directory contents. If packaging
 moves files, that feature must map the moved artifacts to the original references
 without modifying the Evaluation Log. The format and mechanism are outside this
 change, and packaging is not required for the default local paper trail.
+
+Preserving or uploading an Evaluation Log alone does not preserve or transfer the
+files it references. Downstream collection MUST preserve both the log and its
+log-selected evidence files, keep those files retrievable, and verify transferred
+bytes against the log's recorded digests. It MUST map transferred artifacts to
+their original references without modifying the log. This handoff contract does
+not introduce a collection implementation, package format, or storage integration.
 
 Customer integrations own storage backends, transfers, credentials, access policies,
 archival, and longevity. Customers may keep evidence locally without any integration.
