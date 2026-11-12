@@ -4,8 +4,8 @@ github.com/antchfx/xmlquery
 # github.com/antchfx/xpath v1.3.9
 ## explicit; go 1.14
 github.com/antchfx/xpath
-# github.com/complytime/complyctl v1.1.0
-## explicit; go 1.26.8
+# github.com/complytime/complyctl v1.2.0
+## explicit; go 1.26.10
 github.com/complytime/complyctl/api/plugin
 github.com/complytime/complyctl/internal/complytime
 github.com/complytime/complyctl/pkg/provider
@@ -107,11 +107,11 @@ golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
-# google.golang.org/genproto/googleapis/rpc v0.0.0-20260720155508-bb71a54f79dc
+# google.golang.org/genproto/googleapis/rpc v0.0.0-20260817212433-ac3dfec99bb1
 ## explicit; go 1.25.0
 google.golang.org/genproto/googleapis/rpc/status
-# google.golang.org/grpc v1.83.2
-## explicit; go 1.25.0
+# google.golang.org/grpc v1.85.0
+## explicit; go 1.26.0
 google.golang.org/grpc
 google.golang.org/grpc/attributes
 google.golang.org/grpc/backoff
@@ -222,8 +222,8 @@ google.golang.org/protobuf/types/known/anypb
 google.golang.org/protobuf/types/known/durationpb
 google.golang.org/protobuf/types/known/emptypb
 google.golang.org/protobuf/types/known/timestamppb
-# oras.land/oras-go/v2 v2.6.2
-## explicit; go 1.25.0
+# oras.land/oras-go/v2 v2.7.0
+## explicit; go 1.26.0
 oras.land/oras-go/v2/content
 oras.land/oras-go/v2/errdef
 oras.land/oras-go/v2/internal/descriptor
