@@ -5,8 +5,6 @@ package results
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -52,6 +50,9 @@ type PerTargetResult struct {
 	Error          string            `json:"error,omitempty"`
 	Remarks        string            `json:"remarks,omitempty"`
 	ReverseMapping map[string]string `json:"-"`
+	// RetainedEvidence and References are finalized before publication by Scan.
+	RetainedEvidence []provider.Evidence         `json:"-"`
+	References       []provider.MappingReference `json:"-"`
 }
 
 type reqGroup struct {
@@ -169,31 +170,6 @@ func deriveIDFromQuery(query string) string {
 	return strings.Join(parts, ".")
 }
 
-// WritePerTargetResult writes a PerTargetResult as JSON to the given directory.
-func WritePerTargetResult(result *PerTargetResult, dir string) error {
-	if err := os.MkdirAll(dir, 0750); err != nil {
-		return fmt.Errorf("creating results directory: %w", err)
-	}
-
-	sanitized := sanitizeName(result.Target)
-	if result.Branch != "" {
-		sanitized += "-" + result.Branch
-	}
-	filename := sanitized + ".json"
-	path := filepath.Join(dir, filename)
-
-	data, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling per-target result: %w", err)
-	}
-
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		return fmt.Errorf("writing per-target result: %w", err)
-	}
-
-	return nil
-}
-
 // ResolveRequirementID resolves a Rego-derived ID (e.g., "kubernetes.run_as_root")
 // to the corresponding Gemara requirement ID (e.g., "CIS-K8S-5.2.6") using
 // the reverse mapping built by MatchRequirements. If the mapping does not
@@ -211,8 +187,7 @@ func ResolveRequirementID(derivedID string, reverseMap map[string]string) string
 // errors (targets with Status "error" and no findings) are placed into
 // resp.Errors. Rego-derived IDs are resolved with each result's reverse mapping;
 // reverseMap supports callers that provide one legacy shared mapping. Each assessment
-// log includes one Evidence entry linking back to the conftest input path that produced it.
-// MappingReferences are built from unique target/branch combinations.
+// log includes retained result evidence. MappingReferences use artifact-instance IDs.
 func ToScanResponse(
 	targetResults []*PerTargetResult, reverseMap map[string]string,
 ) *provider.ScanResponse {
@@ -366,10 +341,12 @@ func addSyntheticAssessments(
 	}
 }
 
-// buildEvidence creates a single Evidence entry for a target result.
-// When the input is a regular file, InputDigest carries the SHA256
-// hash computed by the server; for directories it is empty.
+// buildEvidence uses finalized artifact-instance evidence supplied by Scan.
+// The legacy fallback supports existing pure mapper callers, not production scans.
 func buildEvidence(tr *PerTargetResult) []provider.Evidence {
+	if tr.RetainedEvidence != nil {
+		return tr.RetainedEvidence
+	}
 	suffix := evidenceSuffix(tr)
 	return []provider.Evidence{{
 		ID:          evidence.IDPrefixConftest + suffix,
@@ -388,8 +365,8 @@ func buildEvidence(tr *PerTargetResult) []provider.Evidence {
 // target result. For remote targets (TargetURL set), it strips
 // the URL scheme and uses the full host+path identity. For local
 // targets, it uses the target path directly. Components are
-// joined via evidence.JoinForID with underscore separators to
-// prevent ambiguity between repo identity and branch name.
+// joined via the existing lossy logical-ID helpers. This compatibility path is
+// not an allocator or an artifact-instance identity scheme; #199 remains separate.
 func evidenceSuffix(tr *PerTargetResult) string {
 	var identity string
 	if tr.TargetURL != "" {
@@ -403,11 +380,8 @@ func evidenceSuffix(tr *PerTargetResult) string {
 	return evidence.SanitizeForID(identity)
 }
 
-// buildMappingReferences creates one MappingReference per unique
-// target/branch combination from successfully scanned targets.
-// The reference ID uses the same collision-resistant encoding as
-// buildEvidence so that Evidence.Source.ReferenceID always matches
-// a MappingReference.ID.
+// buildMappingReferences deduplicates finalized artifact-instance references.
+// Legacy pure mapper callers retain their logical-reference compatibility path.
 func buildMappingReferences(
 	targetResults []*PerTargetResult,
 ) []provider.MappingReference {
@@ -416,6 +390,15 @@ func buildMappingReferences(
 
 	for _, tr := range targetResults {
 		if tr.Status == "error" {
+			continue
+		}
+		if tr.References != nil {
+			for _, reference := range tr.References {
+				if !seen[reference.ID] {
+					seen[reference.ID] = true
+					refs = append(refs, reference)
+				}
+			}
 			continue
 		}
 		suffix := evidenceSuffix(tr)
@@ -483,16 +466,4 @@ func truncateField(s string, max int) string {
 		return s
 	}
 	return s[:max] + "[truncated]"
-}
-
-func sanitizeName(name string) string {
-	var result []rune
-	for _, r := range name {
-		if r == '/' || r == '.' || r == ':' || r == ' ' {
-			result = append(result, '-')
-		} else {
-			result = append(result, r)
-		}
-	}
-	return string(result)
 }

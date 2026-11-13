@@ -93,7 +93,7 @@ error while adding the new finalization errors from D6/D9.
   conflict has been reconciled; the intended modes are selected, not an open choice.
   Verify newly created context parents allow the selected owner to traverse the full
   path without widening the leaf or changing unrelated existing directories.
-- [ ] 1.8 Resolve Generate global/Scan target `workspace` variables per D8 with
+- [x] 1.8 Resolve Generate global/Scan target `workspace` variables per D8 with
   CWD fallback only for absent/empty values. Test relative and symlinked workspace
   roots, invalid non-empty roots, conflicting Scan target roots and conflicting
   Generate target/global roots before storage access. Preserve OPA host/provider
@@ -128,13 +128,13 @@ error while adding the new finalization errors from D6/D9.
 
 ## 4. OPA result-file evidence
 
-- [ ] 4.1 Separate conftest stdout from stderr at the runner boundary and retain exact JSON output as `conftest.json`; verify valid stdout with diagnostic stderr, malformed output, tool errors, and `--no-fail` compliance outcomes.
+- [x] 4.1 Separate conftest stdout from stderr at the runner boundary and retain exact JSON output as `conftest.json`; verify valid stdout with diagnostic stderr, malformed output, tool errors, and `--no-fail` compliance outcomes.
   Preserve `RunWithEnv`'s captured environment and composed ignore rule. Classify
   empty-directory diagnostics from stderr without putting them in retained JSON;
   keep unrelated execution failures distinct and preserve structured evaluated-input
   validation for `[]`, `null`, missing filename/namespace, and valid no-finding output.
-- [ ] 4.2 Allocate readable evaluation directories for remote target/branch and local targets, then parse and hash the retained output; verify remote, local-file, and local-directory evidence coordinates all identify `conftest.json` and carry its SHA256 digest.
-- [ ] 4.3 Keep working clones at the existing replaceable location and local inputs in place; verify three-scan tests create no historical clone/input snapshots and earlier result evidence survives clone replacement and local input edits/deletion.
+- [x] 4.2 Allocate readable evaluation directories for remote target/branch and local targets, then parse and hash the retained output; verify remote, local-file, and local-directory evidence coordinates all identify `conftest.json` and carry its SHA256 digest.
+- [x] 4.3 Keep working clones at the existing replaceable location and local inputs in place; verify three-scan tests create no historical clone/input snapshots and earlier result evidence survives clone replacement and local input edits/deletion.
   Preserve PR #233's `opa-input-selection` contracts with the new layout: enclosing
   scans exclude current/prior evaluation outputs, metadata, partial files, and other
   providers' artifacts; explicit workspace inputs and symlink/hard-link aliases into
@@ -143,9 +143,9 @@ error while adding the new finalization errors from D6/D9.
   across independent targets and repeated scans. Measure representative accumulated
   histories using the existing workspace-preflight benchmarks, and cover inaccessible
   private history without skipping identity checks or changing earlier permissions.
-- [ ] 4.4 Replace input-path evidence references with result-file references, attempt supporting metadata persistence after context is finalized, and stop writing legacy summaries; verify metadata includes non-secret source identity, branch/scan path, available policy/configuration context, and consistent collection timestamps.
-- [ ] 4.5 Cover repeated targets, multiple branches in one request, different scan paths on the same repo/branch, colliding display labels, and multiple assessments per evaluation; verify separate evaluation tokens, coordinates, IDs, and matching reference URLs without copying artifacts per assessment or modifying the #199 encoding helpers.
-- [ ] 4.6 Cover output write/close, parse, digest, and metadata failures; verify incomplete evidence produces operational errors, metadata failures warn without suppressing complete evidence, and previously retained results stay unchanged.
+- [x] 4.4 Replace input-path evidence references with result-file references, attempt supporting metadata persistence after context is finalized, and stop writing legacy summaries; verify metadata includes non-secret source identity, branch/scan path, available policy/configuration context, and consistent collection timestamps.
+- [x] 4.5 Cover repeated targets, multiple branches in one request, different scan paths on the same repo/branch, colliding display labels, and multiple assessments per evaluation; verify separate evaluation tokens, coordinates, IDs, and matching reference URLs without copying artifacts per assessment or modifying the #199 encoding helpers.
+- [x] 4.6 Cover output write/close, parse, digest, and metadata failures; verify incomplete evidence produces operational errors, metadata failures warn without suppressing complete evidence, and previously retained results stay unchanged.
   Extend `workspace_branches_test.go` for both branch orders: input-safety rejection,
   preflight cancellation, empty/unconfirmed directory input, and invalid directory
   output withhold all assessments/evidence/mapping references from that configured
@@ -156,7 +156,7 @@ error while adding the new finalization errors from D6/D9.
 
 ## 5. Integration verification and release readiness
 
-- [ ] 5.1 Add three-scan regressions in each provider's `server/server_test.go`, using the test harness above with changing and identical fixture outputs. Seed legacy fixed-path artifacts and summaries with known bytes; resolve every `ScanResponse` coordinate against an explicit workspace root, verify its escaped absolute file URL identifies the same artifact, recompute each `sha256:` digest, and assert evaluation-qualified IDs and matching reference links. Verify earlier artifacts and legacy files remain unchanged without packaging or storage integration, and that supporting XCCDF/metadata files do not become implicit evidence. Copy the workspace tree and verify coordinates/digests against the copied root while absolute URLs remain unchanged and origin-specific; keep these contract tests runnable under `make test` without credentials or a complyctl checkout.
+- [x] 5.1 Add three-scan regressions in each provider's `server/server_test.go`, using the test harness above with changing and identical fixture outputs. Seed legacy fixed-path artifacts and summaries with known bytes; resolve every `ScanResponse` coordinate against an explicit workspace root, verify its escaped absolute file URL identifies the same artifact, recompute each `sha256:` digest, and assert evaluation-qualified IDs and matching reference links. Verify earlier artifacts and legacy files remain unchanged without packaging or storage integration, and that supporting XCCDF/metadata files do not become implicit evidence. Copy the workspace tree and verify coordinates/digests against the copied root while absolute URLs remain unchanged and origin-specific; keep these contract tests runnable under `make test` without credentials or a complyctl checkout.
 - [ ] 5.2 Verify the existing complyctl conversion preserves coordinates, digests, timestamps, absolute file URLs, and instance references in serialized Gemara Evaluation Logs. Validate converted logs against the applicable Gemara schema and exercise a downstream consumer; verify repeated evaluations do not lose references through deduplication and every reported evidence entry leads to its original file with the matching digest after later scans, without inferring extra evidence from directory contents.
 - [ ] 5.3 Run `openspec validate retain-scan-evidence --strict`, `make build`, `make test`, `go test -race -count=1 ./...`, `make lint`, `make man`, and `git diff --check`; the race run includes shared concurrent-allocation tests and is an additional local convention-pack check, not currently provided by `ci_local.yml`. Inspect applicable workflows and pinned reusable definitions for additional local CI parity checks, recording external prerequisites rather than claiming unrun checks passed.
   Also run PR #233's installed-conftest isolation and offline CLI regressions with

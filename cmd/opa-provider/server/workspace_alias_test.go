@@ -77,7 +77,7 @@ func TestScan_LocalWorkspaceAliasesFailClosed(t *testing.T) {
 				workspace = alias
 			}
 			runner := conftestRunner(conftestAllSuccessJSON)
-			srv := New(ServerOptions{
+			srv := newWorkspaceTestServer(t, ServerOptions{
 				Runner: runner, WorkspaceDir: workspace,
 				ToolChecker: func() ([]string, error) { return nil, nil },
 			})
@@ -139,7 +139,7 @@ func TestScan_OrdinaryAliasesRemainEvaluable(t *testing.T) {
 	require.NoError(t, os.Symlink(file, filepath.Join(input, "alias.json")))
 	require.NoError(t, os.Symlink(external, filepath.Join(input, "directory")))
 	runner := conftestRunner(conftestAllSuccessJSON)
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner: runner, WorkspaceDir: workspace,
 		ToolChecker: func() ([]string, error) { return nil, nil },
 	})
@@ -168,7 +168,7 @@ func TestScan_IgnoredWorkspaceTraversalFailureIsOperational(t *testing.T) {
 	require.NoError(t, os.Mkdir(workspace, 0750))
 	writeScanConfig(t, workspace)
 	runner := conftestRunner(conftestAllSuccessJSON)
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner: runner, WorkspaceDir: workspace,
 		ToolChecker: func() ([]string, error) { return nil, nil },
 	})
@@ -201,7 +201,7 @@ func TestScan_BrokenLinkInsideIgnoredWorkspaceIsOperational(t *testing.T) {
 	broken := filepath.Join(workspace, "broken")
 	require.NoError(t, os.Symlink(filepath.Join(input, "missing"), broken))
 	runner := conftestRunner(conftestAllSuccessJSON)
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner: runner, WorkspaceDir: workspace,
 		ToolChecker: func() ([]string, error) { return nil, nil },
 	})
@@ -223,7 +223,7 @@ func TestScan_ConftestTraversalFailureIsOperational(t *testing.T) {
 	runner := &mockRunner{callFn: func(_ string, _ []string) ([]byte, error) {
 		return []byte("walk path: permission denied"), errors.New("exit status 1")
 	}}
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner: runner, WorkspaceDir: workspace,
 		ToolChecker: func() ([]string, error) { return nil, nil },
 	})
@@ -245,12 +245,12 @@ func TestProcessLocalInput_LogsExcludedBoundary(t *testing.T) {
 	input := t.TempDir()
 	workspace := filepath.Join(input, "workspace")
 	require.NoError(t, os.Mkdir(workspace, 0750))
-	cfg := config.NewConfig(workspace)
+	cfg := config.NewWorkspaceConfig(workspace)
 	require.NoError(t, cfg.EnsureDirectories())
 	var logOutput bytes.Buffer
 	logger := hclog.New(&hclog.LoggerOptions{Output: &logOutput, Level: hclog.Info})
 	runner := conftestRunner(conftestAllSuccessJSON)
-	srv := New(ServerOptions{Runner: runner, WorkspaceDir: workspace})
+	srv := newWorkspaceTestServer(t, ServerOptions{Runner: runner, WorkspaceDir: workspace})
 	result, err := srv.processLocalInput(context.Background(), logger, localTarget(t, input, ""), cfg, nil,
 		&generate.ScanConfig{IDs: []string{"main"}, PolicyDir: t.TempDir()})
 	require.NoError(t, err)
@@ -276,12 +276,12 @@ func TestScan_WorkspaceAliasWithRealConftest(t *testing.T) {
 	workspaceFile := filepath.Join(workspace, "artifact.json")
 	require.NoError(t, os.WriteFile(workspaceFile, []byte(`{invalid`), 0600))
 	require.NoError(t, os.Symlink(workspaceFile, filepath.Join(input, "alias.json")))
-	cfg := config.NewConfig(workspace)
+	cfg := config.NewWorkspaceConfig(workspace)
 	require.NoError(t, cfg.EnsureDirectories())
 	require.NoError(t, generate.WriteScanConfig(
 		cfg.GeneratedDirPath(), []string{"main"}, map[string]string{"main": "test-req"}, policy,
 	))
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		WorkspaceDir: workspace, ToolChecker: func() ([]string, error) { return nil, nil },
 	})
 	target := localTarget(t, input, "")
@@ -347,7 +347,7 @@ func TestScan_TraversalErrorsAreOperational(t *testing.T) {
 			file := filepath.Join(input, "file.json")
 			require.NoError(t, os.WriteFile(file, []byte("{}"), 0600))
 			runner := conftestRunner(conftestAllSuccessJSON)
-			srv := New(ServerOptions{
+			srv := newWorkspaceTestServer(t, ServerOptions{
 				Runner: runner, WorkspaceDir: workspace,
 				ToolChecker: func() ([]string, error) { return nil, nil },
 			})
@@ -393,7 +393,7 @@ func TestScan_UnreadableDirectoryIsOperationalError(t *testing.T) {
 		t.Skipf("filesystem does not enforce fixture read permissions: %v", err)
 	}
 	runner := conftestRunner(conftestAllSuccessJSON)
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner: runner, WorkspaceDir: workspace,
 		ToolChecker: func() ([]string, error) { return nil, nil },
 	})

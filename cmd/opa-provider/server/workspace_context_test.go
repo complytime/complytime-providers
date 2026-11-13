@@ -43,7 +43,7 @@ func TestScan_PreflightCancellationDoesNotProduceAssessments(t *testing.T) {
 			inputFile := filepath.Join(input, "input.json")
 			require.NoError(t, os.WriteFile(inputFile, []byte("{}"), 0600))
 			runner := conftestRunner(conftestAllSuccessJSON)
-			srv := New(ServerOptions{
+			srv := newWorkspaceTestServer(t, ServerOptions{
 				Runner: runner, WorkspaceDir: workspace,
 				Loader:      &mockLoader{loadFn: func(provider.Target, string) (string, error) { return input, nil }},
 				ToolChecker: func() ([]string, error) { return nil, nil },
@@ -180,7 +180,7 @@ func TestScan_CancellationAfterPreflightDoesNotEvaluate(t *testing.T) {
 		cancel()
 		return []byte("ok"), nil
 	}}
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner: runner, WorkspaceDir: workspace,
 		ToolChecker: func() ([]string, error) { return nil, nil },
 	})
@@ -207,7 +207,7 @@ func TestScan_RemoteBranchCancellationDiscardsEarlierAssessments(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(clone, "input.json"), []byte("{}"), 0600))
 		return clone, nil
 	}}
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner: runner, Loader: ldr, WorkspaceDir: workspace,
 		ToolChecker: func() ([]string, error) { return nil, nil },
 	})
@@ -241,7 +241,7 @@ func TestScan_ExpiredDeadlineIsOperational(t *testing.T) {
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
 	runner := conftestRunner(conftestAllSuccessJSON)
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner: runner, WorkspaceDir: workspace,
 		ToolChecker: func() ([]string, error) { return nil, nil },
 	})

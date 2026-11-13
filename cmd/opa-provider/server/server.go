@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -39,6 +40,10 @@ type ServerOptions struct {
 	Runner       scan.CommandRunner
 	ToolChecker  func() ([]string, error)
 	WorkspaceDir string
+	// Logger, Identity and Allocate are trusted dependencies, never RPC settings.
+	Logger   hclog.Logger
+	Identity func() (evidence.Identity, error)
+	Allocate func(evidence.StorageOptions, ...string) (*evidence.Evaluation, error)
 }
 
 // ProviderServer implements the provider.Provider interface for the OPA provider.
@@ -47,11 +52,16 @@ type ProviderServer struct {
 	detectConftestConfig func(string) (string, error)
 	localTraversal       localTraversal
 	identifyFile         identityFunc
+	defaultLoader        bool
+	defaultWorkspace     bool
+	storage              evidence.StorageOptions
 }
 
 // New returns a new ProviderServer with the given options. Zero-value fields
 // in opts are replaced with production defaults.
 func New(opts ServerOptions) *ProviderServer {
+	defaultLoader := opts.Loader == nil
+	defaultWorkspace := opts.WorkspaceDir == ""
 	if opts.Runner == nil {
 		opts.Runner = scan.ExecRunner{}
 	}
@@ -64,10 +74,20 @@ func New(opts ServerOptions) *ProviderServer {
 	if opts.WorkspaceDir == "" {
 		opts.WorkspaceDir = provider.WorkspaceDir
 	}
+	if opts.Logger == nil {
+		opts.Logger = hclog.Default()
+	}
+	if opts.Identity == nil {
+		opts.Identity = evidence.ExecutionIdentity
+	}
+	if opts.Allocate == nil {
+		opts.Allocate = evidence.Allocate
+	}
 	return &ProviderServer{
-		opts: opts, detectConftestConfig: detectConftestConfig,
+		opts:           opts,
 		localTraversal: localTraversal{readDir: os.ReadDir, lstat: os.Lstat},
 		identifyFile:   fileIdentityOf,
+		defaultLoader:  defaultLoader, defaultWorkspace: defaultWorkspace,
 	}
 }
 
@@ -104,7 +124,12 @@ func (s *ProviderServer) Describe(
 func (s *ProviderServer) Generate(
 	_ context.Context, req *provider.GenerateRequest,
 ) (*provider.GenerateResponse, error) {
-	logger := hclog.Default()
+	root, err := evidence.GenerateWorkspace(req)
+	if err != nil {
+		return nil, err
+	}
+	s = s.inWorkspace(root)
+	logger := s.opts.Logger
 
 	if len(req.Configuration) == 0 {
 		return &provider.GenerateResponse{
@@ -124,7 +149,7 @@ func (s *ProviderServer) Generate(
 		}, nil
 	}
 
-	cfg := config.NewConfig(s.opts.WorkspaceDir)
+	cfg := config.NewWorkspaceConfig(root)
 	if err := cfg.EnsureDirectories(); err != nil {
 		return nil, fmt.Errorf("directory setup failed: %w", err)
 	}
@@ -167,7 +192,8 @@ func (s *ProviderServer) Generate(
 
 	contentKey := genindex.ContentKey(ids, policyDir)
 	generatedDir := cfg.GeneratedDirForKey(contentKey)
-	if err := os.MkdirAll(generatedDir, genindex.ContentDirectoryMode); err != nil {
+	if err := evidence.EnsureDirectories(root,
+		filepath.Join(provider.WorkspaceDir, config.ProviderDir, config.GeneratedDir, contentKey)); err != nil {
 		return nil, fmt.Errorf("creating content-generated directory: %w", err)
 	}
 	if err := generate.WriteScanConfig(generatedDir, ids, reverseMap, policyDir); err != nil {
@@ -204,7 +230,7 @@ func (s *ProviderServer) resolvePolicyDir(
 	cfg *config.Config,
 ) (string, error) {
 	if req.ComplypackContentPath != "" {
-		contentPath := req.ComplypackContentPath
+		contentPath := evidence.WorkspacePath(cfg.WorkspaceRoot, req.ComplypackContentPath)
 		logger.Info("using complypack content path for generate",
 			"complypack_content_path", contentPath)
 
@@ -246,7 +272,7 @@ func (s *ProviderServer) resolveScanPolicyDir(
 	if scanCfg != nil && scanCfg.PolicyDir != "" {
 		logger.Info("using policy dir from scan config",
 			"policy_dir", scanCfg.PolicyDir)
-		return scanCfg.PolicyDir, nil
+		return evidence.WorkspacePath(cfg.WorkspaceRoot, scanCfg.PolicyDir), nil
 	}
 
 	// Fall back to pulling via opa_bundle_ref.
@@ -287,11 +313,22 @@ func mergeVariables(global, target map[string]string) map[string]string {
 func (s *ProviderServer) Scan(
 	ctx context.Context, req *provider.ScanRequest,
 ) (*provider.ScanResponse, error) {
-	logger := hclog.Default()
+	logger := s.opts.Logger
 
 	if len(req.Targets) == 0 {
 		return nil, fmt.Errorf("no targets provided: at least one target is required")
 	}
+	root, err := evidence.ScanWorkspace(req)
+	if err != nil {
+		return nil, err
+	}
+	identity, err := s.opts.Identity()
+	if err != nil {
+		return nil, fmt.Errorf("execution identity: %w", err)
+	}
+	s = s.inWorkspace(root)
+	cfg := config.NewWorkspaceConfig(root)
+	s.storage = cfg.StorageOptions(identity)
 
 	missing, err := s.opts.ToolChecker()
 	if err != nil {
@@ -313,7 +350,6 @@ func (s *ProviderServer) Scan(
 		return nil, toolcheck.FormatMissingToolsError(missing)
 	}
 
-	cfg := config.NewConfig(s.opts.WorkspaceDir)
 	if err := cfg.EnsureDirectories(); err != nil {
 		return nil, fmt.Errorf("directory setup failed: %w", err)
 	}
@@ -337,7 +373,6 @@ func (s *ProviderServer) Scan(
 
 	bundleCache := map[string]string{}
 	var allResults []*results.PerTargetResult
-	var writeErrs []error
 	hostRemark := evidence.HostRemark()
 
 	for _, target := range req.Targets {
@@ -347,11 +382,17 @@ func (s *ProviderServer) Scan(
 		if err != nil {
 			return nil, err
 		}
-		targetResults, writeErr := s.processTarget(
+		// Preserve the original input spelling for Generate index lookup above.
+		target.Variables = copyVars(target.Variables)
+		target.Variables[loader.VarWorkspace] = root
+		if path := target.Variables[loader.VarInputPath]; path != "" {
+			target.Variables[loader.VarInputPath] = evidence.WorkspacePath(root, path)
+		}
+		targetResults, targetErr := s.processTarget(
 			ctx, logger, target, cfg, bundleCache, scanCfg,
 		)
-		if writeErr != nil {
-			writeErrs = append(writeErrs, writeErr)
+		if targetErr != nil {
+			return nil, targetErr
 		}
 		for _, tr := range targetResults {
 			tr.Remarks = hostRemark
@@ -363,10 +404,6 @@ func (s *ProviderServer) Scan(
 	}
 
 	resp := results.ToScanResponse(allResults, nil)
-
-	if aggregatedErr := errors.Join(writeErrs...); aggregatedErr != nil {
-		resp.Errors = append(resp.Errors, aggregatedErr.Error())
-	}
 
 	return resp, nil
 }
@@ -387,18 +424,21 @@ func resolveTargetScanConfig(
 	if inputPath := target.Variables[loader.VarInputPath]; inputPath != "" {
 		targetKeyInput = inputPath
 	}
-	scanCfg, _, err := genindex.ResolveConfig(
+	scanCfg, key, err := genindex.ResolveConfig(
 		genindex.TargetKey(targetKeyInput), index, cfg.GeneratedDirPath(), cache, generate.ReadScanConfig,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("resolving generated config for target %q: %w", target.TargetID, err)
 	}
-	return scanCfg, nil
+	resolved := *scanCfg
+	resolved.ContentKey = key
+	return &resolved, nil
 }
 
 func targetError(target, targetURL, branch string, err error) *results.PerTargetResult {
 	return &results.PerTargetResult{
-		Target: target, TargetURL: targetURL, Branch: branch, Status: "error", Error: err.Error(),
+		Target: evidence.PublicContext(target), TargetURL: evidence.PublicContext(targetURL),
+		Branch: branch, Status: "error", Error: evidence.PublicContext(err.Error()),
 	}
 }
 
@@ -462,13 +502,12 @@ func (s *ProviderServer) processRemoteBranches(
 	scanCfg *generate.ScanConfig,
 ) ([]*results.PerTargetResult, error) {
 	var targetResults []*results.PerTargetResult
-	var writeErrs []error
 	repoURL := target.Variables[loader.VarURL]
 
 	for _, branch := range branches {
 		if err := preflightCancellation(ctx); err != nil {
 			return rejectTargetResults(targetResults, targetError(target.TargetID, repoURL, branch, err)),
-				errors.Join(writeErrs...)
+				nil
 		}
 		branchTarget := provider.Target{
 			TargetID:  target.TargetID,
@@ -482,54 +521,42 @@ func (s *ProviderServer) processRemoteBranches(
 			logger.Warn("data load failed",
 				"target", target.TargetID, "branch", branch, "error", err)
 			errResult := targetError(targets.RepoDisplayName(repoURL), repoURL, branch, err)
-			if writeErr := results.WritePerTargetResult(
-				errResult, cfg.ResultsDirPath(),
-			); writeErr != nil {
-				writeErrs = append(writeErrs, writeErr)
-			}
 			targetResults = append(targetResults, errResult)
 			continue
 		}
 
-		if err := s.inspectRemoteInput(ctx, inputPath, target.Variables, cfg.WorkspaceDir); err != nil {
+		if err := s.inspectRemoteInput(ctx, inputPath, target.Variables, s.opts.WorkspaceDir); err != nil {
 			errResult := targetError(target.TargetID, repoURL, branch, err)
 			// A rejected branch invalidates the configured target as a whole.
-			return rejectTargetResults(targetResults, errResult), errors.Join(writeErrs...)
+			return rejectTargetResults(targetResults, errResult), nil
 		}
 		if err := preflightCancellation(ctx); err != nil {
 			return rejectTargetResults(targetResults, targetError(target.TargetID, repoURL, branch, err)),
-				errors.Join(writeErrs...)
+				nil
 		}
 		result, evalErr := s.evalAndParse(
 			logger, inputPath, policyDir,
-			targets.RepoDisplayName(repoURL), branch, cfg, scanCfg, "", nil,
+			target, branch, scanCfg, "", nil,
 		)
 		if result == nil && evalErr != nil {
 			logger.Warn("eval failed",
 				"target", target.TargetID, "branch", branch, "error", evalErr)
 			errResult := targetError(target.TargetID, repoURL, branch, evalErr)
-			if writeErr := results.WritePerTargetResult(
-				errResult, cfg.ResultsDirPath(),
-			); writeErr != nil {
-				writeErrs = append(writeErrs, writeErr)
+			var verificationErr *evidence.VerificationError
+			if errors.As(evalErr, &verificationErr) {
+				return nil, evalErr
 			}
 			var selectionErr *inputSelectionError
 			if errors.As(evalErr, &selectionErr) {
-				return rejectTargetResults(targetResults, errResult), errors.Join(writeErrs...)
+				return rejectTargetResults(targetResults, errResult), nil
 			}
 			targetResults = append(targetResults, errResult)
 			continue
 		}
-		if result != nil {
-			result.TargetURL = repoURL
-		}
-		if evalErr != nil {
-			writeErrs = append(writeErrs, evalErr)
-		}
 		targetResults = append(targetResults, result)
 	}
 
-	return targetResults, errors.Join(writeErrs...)
+	return targetResults, nil
 }
 
 func (s *ProviderServer) processLocalInput(
@@ -544,24 +571,19 @@ func (s *ProviderServer) processLocalInput(
 	if err != nil {
 		errResult := targetError(target.TargetID, "", "", fmt.Errorf(
 			"cannot load local input; check the input path and filesystem access: %w", err))
-		if writeErr := results.WritePerTargetResult(
-			errResult, cfg.ResultsDirPath(),
-		); writeErr != nil {
-			return []*results.PerTargetResult{errResult}, writeErr
-		}
 		return []*results.PerTargetResult{errResult}, nil
 	}
 
-	if err := validateLocalWorkspaceTarget(inputPath, target.Variables, cfg.WorkspaceDir); err != nil {
+	if err := validateLocalWorkspaceTarget(inputPath, target.Variables, s.opts.WorkspaceDir); err != nil {
 		return targetErrors(target.TargetID, err), nil
 	}
 
-	ignore, environment, overlapping, err := s.localWorkspaceIgnore(inputPath, target.Variables, cfg.WorkspaceDir)
+	ignore, environment, overlapping, err := s.localWorkspaceIgnore(inputPath, target.Variables, s.opts.WorkspaceDir)
 	if err != nil {
 		return targetErrors(target.TargetID, fmt.Errorf(
 			"cannot configure workspace exclusion; check input and workspace paths: %w", err)), nil
 	}
-	boundaries, err := workspaceBoundaries(target.Variables, cfg.WorkspaceDir)
+	boundaries, err := workspaceBoundaries(target.Variables, s.opts.WorkspaceDir)
 	if err != nil {
 		err = fmt.Errorf("cannot establish workspace boundaries; check workspace paths: %w", err)
 	} else {
@@ -587,23 +609,24 @@ func (s *ProviderServer) processLocalInput(
 	}
 
 	result, evalErr := s.evalAndParse(
-		logger, inputPath, policyDir, inputPath, "", cfg, scanCfg, ignore, environment,
+		logger, inputPath, policyDir, target, "", scanCfg, ignore, environment,
 	)
 	if result == nil && evalErr != nil {
+		var verificationErr *evidence.VerificationError
+		if errors.As(evalErr, &verificationErr) {
+			return nil, evalErr
+		}
 		return targetErrors(target.TargetID, fmt.Errorf(
 			"local evaluation failed; check input paths, filesystem access, and conftest output: %w", evalErr)), nil
 	}
-	if evalErr != nil {
-		return []*results.PerTargetResult{result}, evalErr
-	}
-
 	return []*results.PerTargetResult{result}, nil
 }
 
 func (s *ProviderServer) evalAndParse(
 	logger hclog.Logger,
-	inputPath, policyDir, displayName, branch string,
-	cfg *config.Config,
+	inputPath, policyDir string,
+	target provider.Target,
+	branch string,
 	scanCfg *generate.ScanConfig,
 	ignore string,
 	environment []string,
@@ -620,12 +643,28 @@ func (s *ProviderServer) evalAndParse(
 	if err != nil {
 		return nil, fmt.Errorf("checking input %q; verify the input path and access: %w", inputPath, err)
 	}
+	labels := evaluationLabels(target, inputPath, branch)
+	evaluation, err := s.opts.Allocate(s.storage, labels...)
+	if err != nil {
+		return nil, fmt.Errorf("allocating conftest evaluation: %w", err)
+	}
+	result, evalErr := s.evaluateRetained(logger, evaluation, target, inputPath, policyDir,
+		branch, inputInfo.IsDir(), scanCfg, ignore, environment)
+	if err := errors.Join(evalErr, evaluation.Close()); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
 
+func (s *ProviderServer) evaluateRetained(logger hclog.Logger, evaluation *evidence.Evaluation,
+	target provider.Target, inputPath, policyDir, branch string, directory bool,
+	scanCfg *generate.ScanConfig, ignore string, environment []string,
+) (*results.PerTargetResult, error) {
 	raw, err := scan.EvalPolicyWithNamespacesAndIgnore(
 		inputPath, policyDir, scanCfg.IDs, s.opts.Runner, ignore, environment,
 	)
 	if err != nil {
-		if inputInfo.IsDir() && containsConftestNoFilesFound(raw) {
+		if directory && containsConftestNoFilesFound(raw.Stderr) {
 			return nil, &inputSelectionError{err: fmt.Errorf(
 				"no eligible input could be confirmed for directory %q; "+
 					"add a supported input or adjust ignore settings: %w", inputPath, err)}
@@ -633,56 +672,47 @@ func (s *ProviderServer) evalAndParse(
 		return nil, fmt.Errorf("evaluating policies; check conftest output and policy configuration: %w", err)
 	}
 
-	result, err := results.ParseConftestOutput(raw, displayName, branch)
+	if err := evaluation.Write(evidence.ConftestFile, raw.Stdout); err != nil {
+		return nil, fmt.Errorf("saving conftest output: %w", err)
+	}
+	artifact, err := evaluation.Read(evidence.ConftestFile)
+	if err != nil {
+		return nil, fmt.Errorf("reading retained conftest output: %w", err)
+	}
+	displayName := inputPath
+	if repoURL := target.Variables[loader.VarURL]; repoURL != "" {
+		displayName = targets.RepoDisplayName(evidence.PublicContext(repoURL))
+	}
+	result, err := results.ParseConftestOutput(artifact.Data, displayName, branch)
 	if err != nil {
 		err = fmt.Errorf("parsing conftest output; check conftest output and policy configuration: %w", err)
-		if inputInfo.IsDir() {
+		if directory {
 			return nil, &inputSelectionError{err: err}
 		}
 		return nil, err
 	}
-	if inputInfo.IsDir() && result.EvaluatedFiles == 0 {
+	if directory && result.EvaluatedFiles == 0 {
 		return nil, &inputSelectionError{err: fmt.Errorf(
 			"no eligible input was confirmed for directory %q; "+
 				"add a supported input or adjust ignore settings", inputPath)}
 	}
 	result.InputPath = inputPath
-
-	// Compute SHA256 digest for regular-file inputs. Directories
-	// are left without a digest per the evidence-source spec.
-	// Stat errors are propagated: if the input was accessible
-	// enough for conftest to evaluate, a subsequent stat failure
-	// is unexpected and must not be silently ignored.
-	//
-	// Known limitation: the digest is computed after conftest
-	// evaluation. If the file is concurrently modified between
-	// conftest reading it and this hash, the digest may not match
-	// the bytes conftest evaluated. This is an inherent constraint
-	// of any external-tool pipeline where the tool reads by path
-	// and does not expose the bytes it consumed. In practice,
-	// compliance scan inputs are not concurrently modified.
-	info, statErr := os.Stat(inputPath)
-	if statErr != nil {
-		return nil, fmt.Errorf(
-			"stat input for digest %s: %w", inputPath, statErr,
-		)
+	result.TargetURL = evidence.PublicContext(target.Variables[loader.VarURL])
+	result.ScannedAt = evaluation.CollectionTime
+	item, reference, err := evaluation.Reference(evidence.ConftestFile,
+		evidence.IDPrefixConftest, evidence.RefPrefixConftest, evidence.TypeConftestResult,
+		"Conftest results: "+displayName, "Conftest evaluation of "+displayName+" "+branch,
+		evidence.HostRemark())
+	if err != nil {
+		return nil, err
 	}
-	if !info.IsDir() {
-		digest, dErr := evidence.FileDigest(inputPath)
-		if dErr != nil {
-			return nil, fmt.Errorf(
-				"computing digest for input %s: %w", inputPath, dErr,
-			)
-		}
-		result.InputDigest = digest
+	evaluation.RecordMetadata(logger, config.ProviderDir, evaluationTarget(target, inputPath, branch),
+		evaluationConfiguration(scanCfg, policyDir))
+	if err := evaluation.Finalize(); err != nil {
+		return nil, err
 	}
-
-	if writeErr := results.WritePerTargetResult(
-		result, cfg.ResultsDirPath(),
-	); writeErr != nil {
-		return result, writeErr
-	}
-
+	result.RetainedEvidence = []provider.Evidence{item}
+	result.References = []provider.MappingReference{reference}
 	return result, nil
 }
 

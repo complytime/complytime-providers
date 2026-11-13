@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package evidence provides shared evidence utilities for all
-// provider plugins. It centralizes digest computation and evidence
-// identity constants to avoid duplication across providers.
+// provider plugins. It centralizes digest computation, evidence identity,
+// workspace resolution, private evaluation storage and supporting metadata.
 package evidence
 
 import (
@@ -26,13 +26,13 @@ const (
 // MappingReference ID constants and prefixes used in
 // provider.Evidence.Source.ReferenceID and
 // provider.MappingReference.ID. Prefixes use an underscore
-// trailer to separate the type from the JoinForID suffix,
-// keeping underscores as structural field separators.
+// trailer to separate artifact kind from an evaluation token (or a legacy
+// logical suffix in compatibility-only mapper calls).
 const (
 	RefOpenSCAPARF    = "openscap-arf"
 	RefPrefixAmpel    = "ampel_"
 	RefPrefixSnappy   = "snappy_"
-	RefPrefixConftest = "conftest-input_"
+	RefPrefixConftest = "conftest-result_"
 )
 
 // EnvMachineIDFile is the environment variable that overrides the

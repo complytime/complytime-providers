@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/complytime/complyctl/pkg/provider"
+	"github.com/complytime/complytime-providers/internal/evidence"
 )
 
 const (
@@ -24,7 +27,21 @@ const (
 
 // Config holds the provider configuration with workspace-relative paths.
 type Config struct {
-	WorkspaceDir string
+	WorkspaceDir  string
+	WorkspaceRoot string
+}
+
+// NewWorkspaceConfig derives provider paths from one resolved coordinate root.
+// The configured artifact boundary for input isolation remains a server concern.
+func NewWorkspaceConfig(root string) *Config {
+	return &Config{WorkspaceDir: filepath.Join(root, provider.WorkspaceDir), WorkspaceRoot: root}
+}
+
+// StorageOptions supplies resolved roots and execution identity without selecting
+// workspace precedence or importing provider orchestration into shared helpers.
+func (c *Config) StorageOptions(identity evidence.Identity) evidence.StorageOptions {
+	return evidence.StorageOptions{WorkspaceRoot: c.WorkspaceRoot,
+		ResultsRoot: c.ResultsDirPath(), Identity: identity}
 }
 
 // NewConfig returns a new Config rooted at the given workspace directory.
@@ -80,6 +97,16 @@ func (c *Config) EnsureDirectories() error {
 		c.GeneratedDirPath(),
 	}
 	for _, dir := range directories {
+		if c.WorkspaceRoot != "" {
+			relative, err := filepath.Rel(c.WorkspaceRoot, dir)
+			if err != nil {
+				return fmt.Errorf("resolving provider directory: %w", err)
+			}
+			if err := evidence.EnsureDirectories(c.WorkspaceRoot, relative); err != nil {
+				return fmt.Errorf("creating directory %s: %w", dir, err)
+			}
+			continue
+		}
 		if err := os.MkdirAll(dir, 0750); err != nil {
 			return fmt.Errorf("creating directory %s: %w", dir, err)
 		}
