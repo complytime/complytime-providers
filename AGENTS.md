@@ -30,14 +30,16 @@ make build-opa-provider
 # Run all unit tests
 make test
 
-# Run released-baseline CI helper tests (requires Go, jq, make, and curl)
+# Run released-baseline CI helper tests (requires Go, Git, jq, make, curl, GNU coreutils)
 bash .github/scripts/test/resolve-complyctl-release-baseline_test.sh
 bash .github/scripts/test/validate-released-complyctl-checkout_test.sh
 bash .github/scripts/test/released-baseline-diagnostics_test.sh
+bash .github/scripts/test/canonical-complyctl-harness_test.sh
 
 # Lint CI helper scripts and the cross-repo workflow
 shellcheck .github/scripts/*.sh .github/scripts/test/*.sh
 yamllint .github/workflows/ci_cross_repo_integration.yml
+actionlint .github/workflows/ci_cross_repo_integration.yml
 
 # Run OPA's real-conftest isolation tests (requires conftest and git on PATH)
 go test -race -count=1 ./cmd/opa-provider/server -run '^TestScan_(RealConftest|.*WithRealConftest|WorkspaceIgnoreWithConftest)'

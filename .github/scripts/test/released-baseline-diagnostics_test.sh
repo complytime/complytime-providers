@@ -22,13 +22,20 @@ require_workflow_text 'released-provider-build: provider build failed for %s\n'
 require_workflow_text 'released-provider-test: provider test failed for %s\n'
 # shellcheck disable=SC2016 # The GitHub Actions expression must remain literal.
 require_workflow_text 'COMPLYCTL_MODULE: ${{ needs.resolve-released-baseline.outputs.module }}'
-require_workflow_text 'released-integration: cross-repo integration failed for %s\n'
-require_workflow_text 'make -C ../_released_complyctl test-cross-repo'
+require_workflow_text 'run-released-complyctl-integration.sh'
+require_workflow_text 'validate-canonical-complyctl-harness.sh'
+require_workflow_text 'canonical-harness-preparation: could not check out %s\n'
+require_workflow_text 'Canonical harness commit:'
+# shellcheck disable=SC2016 # The GitHub Actions expressions must remain literal.
+require_workflow_text 'ref: ${{ env.CANONICAL_HARNESS_COMMIT }}'
 # shellcheck disable=SC2016 # The GitHub Actions expression must remain literal.
 require_workflow_text 'COMPLYCTL_TAG: ${{ needs.resolve-released-baseline.outputs.tag }}'
 
-if grep -Fq '_compatibility_harness' "$WORKFLOW"; then
-    printf 'temporary compatibility harness checkout is still present\n' >&2
+# Historical dispatch is intentionally superseded by the reviewed canonical
+# harness contract. Execution regressions prove released-host selection instead
+# of prohibiting an arbitrary checkout name.
+if grep -Fq 'make -C ../_released_complyctl test-cross-repo' "$WORKFLOW"; then
+    printf 'released integration still selects historical assertions\n' >&2
     exit 1
 fi
 
