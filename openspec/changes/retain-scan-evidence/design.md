@@ -636,13 +636,20 @@ requiring a new host identity protocol to give them to the original user.
 
 ## Repository instruction conflicts
 
-The permission conflict remains reported for governance handling. Recording the
-selected design does not change rules, severity, or review requirements.
+### Maintainer reconciliation (2026-11-10)
 
-- **Permission-mode instruction conflict (HIGH):** The selected 0700/0600 modes
+The requesting maintainer confirmed in this implementation conversation:
+“I am maintainer and the decision is to keep the information from spec instead of
+from the pack. The spec is more restrict.” This conversation is the decision venue;
+no external decision link was supplied. The decision applies only to this change's
+new evaluation directories and evidence/supporting files: D1/D9's stricter 0700/0600
+requirements take precedence over Go pack SC-005's generic 0755/0644 modes.
+Convention packs, severity rules, and review requirements remain unchanged.
+
+- **Reconciled permission-mode instruction conflict (HIGH):** The selected 0700/0600 modes
   conflict with `.opencode/uf/packs/go.md` SC-005's 0755/0644 rule. Execution ownership
-  does not waive that rule. Obtain reconciliation through the applicable governance
-  process before implementing modes. Do not edit convention packs or
+  does not waive that rule. The scoped maintainer decision above supplies the
+  applicable instruction for this implementation. Do not edit convention packs or
   make findings world-readable to clear review in this change.
 
 The earlier cross-repository implementation premise no longer applies: launcher and

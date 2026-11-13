@@ -10,6 +10,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/complytime/complytime-providers/cmd/opa-provider/config"
+	"github.com/complytime/complytime-providers/internal/evidence"
 )
 
 const (
@@ -26,6 +29,62 @@ func BenchmarkWorkspacePreflightLargeTree(b *testing.B) {
 
 func BenchmarkWorkspacePreflightHalfTree(b *testing.B) {
 	benchmarkWorkspacePreflight(b, benchmarkDirectories/2)
+}
+
+// BenchmarkWorkspacePreflightRetainedHistory measures the existing identity walk
+// with actual private evaluation leaves. It does not skip historical identities.
+func BenchmarkWorkspacePreflightRetainedHistory(b *testing.B) {
+	for _, count := range []int{100, 1000} {
+		b.Run(fmt.Sprintf("evaluations-%d", count), func(b *testing.B) {
+			root := b.TempDir()
+			cfg := config.NewWorkspaceConfig(root)
+			if err := cfg.EnsureDirectories(); err != nil {
+				b.Fatal(err)
+			}
+			identity, err := evidence.ExecutionIdentity()
+			if err != nil {
+				b.Fatal(err)
+			}
+			for range count {
+				evaluation, err := evidence.Allocate(cfg.StorageOptions(identity), "target", "main")
+				if err != nil {
+					b.Fatal(err)
+				}
+				if err := evaluation.Write(evidence.ConftestFile, []byte(conftestAllSuccessJSON)); err != nil {
+					b.Fatal(err)
+				}
+				if err := evaluation.WriteMetadata(config.ProviderDir, evidence.TargetContext{TargetID: "target"}, evidence.ConfigurationContext{}); err != nil {
+					b.Fatal(err)
+				}
+				if err := evaluation.Finalize(); err != nil {
+					b.Fatal(err)
+				}
+				if err := evaluation.Close(); err != nil {
+					b.Fatal(err)
+				}
+			}
+			input := filepath.Join(root, "input.json")
+			if err := os.WriteFile(input, []byte(`{}`), 0600); err != nil {
+				b.Fatal(err)
+			}
+			boundaries := []string{cfg.WorkspaceDir}
+			traversal := localTraversal{readDir: os.ReadDir, lstat: os.Lstat}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				identities, err := workspaceIdentities(context.Background(), boundaries, "", traversal, fileIdentityOf)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if err := inspectInput(context.Background(), input, boundaries, "", "", traversal, identities, fileIdentityOf); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(count), "evaluations")
+			b.ReportMetric(float64(2*count), "retained-files")
+		})
+	}
 }
 
 func benchmarkWorkspacePreflight(b *testing.B, directoryCount int) {

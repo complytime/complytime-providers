@@ -61,9 +61,12 @@ are not set manually by the user.
     Default: root of the cloned repository.
 
 **workspace** (injected by complyctl)
-:   Workspace base directory. The provider excludes this base joined with
-    **.complytime**, as well as its own artifact directory when different.
-    When absent, the provider uses its configured artifact directory.
+:   Base for generated artifacts, retained results and evidence coordinates.
+    Generate uses its global variable; Scan uses target variables. Absent or
+    empty values use provider process CWD. Invalid or conflicting roots fail
+    the RPC before storage. The provider does not reread environment precedence.
+    Relative input/configuration paths resolve against this base; absolute
+    external paths remain absolute. This is a breaking provider lookup change.
 
 **platform** (optional)
 :   Platform hint for self-hosted git instances (e.g., **github**,
@@ -89,14 +92,12 @@ target that contains a workspace, the provider excludes the workspace
 files, including user-owned files. Files outside the excluded directories
 remain eligible subject to the link and input checks below.
 
-The provider resolves the host workspace as the **workspace** base injected
-by complyctl joined with **.complytime**. It also excludes its own artifact
-directory, normally **.complytime** relative to the provider's working
-directory, when that directory differs. For example, a host base of
-*/srv/team* and a provider working directory of */srv/scan* create two
-boundaries: */srv/team/.complytime* and */srv/scan/.complytime*. If the
-host does not provide a workspace base, the provider uses its configured
-artifact directory. The provider resolves both paths through symbolic links.
+The provider excludes the selected **workspace** base joined with
+**.complytime** and a configured provider artifact directory when different,
+including an existing invocation-relative default. An absent old default is not
+created in the invoking tree. Output paths and evidence coordinates use the selected base,
+not the configured exclusion directory. The provider resolves both boundaries
+through symbolic links.
 If it cannot resolve a boundary, it rejects the target. Check that both
 workspace directories exist and that the provider can access their paths,
 then retry the scan.
@@ -127,13 +128,17 @@ lack of confirmed evaluated directory input in any branch suppresses assessments
 from every branch of that configured target. This applies in either branch order.
 The error identifies the rejected target and branch; other configured targets
 retain their assessments. Repair the rejected branch's input or select only the
-intended eligible branches. Previously written per-branch result files are not deleted.
+intended eligible branches. Previously written branch artifacts remain on disk
+without published evidence or mapping references; they are not deleted.
 
 Workspace exclusion does not prune directories from traversal. An
 unreadable directory or broken link can still cause an operational error;
 fix the path or its permissions before retrying. Preflight is not a
 sandbox: concurrent filesystem changes between preflight and conftest
-traversal can defeat isolation.
+traversal can defeat isolation. Identity preflight traverses retained history,
+so its work grows with stored files and directories. Inaccessible private history
+fails closed; use the authorized account or elevated access without widening old
+permissions or treating deletion as an automatic remedy.
 
 ## Conftest ignore configuration
 
@@ -155,8 +160,8 @@ export CONFTEST_IGNORE='^$'
 ```
 
 Other conftest configuration settings continue to apply. The provider
-checks configuration in conftest's working directory and resolves a
-relative **CONFTEST_CONFIG_FILE** from that directory.
+checks configuration and runs conftest in the selected workspace, without changing
+process CWD. A relative **CONFTEST_CONFIG_FILE** uses that same workspace.
 
 # ENVIRONMENT
 
@@ -211,13 +216,25 @@ Requires the following tools at runtime:
 # FILES
 
 *.complytime/opa/*
-:   Provider workspace directory. All paths below are relative to the
-    current working directory.
+:   Provider artifacts. All paths below are relative to the selected workspace
+    root, not the Evaluation Log's directory or an auditor's current directory.
 
-*.complytime/opa/results/\<target\>-\<branch\>.json*
-:   Per-target result JSON summarizing conftest findings for a single
-    target and branch combination. For local targets, the branch
-    component is omitted.
+*.complytime/opa/results/\<repository\>/\<branch\>/evaluation-\<UTC-time\>-\<token\>/conftest.json*
+:   Exact conftest JSON stdout for one remote target/branch evaluation.
+    Time uses **20060102T150405Z** format; a random token distinguishes executions.
+
+*.complytime/opa/results/\<local-target\>/evaluation-\<UTC-time\>-\<token\>/conftest.json*
+:   Exact conftest JSON stdout for a local file or directory evaluation.
+    Display labels are bounded grouping hints, not unique identities.
+
+*metadata.json* (beside each retained result)
+:   Best-effort schema-v1 collection-start, non-secret target/branch/scan-path
+    and available policy/namespace/requirement-mapping context. Paths describe
+    provenance, not archived policy or input bytes. Metadata is supporting output,
+    not an evidence inventory or digest authority.
+
+Legacy normalized per-target summaries are no longer written, including on
+errors. Existing summary files remain untouched and are not current results.
 
 *.complytime/opa/generated/\<content-key\>/scan-config.json*
 :   Scan configuration written by the **Generate** RPC. Records matched
@@ -227,13 +244,14 @@ Requires the following tools at runtime:
 *.complytime/opa/generated/generate-index.json*
 :   Maps each generated target to its content-keyed scan configuration.
 
-*.complytime/opa/generated/complytime-mapping.json*
+*\<policy-directory\>/complytime-mapping.json*
 :   Mapping file shipped in the OCI policy bundle or complypack. Maps
     Gemara requirement IDs to Rego policy namespaces. Required for
     requirement-scoped evaluation.
 
 *.complytime/opa/repos/*
-:   Directory for cloned git repositories when **url** targets are used.
+:   Replaceable working clones, not retained evidence or historical snapshots.
+    Used when **url** targets are selected.
     Each repository is cloned into a subdirectory named by the sanitized
     URL and branch.
 
@@ -243,30 +261,73 @@ Requires the following tools at runtime:
 
 # EVIDENCE
 
-The provider records an **Evidence** entry on each **AssessmentLog**
-returned by the **Scan** RPC:
+Use the Gemara Evaluation Log to identify and verify each assessment's retained
+result file. The log alone defines the evidence set: files beside an artifact,
+including metadata, do not become evidence implicitly.
 
 **Type**
-:   **ConftestResult** — the conftest evaluation output for the target
-    input path.
+:   **ConftestResult** — retained conftest output for remote repositories,
+    local files and local directories, uniformly.
 
 **Production**
 :   The provider invokes **conftest test** with namespace-scoped policies
     against the input path (a cloned repository directory or a local
-    filesystem path). The conftest JSON output is parsed into per-target
-    result files.
+    filesystem path). It preserves exact JSON stdout as **conftest.json**,
+    parses and hashes those stored bytes and keeps stderr separate. Valid failing
+    compliance results remain evidence because conftest runs with **--no-fail**.
+    Required allocation/write/close/parse/digest failures publish no affected
+    assessments. Metadata failures warn; ownership/mode failures fail the RPC.
 
 **EvaluationLog representation**
 :   Each assessment log carries an Evidence entry with:
 
-    - **Source.Coordinate**: the input path evaluated by conftest
-      (e.g., *.complytime/opa/repos/\<repo\>/\<branch\>* or a local
-      filesystem path)
-    - **Source.ReferenceID**: **conftest-input-\<target\>[-\<branch\>]**
+    - **Source.Coordinate**: workspace-root-relative path to retained **conftest.json**
+    - **Source.Digest**: SHA256 (**sha256:\<hex\>**) of the stored output for every input type
+    - **ID**: **conftest_\<token\>**
+    - **Source.ReferenceID**: **conftest-result_\<token\>**, matching its mapping reference
+    - **CollectedAt**: UTC collection start, also used in the directory and metadata
 
-    For regular-file inputs, **Source.Digest** contains the SHA-256
-    hash (**sha256:\<hex\>**) of the file content at scan time. For
-    directory inputs (cloned repositories), no digest is recorded.
+    A mapping reference's escaped absolute **file://** URL identifies the same file.
+    Multiple assessments reuse one artifact/reference; different evaluations have
+    different IDs even for identical bytes. These coordinate/ID and OPA result-file
+    semantics are breaking changes, without moving fixed-path aliases.
+
+Complyctl selects **--workspace**, then **COMPLYTIME_WORKSPACE**, then invocation
+directory and supplies that root through existing RPC variables. Establish that
+root, read the log's mappings, resolve each coordinate against the root (or decode
+the absolute file URL), and compare the file's SHA256 with the recorded digest.
+URI escapes such as **%20** and **%25** are not literal filename characters.
+No packaging or storage integration is required for in-place verification.
+
+Preservation is always on, with no automatic cleanup, retention settings or
+deduplication. Storage grows with each result and supporting metadata, including
+identical results and failed attempts. Local inputs stay in place; remote clones
+remain replaceable. Embedded conftest input filenames are provenance rather than
+retained evidence links. Inputs and policies are not archived; unchanged findings
+do not prove unchanged inputs, and historical re-evaluation is not guaranteed.
+
+Evaluation directories use mode **0700** and files **0600**, owned by the provider's
+effective execution UID/GID. Sudo and direct-root scans remain root-owned; the
+original user needs authorized elevated reading/hashing. Context parents must
+permit traversal and the selected workspace must be writable. Permission or
+disk-space failures can leave unreferenced partial files. Fix account access or
+capacity before retrying; the provider does not transfer owners, widen historical
+permissions or promise access to arbitrary other users.
+
+Uploading the Evaluation Log does not transfer its evidence bytes. Customer-owned
+storage and transfer integrations must preserve both the log and log-selected files,
+keep them retrievable and verify transferred bytes against the logged digests.
+Collection, validation of collected copies and optional packaging are separate
+future complyctl capabilities, not implemented here. Any relocation must map moved
+artifacts to original references without modifying the log. Coordinates work against
+a copied workspace preserving the layout; absolute URLs remain specific to the
+originating filesystem and do not relocate automatically. Storage backends and
+long-term retention remain customer-owned.
+
+After upgrade, legacy summaries/fixed-path artifacts stop being refreshed; existing
+files and historical logs remain untouched and are not migrated. Already overwritten
+evidence cannot be recovered. Rolling back to an older binary resumes overwrite
+behavior for later scans while retained directories remain readable by authorized users.
 
 # EXIT CODES
 

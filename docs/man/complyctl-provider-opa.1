@@ -58,10 +58,14 @@ Path traversal sequences (\f[B]../\f[R]) are rejected.
 Default: root of the cloned repository.
 .TP
 \f[B]workspace\f[R] (injected by complyctl)
-Workspace base directory.
-The provider excludes this base joined with \f[B].complytime\f[R], as
-well as its own artifact directory when different.
-When absent, the provider uses its configured artifact directory.
+Base for generated artifacts, retained results and evidence coordinates.
+Generate uses its global variable; Scan uses target variables.
+Absent or empty values use provider process CWD.
+Invalid or conflicting roots fail the RPC before storage.
+The provider does not reread environment precedence.
+Relative input/configuration paths resolve against this base; absolute
+external paths remain absolute.
+This is a breaking provider lookup change.
 .TP
 \f[B]platform\f[R] (optional)
 Platform hint for self\-hosted git instances (e.g., \f[B]github\f[R],
@@ -87,17 +91,13 @@ excludes the workspace files, including user\-owned files.
 Files outside the excluded directories remain eligible subject to the
 link and input checks below.
 .PP
-The provider resolves the host workspace as the \f[B]workspace\f[R] base
-injected by complyctl joined with \f[B].complytime\f[R].
-It also excludes its own artifact directory, normally
-\f[B].complytime\f[R] relative to the provider\(cqs working directory,
-when that directory differs.
-For example, a host base of \f[I]/srv/team\f[R] and a provider working
-directory of \f[I]/srv/scan\f[R] create two boundaries:
-\f[I]/srv/team/.complytime\f[R] and \f[I]/srv/scan/.complytime\f[R].
-If the host does not provide a workspace base, the provider uses its
-configured artifact directory.
-The provider resolves both paths through symbolic links.
+The provider excludes the selected \f[B]workspace\f[R] base joined with
+\f[B].complytime\f[R] and a configured provider artifact directory when
+different, including an existing invocation\-relative default.
+An absent old default is not created in the invoking tree.
+Output paths and evidence coordinates use the selected base, not the
+configured exclusion directory.
+The provider resolves both boundaries through symbolic links.
 If it cannot resolve a boundary, it rejects the target.
 Check that both workspace directories exist and that the provider can
 access their paths, then retry the scan.
@@ -137,13 +137,19 @@ The error identifies the rejected target and branch; other configured
 targets retain their assessments.
 Repair the rejected branch\(cqs input or select only the intended
 eligible branches.
-Previously written per\-branch result files are not deleted.
+Previously written branch artifacts remain on disk without published
+evidence or mapping references; they are not deleted.
 .PP
 Workspace exclusion does not prune directories from traversal.
 An unreadable directory or broken link can still cause an operational
 error; fix the path or its permissions before retrying.
 Preflight is not a sandbox: concurrent filesystem changes between
 preflight and conftest traversal can defeat isolation.
+Identity preflight traverses retained history, so its work grows with
+stored files and directories.
+Inaccessible private history fails closed; use the authorized account or
+elevated access without widening old permissions or treating deletion as
+an automatic remedy.
 .SS Conftest ignore configuration
 For a local directory that contains a workspace, the provider combines a
 nonempty \f[B]CONFTEST_IGNORE\f[R] with the workspace exclusion.
@@ -166,8 +172,9 @@ export CONFTEST_IGNORE=\(aq\(ha$\(aq
 .EE
 .PP
 Other conftest configuration settings continue to apply.
-The provider checks configuration in conftest\(cqs working directory and
-resolves a relative \f[B]CONFTEST_CONFIG_FILE\f[R] from that directory.
+The provider checks configuration and runs conftest in the selected
+workspace, without changing process CWD.
+A relative \f[B]CONFTEST_CONFIG_FILE\f[R] uses that same workspace.
 .SH ENVIRONMENT
 .TP
 \f[B]CONFTEST_IGNORE\f[R]
@@ -233,13 +240,30 @@ Provided by the \f[B]git\f[R] Fedora package.
 .SH FILES
 .TP
 \f[I].complytime/opa/\f[R]
-Provider workspace directory.
-All paths below are relative to the current working directory.
+Provider artifacts.
+All paths below are relative to the selected workspace root, not the
+Evaluation Log\(cqs directory or an auditor\(cqs current directory.
 .TP
-\f[I].complytime/opa/results/<target>\-<branch>.json\f[R]
-Per\-target result JSON summarizing conftest findings for a single
-target and branch combination.
-For local targets, the branch component is omitted.
+\f[I].complytime/opa/results/<repository>/<branch>/evaluation\-<UTC\-time>\-<token>/conftest.json\f[R]
+Exact conftest JSON stdout for one remote target/branch evaluation.
+Time uses \f[B]20060102T150405Z\f[R] format; a random token
+distinguishes executions.
+.TP
+\f[I].complytime/opa/results/<local\-target>/evaluation\-<UTC\-time>\-<token>/conftest.json\f[R]
+Exact conftest JSON stdout for a local file or directory evaluation.
+Display labels are bounded grouping hints, not unique identities.
+.TP
+\f[I]metadata.json\f[R] (beside each retained result)
+Best\-effort schema\-v1 collection\-start, non\-secret
+target/branch/scan\-path and available
+policy/namespace/requirement\-mapping context.
+Paths describe provenance, not archived policy or input bytes.
+Metadata is supporting output, not an evidence inventory or digest
+authority.
+.PP
+Legacy normalized per\-target summaries are no longer written, including
+on errors.
+Existing summary files remain untouched and are not current results.
 .TP
 \f[I].complytime/opa/generated/<content\-key>/scan\-config.json\f[R]
 Scan configuration written by the \f[B]Generate\f[R] RPC.
@@ -249,14 +273,15 @@ and the resolved policy directory path.
 \f[I].complytime/opa/generated/generate\-index.json\f[R]
 Maps each generated target to its content\-keyed scan configuration.
 .TP
-\f[I].complytime/opa/generated/complytime\-mapping.json\f[R]
+\f[I]<policy\-directory>/complytime\-mapping.json\f[R]
 Mapping file shipped in the OCI policy bundle or complypack.
 Maps Gemara requirement IDs to Rego policy namespaces.
 Required for requirement\-scoped evaluation.
 .TP
 \f[I].complytime/opa/repos/\f[R]
-Directory for cloned git repositories when \f[B]url\f[R] targets are
-used.
+Replaceable working clones, not retained evidence or historical
+snapshots.
+Used when \f[B]url\f[R] targets are selected.
 Each repository is cloned into a subdirectory named by the sanitized URL
 and branch.
 .TP
@@ -264,34 +289,104 @@ and branch.
 Directory for downloaded OPA policy bundles (from OCI registries or
 complypack content).
 .SH EVIDENCE
-The provider records an \f[B]Evidence\f[R] entry on each
-\f[B]AssessmentLog\f[R] returned by the \f[B]Scan\f[R] RPC:
+Use the Gemara Evaluation Log to identify and verify each
+assessment\(cqs retained result file.
+The log alone defines the evidence set: files beside an artifact,
+including metadata, do not become evidence implicitly.
 .TP
 \f[B]Type\f[R]
-\f[B]ConftestResult\f[R] \(em the conftest evaluation output for the
-target input path.
+\f[B]ConftestResult\f[R] \(em retained conftest output for remote
+repositories, local files and local directories, uniformly.
 .TP
 \f[B]Production\f[R]
 The provider invokes \f[B]conftest test\f[R] with namespace\-scoped
 policies against the input path (a cloned repository directory or a
 local filesystem path).
-The conftest JSON output is parsed into per\-target result files.
+It preserves exact JSON stdout as \f[B]conftest.json\f[R], parses and
+hashes those stored bytes and keeps stderr separate.
+Valid failing compliance results remain evidence because conftest runs
+with \f[B]\(enno\-fail\f[R].
+Required allocation/write/close/parse/digest failures publish no
+affected assessments.
+Metadata failures warn; ownership/mode failures fail the RPC.
 .TP
 \f[B]EvaluationLog representation\f[R]
 Each assessment log carries an Evidence entry with:
 .RS
 .IP \(bu 2
-\f[B]Source.Coordinate\f[R]: the input path evaluated by conftest (e.g.,
-\f[I].complytime/opa/repos/<repo>/<branch>\f[R] or a local filesystem
-path)
+\f[B]Source.Coordinate\f[R]: workspace\-root\-relative path to retained
+\f[B]conftest.json\f[R]
 .IP \(bu 2
-\f[B]Source.ReferenceID\f[R]:
-\f[B]conftest\-input\-<target>[\-<branch>]\f[R]
+\f[B]Source.Digest\f[R]: SHA256 (\f[B]sha256:<hex>\f[R]) of the stored
+output for every input type
+.IP \(bu 2
+\f[B]ID\f[R]: \f[B]conftest_<token>\f[R]
+.IP \(bu 2
+\f[B]Source.ReferenceID\f[R]: \f[B]conftest\-result_<token>\f[R],
+matching its mapping reference
+.IP \(bu 2
+\f[B]CollectedAt\f[R]: UTC collection start, also used in the directory
+and metadata
 .PP
-For regular\-file inputs, \f[B]Source.Digest\f[R] contains the SHA\-256
-hash (\f[B]sha256:<hex>\f[R]) of the file content at scan time.
-For directory inputs (cloned repositories), no digest is recorded.
+A mapping reference\(cqs escaped absolute \f[B]file://\f[R] URL
+identifies the same file.
+Multiple assessments reuse one artifact/reference; different evaluations
+have different IDs even for identical bytes.
+These coordinate/ID and OPA result\-file semantics are breaking changes,
+without moving fixed\-path aliases.
 .RE
+.PP
+Complyctl selects \f[B]\(enworkspace\f[R], then
+\f[B]COMPLYTIME_WORKSPACE\f[R], then invocation directory and supplies
+that root through existing RPC variables.
+Establish that root, read the log\(cqs mappings, resolve each coordinate
+against the root (or decode the absolute file URL), and compare the
+file\(cqs SHA256 with the recorded digest.
+URI escapes such as \f[B]%20\f[R] and \f[B]%25\f[R] are not literal
+filename characters.
+No packaging or storage integration is required for in\-place
+verification.
+.PP
+Preservation is always on, with no automatic cleanup, retention settings
+or deduplication.
+Storage grows with each result and supporting metadata, including
+identical results and failed attempts.
+Local inputs stay in place; remote clones remain replaceable.
+Embedded conftest input filenames are provenance rather than retained
+evidence links.
+Inputs and policies are not archived; unchanged findings do not prove
+unchanged inputs, and historical re\-evaluation is not guaranteed.
+.PP
+Evaluation directories use mode \f[B]0700\f[R] and files \f[B]0600\f[R],
+owned by the provider\(cqs effective execution UID/GID.
+Sudo and direct\-root scans remain root\-owned; the original user needs
+authorized elevated reading/hashing.
+Context parents must permit traversal and the selected workspace must be
+writable.
+Permission or disk\-space failures can leave unreferenced partial files.
+Fix account access or capacity before retrying; the provider does not
+transfer owners, widen historical permissions or promise access to
+arbitrary other users.
+.PP
+Uploading the Evaluation Log does not transfer its evidence bytes.
+Customer\-owned storage and transfer integrations must preserve both the
+log and log\-selected files, keep them retrievable and verify
+transferred bytes against the logged digests.
+Collection, validation of collected copies and optional packaging are
+separate future complyctl capabilities, not implemented here.
+Any relocation must map moved artifacts to original references without
+modifying the log.
+Coordinates work against a copied workspace preserving the layout;
+absolute URLs remain specific to the originating filesystem and do not
+relocate automatically.
+Storage backends and long\-term retention remain customer\-owned.
+.PP
+After upgrade, legacy summaries/fixed\-path artifacts stop being
+refreshed; existing files and historical logs remain untouched and are
+not migrated.
+Already overwritten evidence cannot be recovered.
+Rolling back to an older binary resumes overwrite behavior for later
+scans while retained directories remain readable by authorized users.
 .SH EXIT CODES
 This provider is a gRPC subprocess managed by \f[B]complyctl\f[R].
 Exit codes follow the hashicorp/go\-plugin protocol and are not

@@ -95,9 +95,9 @@ See `docs/configuration.md` for comprehensive examples including mixed-platform 
 The plugin resolves granular AMPEL policy files (one JSON file per control) using the following precedence:
 1. **Complypack content** — When a complypack is configured for the ampel evaluator-id, complyctl provides the content path automatically. The plugin extracts `content.tar.gz` archives if needed.
 2. **`ampel_policy_dir` global variable** — A custom directory specified in `complytime.yaml`.
-3. **Default directory** — `{workspace}/ampel/granular-policies/`.
+3. **Default directory** — `{workspace}/.complytime/ampel/granular-policies/`.
 
-During the `generate` phase, the plugin matches assessment configuration requirement IDs (Gemara `requirement-id` values) to granular AMPEL policy IDs and merges the matched policies into a single bundle used for verification. Generated output is written to `{workspace}/ampel/policy/`.
+During the `generate` phase, the plugin matches assessment configuration requirement IDs (Gemara `requirement-id` values) to granular AMPEL policy IDs and merges the matched policies into a single bundle used for verification. Generated output is written to `{workspace}/.complytime/ampel/generated/<content-key>/` and selected through `generate-index.json`.
 
 Sample policy files are available in the [complytime-demos](https://github.com/complytime/complytime-demos) repository under `base_ansible_env/files/ampel-policies/`.
 
@@ -109,7 +109,7 @@ When the plugin receives the `generate` command from complyctl, it will:
 * Load granular AMPEL policy files from the resolved policy directory
 * Match assessment configuration requirement IDs (Gemara `requirement-id` values) to available granular AMPEL policies
 * Merge matched policies into a single policy bundle
-* Write the bundle to `{workspace}/ampel/policy/complytime-ampel-policy.json`
+* Write the bundle and `scan-config.json` to `{workspace}/.complytime/ampel/generated/<content-key>/`
 
 ### Scan
 
@@ -121,8 +121,71 @@ When the plugin receives the `scan` command from complyctl, it will:
   * Extract the subject hash from the snappy attestation
   * Run `ampel verify` to evaluate the attestation against the generated policy bundle
   * Parse the AMPEL verification results (supporting both raw and DSSE-wrapped attestations)
-* Write per-repository result files to the configured results directory
+* Preserve both attestations in a fresh directory for every repository/branch/spec evaluation
 * Return assessment results to complyctl for inclusion in the compliance report
+
+### Evidence and workspace
+
+Each scan preserves the raw outputs referenced by its Gemara Evaluation Log, so
+later scans do not overwrite earlier evidence. The layout beneath the selected
+workspace root is:
+
+```text
+.complytime/ampel/results/<repository>/<branch>/<spec>/evaluation-<UTC-time>-<token>/
+  snappy.intoto.json
+  ampel.intoto.json
+  metadata.json
+```
+
+The directory contains one evaluation's attestation pair and best-effort supporting
+metadata. Readable labels are bounded to 80 bytes and can collide; exclusive
+allocation with a 128-bit random token keeps evaluation instances independent.
+The spec label describes snappy's collection spec, not a policy identity.
+Repeated or failing-compliance evaluations retain separate outputs, even when
+their bytes are identical. Many assessments can share one pair without copies.
+
+**Breaking changes:** fixed-path attestations and normalized per-repository JSON
+summaries are no longer written or refreshed. Evidence and mapping-reference IDs
+now use `ampel_<token>` and `snappy_<token>`. Resolve each returned evidence
+coordinate against the selected workspace root, not the log's directory, and
+verify the file against its `sha256:<hex>` digest. Mapping references retain
+escaped absolute `file://` URLs to the same files. The log alone defines the
+evidence set; metadata and other unreferenced files are not implicit evidence.
+
+Complyctl selects `--workspace`, then `COMPLYTIME_WORKSPACE`, then its invoking
+directory and delivers that value through Generate global/Scan target `workspace`
+variables. Missing/empty variables use provider CWD for legacy/direct callers;
+conflicting request roots fail. Relative inputs, collection spec files and provider
+configuration now resolve against that workspace, while absolute paths remain
+absolute. Invocation-relative configurations must migrate. Tool execution uses
+the selected workspace without changing process-wide CWD.
+
+Preservation is always on: no automatic cleanup, retention setting, compression,
+deduplication, input snapshot or historical policy archive is added. Storage grows
+with each evaluation and interrupted attempts can leave unreferenced partial
+outputs. Metadata failures warn but do not suppress complete verified evidence.
+The directories use `0700` and files `0600`, owned by the effective execution
+UID/GID. The workspace must be writable and existing parents traversable by that
+account. Sudo/direct-root evidence remains root-owned; the original user needs
+authorized elevated access to read and hash it. There is no original-user handoff.
+For permission or disk-space failures, check execution-account access, parent
+traversal and capacity without widening old evidence permissions or changing owners.
+
+Uploading a log alone does not upload its evidence bytes. Customers own storage,
+transfers, access policies and longevity: preserve the log and its log-selected
+files, keep them retrievable and verify transferred bytes against the digests.
+Collection and optional packaging remain separate future complyctl capabilities;
+moved files require mapping to original references without rewriting the log.
+Coordinates can resolve against a copied workspace with its layout preserved;
+absolute URLs still describe the originating filesystem and do not relocate.
+
+Upgrade stops refreshing fixed-path outputs and leaves legacy files and historical
+logs untouched, without migration or recovery of already overwritten evidence.
+Older binaries resume overwrite behavior
+after rollback; retained evaluation directories remain readable by authorized readers.
+See the [Ampel man page](../../docs/man/complyctl-provider-ampel.md) for path and
+evidence-field reference details and the [shared evidence workflow](../../README.md#preserve-and-verify-scan-evidence)
+for workspace discovery, URI decoding and log/file transfer guidance.
 
 ## Installation
 

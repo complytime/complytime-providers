@@ -41,11 +41,15 @@ var safeBranchPattern = regexp.MustCompile(`^[a-zA-Z0-9._/-]+$`)
 var _ provider.Provider = (*ProviderServer)(nil)
 
 // ProviderServer implements the provider.Provider interface for the AMPEL provider.
-type ProviderServer struct{}
+type ProviderServer struct {
+	logger   hclog.Logger
+	identity func() (evidence.Identity, error)
+	allocate func(evidence.StorageOptions, ...string) (*evidence.Evaluation, error)
+}
 
 // New returns a new ProviderServer.
 func New() *ProviderServer {
-	return &ProviderServer{}
+	return &ProviderServer{logger: hclog.Default(), identity: evidence.ExecutionIdentity, allocate: evidence.Allocate}
 }
 
 // Describe returns the provider metadata and health status.
@@ -61,7 +65,12 @@ func (s *ProviderServer) Describe(_ context.Context, _ *provider.DescribeRequest
 // granular AMPEL policy files and merges the matched policies into a single
 // bundle for scan.
 func (s *ProviderServer) Generate(_ context.Context, req *provider.GenerateRequest) (*provider.GenerateResponse, error) {
-	logger := hclog.Default()
+	logger := s.logger
+	root, err := evidence.GenerateWorkspace(req)
+	if err != nil {
+		return nil, err
+	}
+	cfg := config.NewWorkspaceConfig(root)
 
 	if len(req.Configuration) == 0 {
 		return &provider.GenerateResponse{
@@ -77,7 +86,7 @@ func (s *ProviderServer) Generate(_ context.Context, req *provider.GenerateReque
 		}, nil
 	}
 
-	if err := config.EnsureDirectories(); err != nil {
+	if err := cfg.EnsureDirectories(); err != nil {
 		return &provider.GenerateResponse{
 			Success:      false,
 			ErrorMessage: fmt.Sprintf("directory setup failed: %v", err),
@@ -86,13 +95,16 @@ func (s *ProviderServer) Generate(_ context.Context, req *provider.GenerateReque
 
 	logger.Info("generating AMPEL policy")
 
-	sourceDir, resolveErr := resolvePolicyDir(logger, req)
+	resolvedRequest := *req
+	resolvedRequest.ComplypackContentPath = cfg.Path(req.ComplypackContentPath)
+	sourceDir, resolveErr := resolvePolicyDir(logger, &resolvedRequest)
 	if resolveErr != nil {
 		return &provider.GenerateResponse{
 			Success:      false,
 			ErrorMessage: resolveErr.Error(),
 		}, nil
 	}
+	sourceDir = cfg.Path(sourceDir)
 	granular, err := convert.LoadGranularPolicies(sourceDir)
 	if err != nil {
 		return &provider.GenerateResponse{
@@ -119,7 +131,7 @@ func (s *ProviderServer) Generate(_ context.Context, req *provider.GenerateReque
 		requirementIDs[i] = p.ID
 	}
 	contentKey := genindex.ContentKey(requirementIDs, sourceDir)
-	outputDir := config.GeneratedDirForKey(contentKey)
+	outputDir := cfg.Path(config.GeneratedDirForKey(contentKey))
 	if err := os.MkdirAll(outputDir, genindex.ContentDirectoryMode); err != nil {
 		return &provider.GenerateResponse{
 			Success:      false,
@@ -139,7 +151,7 @@ func (s *ProviderServer) Generate(_ context.Context, req *provider.GenerateReque
 		}, nil
 	}
 	if err := genindex.UpdateIndex(
-		config.GeneratedDirPath(), genindex.TargetKey(req.TargetVariables["url"]), contentKey,
+		cfg.Path(config.GeneratedDirPath()), genindex.TargetKey(req.TargetVariables["url"]), contentKey,
 	); err != nil {
 		return &provider.GenerateResponse{
 			Success:      false,
@@ -154,34 +166,46 @@ func (s *ProviderServer) Generate(_ context.Context, req *provider.GenerateReque
 // Scan invokes the AMPEL toolchain to scan target repositories and returns
 // standardized assessment results.
 func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*provider.ScanResponse, error) {
-	logger := hclog.Default()
+	logger := s.logger
 
 	if len(req.Targets) == 0 {
 		return nil, fmt.Errorf("no targets provided")
 	}
+	root, err := evidence.ScanWorkspace(req)
+	if err != nil {
+		return nil, err
+	}
+	identity, err := s.identity()
+	if err != nil {
+		return nil, fmt.Errorf("execution identity: %w", err)
+	}
+	cfg := config.NewWorkspaceConfig(root)
 
 	if err := checkRequiredTools(logger); err != nil {
 		return nil, err
 	}
 
-	if err := config.EnsureDirectories(); err != nil {
+	if err := cfg.EnsureDirectories(); err != nil {
 		return nil, fmt.Errorf("directory setup failed: %w", err)
 	}
 
 	logger.Info("scanning target repositories")
 
-	resultsDir := config.ResultsDirPath()
-	specDir := config.SpecDirPath()
+	specDir := cfg.Path(config.SpecDirPath())
+	runner := ScanRunner
+	if execution, ok := runner.(scan.ExecRunner); ok {
+		execution.WorkingDirectory = root
+		runner = execution
+	}
 
 	if err := scan.WriteSpecFiles(specDir); err != nil {
 		return nil, fmt.Errorf("writing spec files: %w", err)
 	}
 
 	baseScanCfg := scan.ScanConfig{
-		OutputDir: resultsDir,
-		SpecDir:   specDir,
+		SpecDir: root,
 	}
-	index, indexErr := genindex.ReadIndex(config.GeneratedDirPath())
+	index, indexErr := genindex.ReadIndex(cfg.Path(config.GeneratedDirPath()))
 	if indexErr != nil && !errors.Is(indexErr, os.ErrNotExist) {
 		return nil, fmt.Errorf("reading generate index for target %q: %w", req.Targets[0].TargetID, indexErr)
 	}
@@ -189,7 +213,7 @@ func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*pr
 	var legacyScanConfig *generate.ScanConfig
 	if !hasIndex {
 		logger.Warn("generate index absent; using legacy scan configuration fallback")
-		legacyScanConfig, indexErr = generate.ReadScanConfig(config.ScanConfigDirPath())
+		legacyScanConfig, indexErr = generate.ReadScanConfig(cfg.Path(config.ScanConfigDirPath()))
 		if indexErr != nil {
 			logger.Warn("scan config not found, passing assessments will not be synthesized", "error", indexErr)
 		}
@@ -200,7 +224,7 @@ func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*pr
 	hostRemark := evidence.HostRemark()
 
 	for _, target := range req.Targets {
-		repoURL := target.Variables["url"]
+		repoURL := evidence.PublicContext(target.Variables["url"])
 		if repoURL == "" {
 			return nil, fmt.Errorf("target %q: missing required variable 'url'", target.TargetID)
 		}
@@ -221,17 +245,17 @@ func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*pr
 		specs := splitCSV(specsStr)
 
 		// Defense-in-depth: validate target variables on the provider side
-		if err := validateTargetVariables(repoURL, branches, specs, accessToken, target.TargetID); err != nil {
+		if err := validateTargetVariables(repoURL, branches, specs, accessToken, evidence.PublicContext(target.TargetID)); err != nil {
 			return nil, err
 		}
 		targetScanConfig, policyPath, err := resolveTargetArtifacts(
-			target, index, hasIndex, legacyScanConfig, scanConfigCache,
+			target, index, hasIndex, legacyScanConfig, scanConfigCache, cfg,
 		)
 		if err != nil {
 			return nil, err
 		}
 		scanCfg := baseScanCfg
-		scanCfg.PolicyPath = policyPath
+		scanCfg.PolicyPath = cfg.Path(policyPath)
 
 		// Validate and detect platform
 		platform, _, _, err := targets.ParseRepoURL(repoURL, platformHint)
@@ -244,91 +268,26 @@ func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*pr
 			AccessToken: accessToken,
 			Platform:    platform,
 		}
+		configuration := evidence.ConfigurationContext{PolicyPath: scanCfg.PolicyPath}
+		if targetScanConfig != nil {
+			configuration.RequirementIDs = targetScanConfig.RequirementIDs
+		}
+		if hasIndex {
+			configuration.ContentKey = filepath.Base(filepath.Dir(scanCfg.PolicyPath))
+		}
+		options := evaluationOptions{
+			targetID: target.TargetID, repository: repo, scanConfig: scanCfg,
+			configuration: configuration, storage: cfg.StorageOptions(identity),
+			runner: runner, remarks: hostRemark,
+		}
 
 		for _, branch := range branches {
 			for _, specRef := range specs {
-				specPath := scan.ResolveSpecPath(specRef, scanCfg.SpecDir)
-				logger.Info("scanning repository", "url", repoURL, "branch", branch, "spec", specRef)
-
-				rawResult, err := scan.ScanRepository(repo, branch, specPath, scanCfg, ScanRunner)
+				parsed, err := s.scanEvaluation(options, branch, specRef)
 				if err != nil {
-					logger.Error("scan failed", "repo", repoURL, "branch", branch, "spec", specRef, "error", err)
-					errResult := &results.PerRepoResult{
-						Repository: repoURL,
-						Branch:     branch,
-						Status:     "error",
-						Error:      err.Error(),
-					}
-					repoResults = append(repoResults, errResult)
-					if writeErr := results.WritePerRepoResult(errResult, resultsDir); writeErr != nil {
-						logger.Error("failed to write error result", "error", writeErr)
-					}
-					continue
+					return nil, err
 				}
-
-				parsed, err := results.ParseAmpelOutput(rawResult.Output, repoURL, branch)
-				if err != nil {
-					logger.Error("failed to parse scan output", "repo", repoURL, "error", err)
-					errResult := &results.PerRepoResult{
-						Repository: repoURL,
-						Branch:     branch,
-						Status:     "error",
-						Error:      err.Error(),
-					}
-					repoResults = append(repoResults, errResult)
-					if writeErr := results.WritePerRepoResult(errResult, resultsDir); writeErr != nil {
-						logger.Error("failed to write error result", "error", writeErr)
-					}
-					continue
-				}
-				if targetScanConfig != nil {
-					parsed.RequirementIDs = targetScanConfig.RequirementIDs
-				}
-
-				// All-SKIP detection: when every finding skipped, no policy's
-				// declared predicate types matched the attestation. This is a
-				// misconfiguration, not a valid scan result (Decision 3).
-				// Clear findings so ToScanResponse routes the result to
-				// operational errors (status "error" + no findings).
-				if parsed.AllFindingsSkipped() {
-					parsed.Status = "error"
-					parsed.Error = "all policies were skipped: " +
-						"no policies matched the attestation predicate type"
-					parsed.Findings = nil
-				}
-
-				// Thread attestation paths, spec label, and host remark from scan result
-				parsed.AmpelAttestationPath = rawResult.AmpelAttestationPath
-				parsed.SnappyAttestationPath = rawResult.SnappyAttestationPath
-				parsed.SpecLabel = scan.SanitizeSpecName(specRef)
-				parsed.Remarks = hostRemark
-
-				// Pre-compute digests for evidence (keeps ToScanResponse pure)
-				if rawResult.AmpelAttestationPath != "" {
-					d, digestErr := evidence.FileDigest(rawResult.AmpelAttestationPath)
-					if digestErr != nil {
-						return nil, fmt.Errorf(
-							"evidence digest failed for %s: %w",
-							rawResult.AmpelAttestationPath, digestErr,
-						)
-					}
-					parsed.AmpelDigest = d
-				}
-				if rawResult.SnappyAttestationPath != "" {
-					d, digestErr := evidence.FileDigest(rawResult.SnappyAttestationPath)
-					if digestErr != nil {
-						return nil, fmt.Errorf(
-							"evidence digest failed for %s: %w",
-							rawResult.SnappyAttestationPath, digestErr,
-						)
-					}
-					parsed.SnappyDigest = d
-				}
-
 				repoResults = append(repoResults, parsed)
-				if writeErr := results.WritePerRepoResult(parsed, resultsDir); writeErr != nil {
-					logger.Error("failed to write result", "error", writeErr)
-				}
 			}
 		}
 	}
@@ -338,19 +297,50 @@ func (s *ProviderServer) Scan(_ context.Context, req *provider.ScanRequest) (*pr
 	return scanResponse, nil
 }
 
+func finalizeEvaluation(evaluation *evidence.Evaluation, parsed *results.PerRepoResult, remarks string) error {
+	for _, artifact := range []struct{ name, prefix, title string }{
+		{evidence.AmpelFile, evidence.IDPrefixAmpel, "Ampel policy attestation"},
+		{evidence.SnappyFile, evidence.IDPrefixSnappy, "Snappy observation"},
+	} {
+		// Re-read after tool completion to detect loss of an earlier required artifact;
+		// this preserves Ampel's existing RPC error channel for digest failures.
+		if _, err := evaluation.Read(artifact.name); err != nil {
+			return fmt.Errorf("evidence digest failed: %w", err)
+		}
+		item, reference, err := evaluation.Reference(artifact.name, artifact.prefix, artifact.prefix,
+			evidence.TypeIntotoAttestation, artifact.title+" for "+parsed.Repository+"@"+parsed.Branch,
+			"Retained in-toto attestation; collection spec: "+parsed.SpecLabel, remarks)
+		if err != nil {
+			return err
+		}
+		parsed.RetainedEvidence = append(parsed.RetainedEvidence, item)
+		parsed.References = append(parsed.References, reference)
+	}
+	return nil
+}
+
+func publicOperationalError(err error, accessToken string) string {
+	message := err.Error()
+	if accessToken != "" {
+		message = strings.ReplaceAll(message, accessToken, "[redacted]")
+	}
+	return evidence.PublicContext(message)
+}
+
 func resolveTargetArtifacts(
 	target provider.Target,
 	index genindex.GenerateIndex,
 	hasIndex bool,
 	legacyScanConfig *generate.ScanConfig,
 	cache map[string]*generate.ScanConfig,
+	cfg *config.Config,
 ) (*generate.ScanConfig, string, error) {
 	if !hasIndex {
 		return legacyScanConfig, filepath.Join(config.GeneratedPolicyDirPath(), convert.PolicyFileName), nil
 	}
 
 	scanConfig, contentKey, err := genindex.ResolveConfig(
-		genindex.TargetKey(target.Variables["url"]), index, config.GeneratedDirPath(), cache,
+		genindex.TargetKey(target.Variables["url"]), index, cfg.Path(config.GeneratedDirPath()), cache,
 		generate.ReadScanConfig,
 	)
 	if err != nil {

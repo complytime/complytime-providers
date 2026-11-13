@@ -55,7 +55,7 @@ func TestScan_LocalHardLinksAndExternalFiles(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			runner := conftestRunner(conftestAllSuccessJSON)
-			srv := New(ServerOptions{
+			srv := newWorkspaceTestServer(t, ServerOptions{
 				Runner: runner, WorkspaceDir: workspace,
 				ToolChecker: func() ([]string, error) { return nil, nil },
 			})
@@ -96,12 +96,12 @@ func TestScan_IgnoredHardLinkWithRealConftest(t *testing.T) {
 	artifact := filepath.Join(workspace, "artifact.json")
 	require.NoError(t, os.WriteFile(artifact, []byte(`{invalid`), 0600))
 	require.NoError(t, os.Link(artifact, filepath.Join(input, "alias.json")))
-	cfg := config.NewConfig(workspace)
+	cfg := config.NewWorkspaceConfig(workspace)
 	require.NoError(t, cfg.EnsureDirectories())
 	require.NoError(t, generate.WriteScanConfig(
 		cfg.GeneratedDirPath(), []string{"main"}, map[string]string{"main": "test-req"}, policy,
 	))
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		WorkspaceDir: workspace, ToolChecker: func() ([]string, error) { return nil, nil },
 	})
 	response, err := srv.Scan(context.Background(), makeScanRequest(t, []provider.Target{
@@ -125,7 +125,7 @@ func TestScan_IdentityAndWorkspaceTraversalErrors(t *testing.T) {
 			require.NoError(t, os.WriteFile(workspaceFile, []byte("{}"), 0600))
 			require.NoError(t, os.WriteFile(input, []byte("{}"), 0600))
 			runner := conftestRunner(conftestAllSuccessJSON)
-			srv := New(ServerOptions{
+			srv := newWorkspaceTestServer(t, ServerOptions{
 				Runner: runner, WorkspaceDir: workspace,
 				ToolChecker: func() ([]string, error) { return nil, nil },
 			})
@@ -228,7 +228,7 @@ func TestWorkspaceIdentities_ExternalSymlinksAreNotCollected(t *testing.T) {
 	assert.Len(t, identities, 1)
 	writeScanConfig(t, workspace)
 	runner := conftestRunner(conftestAllSuccessJSON)
-	srv := New(ServerOptions{Runner: runner, WorkspaceDir: workspace,
+	srv := newWorkspaceTestServer(t, ServerOptions{Runner: runner, WorkspaceDir: workspace,
 		ToolChecker: func() ([]string, error) { return nil, nil }})
 	response, err := srv.Scan(context.Background(), makeScanRequest(t, []provider.Target{
 		localTarget(t, externalFile, ""),
@@ -335,7 +335,7 @@ func TestWorkspaceIdentities_DanglingLinksDoNotBlockOtherTargets(t *testing.T) {
 	input := filepath.Join(t.TempDir(), "input.json")
 	require.NoError(t, os.WriteFile(input, []byte("{}"), 0600))
 	runner := conftestRunner(conftestAllSuccessJSON)
-	srv := New(ServerOptions{Runner: runner, WorkspaceDir: workspace,
+	srv := newWorkspaceTestServer(t, ServerOptions{Runner: runner, WorkspaceDir: workspace,
 		ToolChecker: func() ([]string, error) { return nil, nil }})
 	response, err := srv.Scan(context.Background(), makeScanRequest(t, []provider.Target{
 		localTarget(t, input, ""),

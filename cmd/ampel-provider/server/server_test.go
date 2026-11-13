@@ -9,10 +9,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 
+	"github.com/hashicorp/go-hclog"
 	"github.com/stretchr/testify/require"
 
 	"github.com/complytime/complyctl/pkg/provider"
@@ -20,7 +26,9 @@ import (
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/convert"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/generate"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/scan"
+	"github.com/complytime/complytime-providers/cmd/ampel-provider/targets"
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/toolcheck"
+	"github.com/complytime/complytime-providers/internal/evidence"
 	"github.com/complytime/complytime-providers/internal/genindex"
 )
 
@@ -28,6 +36,258 @@ func TestMain(m *testing.M) {
 	// Skip tool check for most tests since snappy/ampel may not be installed
 	SkipToolCheck = true
 	os.Exit(m.Run())
+}
+
+func setupRetentionServer(t *testing.T) (*ProviderServer, string) {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "workspace space % é")
+	require.NoError(t, os.Mkdir(root, 0o700))
+	policyDir := filepath.Join(root, "policies")
+	writeGranularPolicies(t, policyDir, "BP-1.01", "BP-3.01")
+	server := New()
+	server.logger = hclog.NewNullLogger()
+	response, err := server.Generate(context.Background(), &provider.GenerateRequest{
+		GlobalVariables: map[string]string{"workspace": root, "ampel_policy_dir": "policies"},
+		TargetVariables: map[string]string{"url": "https://github.com/myorg/repo1"},
+		Configuration:   []provider.AssessmentConfiguration{{RequirementID: "BP-1.01"}, {RequirementID: "BP-3.01"}},
+	})
+	require.NoError(t, err)
+	require.True(t, response.Success, response.ErrorMessage)
+	for name, data := range legacyAttestations(root) {
+		require.NoError(t, os.WriteFile(name, data, 0o600))
+	}
+	previous := ScanRunner
+	t.Cleanup(func() { ScanRunner = previous })
+	return server, root
+}
+
+func legacyAttestations(root string) map[string][]byte {
+	prefix := targets.SanitizeRepoURL("https://github.com/myorg/repo1") + "-main-" +
+		scan.SanitizeSpecName("builtin:github/branch-rules.yaml")
+	directory := filepath.Join(root, config.ResultsDirPath())
+	return map[string][]byte{
+		filepath.Join(directory, prefix+"-ampel.intoto.json"):  makeAmpelResultAttestation(),
+		filepath.Join(directory, prefix+"-snappy.intoto.json"): makeTestAttestation(),
+	}
+}
+
+func assertLegacyAttestations(t *testing.T, root string) {
+	t.Helper()
+	for name, original := range legacyAttestations(root) {
+		data, err := os.ReadFile(name)
+		require.NoError(t, err)
+		require.Equal(t, original, data)
+	}
+}
+
+func retentionRequest(root string) *provider.ScanRequest {
+	return &provider.ScanRequest{Targets: []provider.Target{{TargetID: "repository", Variables: map[string]string{
+		"workspace": root, "url": "https://github.com/myorg/repo1", "branches": "main,release/1",
+		"specs": "builtin:github/branch-rules.yaml,team/check.yaml",
+	}}}}
+}
+
+func TestScan_ThreeScansRetainIndependentAttestations(t *testing.T) {
+	server, root := setupRetentionServer(t)
+	request := retentionRequest(root)
+	resultsDir := filepath.Join(root, config.ResultsDirPath())
+	legacy := filepath.Join(resultsDir, targets.SanitizeRepoURL(request.Targets[0].Variables["url"])+"-main.json")
+	require.NoError(t, os.WriteFile(legacy, []byte("legacy summary"), 0o600))
+	start := time.Date(2026, 11, 10, 23, 59, 59, 0, time.UTC)
+	server.allocate = func(options evidence.StorageOptions, labels ...string) (*evidence.Evaluation, error) {
+		options.Clock = func() time.Time { return start }
+		return evidence.Allocate(options, labels...)
+	}
+	retained := make(map[string][]byte)
+	identities := make(map[string]bool)
+	leaves := make(map[string]bool)
+	for scanNumber := range 3 {
+		output := makeAmpelResultAttestation()
+		if scanNumber > 0 {
+			output = bytes.ReplaceAll(output, []byte(`"PASS"`), []byte(`"FAIL"`))
+		}
+		ScanRunner = &mockScanRunner{snappyOutput: makeTestAttestation(), ampelOutput: output}
+		response, err := server.Scan(context.Background(), request)
+		require.NoError(t, err)
+		require.Empty(t, response.Errors)
+		require.Len(t, response.Assessments, 2)
+		require.Len(t, response.MappingReferences, 8)
+		references := make(map[string]provider.MappingReference)
+		for _, reference := range response.MappingReferences {
+			require.False(t, identities[reference.ID], "different evaluations must not deduplicate")
+			identities[reference.ID] = true
+			references[reference.ID] = reference
+		}
+		for _, assessment := range response.Assessments {
+			require.Len(t, assessment.Evidence, 8)
+			for _, item := range assessment.Evidence {
+				reference, found := references[item.Source.ReferenceID]
+				require.True(t, found)
+				path := filepath.Join(root, item.Source.Coordinate)
+				locator, err := url.Parse(reference.URL)
+				require.NoError(t, err)
+				require.Equal(t, "file", locator.Scheme)
+				require.Equal(t, path, locator.Path)
+				require.Contains(t, reference.URL, "%25")
+				data, err := os.ReadFile(path)
+				require.NoError(t, err)
+				digest, err := evidence.FileDigest(path)
+				require.NoError(t, err)
+				require.Equal(t, digest, item.Source.Digest)
+				require.Equal(t, start.Format(time.RFC3339), item.CollectedAt)
+				require.Regexp(t, `^(ampel|snappy)_[a-f0-9]{32}$`, item.ID)
+				require.Contains(t, filepath.Base(filepath.Dir(path)), start.Format(evidence.EvaluationTimeFormat))
+				retained[path] = data
+				leaves[filepath.Dir(path)] = true
+			}
+		}
+		for path, original := range retained {
+			current, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.Equal(t, original, current)
+		}
+		expectedFiles := []string{legacy}
+		for path := range legacyAttestations(root) {
+			expectedFiles = append(expectedFiles, path)
+		}
+		for path := range retained {
+			expectedFiles = append(expectedFiles, path)
+		}
+		for leaf := range leaves {
+			expectedFiles = append(expectedFiles, filepath.Join(leaf, evidence.MetadataFile))
+		}
+		var actualFiles []string
+		err = filepath.WalkDir(resultsDir, func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if !entry.IsDir() {
+				actualFiles = append(actualFiles, path)
+			}
+			return nil
+		})
+		require.NoError(t, err)
+		require.ElementsMatch(t, expectedFiles, actualFiles, "new scans must not write summaries")
+	}
+	require.Len(t, retained, 24)
+	require.Len(t, leaves, 12)
+	assertLegacyAttestations(t, root)
+	for leaf := range leaves {
+		entries, err := os.ReadDir(leaf)
+		require.NoError(t, err)
+		require.Len(t, entries, 3, "no per-assessment copies or legacy summaries")
+		var metadata map[string]any
+		data, err := os.ReadFile(filepath.Join(leaf, evidence.MetadataFile))
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(data, &metadata))
+		require.Equal(t, start.Format(time.RFC3339), metadata["collected_at"])
+		target := metadata["target"].(map[string]any)
+		require.Contains(t, []string{"main", "release/1"}, target["branch"])
+	}
+	data, err := os.ReadFile(legacy)
+	require.NoError(t, err)
+	require.Equal(t, "legacy summary", string(data))
+	copyRoot := filepath.Join(t.TempDir(), "copied-workspace")
+	require.NoError(t, os.CopyFS(copyRoot, os.DirFS(root)))
+	for path := range retained {
+		coordinate, err := filepath.Rel(root, path)
+		require.NoError(t, err)
+		originalDigest, err := evidence.FileDigest(path)
+		require.NoError(t, err)
+		copiedDigest, err := evidence.FileDigest(filepath.Join(copyRoot, coordinate))
+		require.NoError(t, err)
+		require.Equal(t, originalDigest, copiedDigest)
+	}
+}
+
+func TestScan_RetainedArtifactFailureChannels(t *testing.T) {
+	for _, failure := range []string{"allocation", "write", "close", "missing-output", "invalid-output", "digest", "identity", "ownership-mode", "metadata-write", "metadata-close"} {
+		t.Run(failure, func(t *testing.T) {
+			server, root := setupRetentionServer(t)
+			request := retentionRequest(root)
+			request.Targets[0].Variables["branches"] = "main"
+			request.Targets[0].Variables["specs"] = "builtin:github/branch-rules.yaml"
+			runner := &mockScanRunner{snappyOutput: makeTestAttestation(), ampelOutput: makeAmpelResultAttestation()}
+			ScanRunner = runner
+			var warnings bytes.Buffer
+			server.logger = hclog.New(&hclog.LoggerOptions{Output: &warnings, Level: hclog.Warn})
+			server.allocate = func(options evidence.StorageOptions, labels ...string) (*evidence.Evaluation, error) {
+				if failure == "allocation" {
+					return nil, syscall.ENOSPC
+				}
+				reads := 0
+				options.Operations.Read = func(file *os.File) ([]byte, error) {
+					if file.Name() == evidence.SnappyFile {
+						reads++
+					}
+					if failure == "digest" && reads == 2 {
+						return nil, io.ErrUnexpectedEOF
+					}
+					return io.ReadAll(file)
+				}
+				options.Operations.Write = func(file *os.File, data []byte) (int, error) {
+					if failure == "write" || (failure == "metadata-write" && file.Name() == evidence.MetadataFile) {
+						return 0, syscall.ENOSPC
+					}
+					return file.Write(data)
+				}
+				options.Operations.Close = func(file *os.File) error {
+					if err := file.Close(); err != nil {
+						return err
+					}
+					if failure == "close" || (failure == "metadata-close" && file.Name() == evidence.MetadataFile) {
+						return syscall.EIO
+					}
+					return nil
+				}
+				options.Operations.Chmod = func(file *os.File, mode os.FileMode) error {
+					if failure == "ownership-mode" && file.Name() == evidence.AmpelFile {
+						return syscall.EPERM
+					}
+					return file.Chmod(mode)
+				}
+				return evidence.Allocate(options, labels...)
+			}
+			if failure == "identity" {
+				server.identity = func() (evidence.Identity, error) { return evidence.Identity{}, syscall.EIO }
+			}
+			if failure == "invalid-output" {
+				runner.ampelOutput = []byte("{malformed")
+			}
+			if failure == "missing-output" {
+				runner.ampelOutput = nil
+			}
+			response, err := server.Scan(context.Background(), request)
+			switch failure {
+			case "identity", "digest", "ownership-mode":
+				require.Error(t, err)
+				require.Nil(t, response)
+			case "metadata-write", "metadata-close":
+				require.NoError(t, err)
+				require.Empty(t, response.Errors)
+				require.Len(t, response.Assessments, 2)
+				require.Len(t, response.MappingReferences, 2)
+				require.Contains(t, warnings.String(), "supporting evaluation metadata")
+			default:
+				require.NoError(t, err)
+				require.Len(t, response.Errors, 1)
+				require.Empty(t, response.Assessments)
+				require.Empty(t, response.MappingReferences)
+			}
+			assertLegacyAttestations(t, root)
+		})
+	}
+}
+
+func TestPublicOperationalError_ExcludesCredentials(t *testing.T) {
+	locator := url.URL{Scheme: "https", Host: "example.com", Path: "/repository",
+		User: url.UserPassword("account", "url-password"), RawQuery: "token=query-token", Fragment: "private"}
+	message := publicOperationalError(fmt.Errorf("request failed for %s using access-value", locator.String()), "access-value")
+	require.Contains(t, message, "https://example.com/repository")
+	require.Contains(t, message, "[redacted]")
+	for _, secret := range []string{"url-password", "query-token", "private", "access-value"} {
+		require.NotContains(t, message, secret)
+	}
 }
 
 func makeTestConfigurations() []provider.AssessmentConfiguration {
@@ -158,12 +418,11 @@ func setupServerWithGenerate(t *testing.T) (*ProviderServer, string) {
 
 func generatedArtifactDir(t *testing.T) string {
 	t.Helper()
-	entries, err := os.ReadDir(config.GeneratedDirPath())
+	index, err := genindex.ReadIndex(config.GeneratedDirPath())
 	require.NoError(t, err)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			return filepath.Join(config.GeneratedDirPath(), entry.Name())
-		}
+	require.Len(t, index.Targets, 1)
+	for _, contentKey := range index.Targets {
+		return config.GeneratedDirForKey(contentKey)
 	}
 	t.Fatal("expected generated artifact directory")
 	return ""
@@ -513,11 +772,11 @@ func TestScan_ValidTargets(t *testing.T) {
 	require.Len(t, scanResp.Assessments, 1)
 	require.Equal(t, provider.ResultPassed, scanResp.Assessments[0].Steps[0].Result)
 
-	// Verify snappy attestation and ampel intoto result files were created
-	resultsDir := filepath.Join(dir, provider.WorkspaceDir, config.ProviderDir, config.DefaultResultsDir)
-	files, err := os.ReadDir(resultsDir)
+	// Resolve the reported evidence, not a former fixed filename.
+	evidencePath := filepath.Join(dir, scanResp.Assessments[0].Evidence[0].Source.Coordinate)
+	files, err := os.ReadDir(filepath.Dir(evidencePath))
 	require.NoError(t, err)
-	require.Len(t, files, 3) // snappy attestation + ampel intoto result + per-repo result
+	require.Len(t, files, 3) // two attestations and supporting metadata, no summary
 }
 
 func TestScan_EmptySpecs_ReturnsError(t *testing.T) {
@@ -566,11 +825,19 @@ func TestScan_MultipleSpecs(t *testing.T) {
 	require.Len(t, scanResp.Assessments, 1)
 	require.Len(t, scanResp.Assessments[0].Steps, 2)
 
-	// Verify 5 output files (2 snappy + 2 ampel + 1 per-repo result)
-	resultsDir := filepath.Join(dir, provider.WorkspaceDir, config.ProviderDir, config.DefaultResultsDir)
-	files, err := os.ReadDir(resultsDir)
-	require.NoError(t, err)
-	require.Len(t, files, 5)
+	require.Len(t, scanResp.MappingReferences, 4)
+	leaves := make(map[string]bool)
+	for _, item := range scanResp.Assessments[0].Evidence {
+		path := filepath.Join(dir, item.Source.Coordinate)
+		require.FileExists(t, path)
+		leaves[filepath.Dir(path)] = true
+	}
+	require.Len(t, leaves, 2)
+	for leaf := range leaves {
+		files, err := os.ReadDir(leaf)
+		require.NoError(t, err)
+		require.Len(t, files, 3)
+	}
 }
 
 func TestScan_ScanError_ContinuesScanning(t *testing.T) {
@@ -990,8 +1257,7 @@ func (m *mockDigestFailRunner) run(name string, args ...string) ([]byte, error) 
 			_ = os.WriteFile(resultsPath, m.ampelOutput, 0600)
 			// Delete the snappy attestation to simulate file loss between
 			// scan and digest computation
-			snappyPath := resultsPath[:len(resultsPath)-len("-ampel.intoto.json")] +
-				"-snappy.intoto.json"
+			snappyPath := filepath.Join(filepath.Dir(resultsPath), "snappy.intoto.json")
 			_ = os.Remove(snappyPath)
 			break
 		}

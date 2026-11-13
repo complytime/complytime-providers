@@ -67,11 +67,7 @@ Gemara Policy Layer (YAML)
   - id: <xccdf_rule_short_name>       # from OSCAL implemented-requirement
     evaluator_id: openscap             # routes to the OpenSCAP plugin
     parameters:
-      workspace: ./.complytime/scan
       profile: <ssg_profile_short_name>
-      policy: tailoring.xml
-      arf: arf-results.xml
-      results: xccdf-results.xml
 ```
 
 For testing, manually extract a few rule short names from the OSCAL content (or from `oscap info` output) and use them directly in the policy layer seed data (Step 4). A production workflow would automate this conversion via [complyscribe](https://github.com/complytime/complyscribe).
@@ -225,20 +221,12 @@ controls:
 - id: kernel_module_cramfs_disabled
   evaluator_id: openscap
   parameters:
-    workspace: ./.complytime/scan
     profile: cis_workstation_l1
-    policy: tailoring.xml
-    arf: arf-results.xml
-    results: xccdf-results.xml
     control_id: cis_fedora_1-1.1.1
 - id: package_libselinux_installed
   evaluator_id: openscap
   parameters:
-    workspace: ./.complytime/scan
     profile: cis_workstation_l1
-    policy: tailoring.xml
-    arf: arf-results.xml
-    results: xccdf-results.xml
     control_id: cis_fedora_1-3.1.1
 # ... 315 rules total
 ```
@@ -249,11 +237,7 @@ controls:
 |:---|:---|:---|
 | `id` | XCCDF rule short name (e.g., `kernel_module_cramfs_disabled`) | Becomes the Gemara `requirement-id`, used as `RequirementID` — must match a rule in the SSG datastream |
 | `evaluator_id` | `openscap` | Routes the request to `complyctl-provider-openscap` |
-| `parameters.workspace` | `./.complytime/scan` | Working directory for plugin output |
 | `parameters.profile` | `cis_workstation_l1` | SSG profile short name — must exist in the auto-detected datastream |
-| `parameters.policy` | `tailoring.xml` | Filename for tailoring XML — written by Generate, consumed by Scan |
-| `parameters.arf` | `arf-results.xml` | Filename for ARF results — written by `oscap xccdf eval` |
-| `parameters.results` | `xccdf-results.xml` | Filename for XCCDF results — written by `oscap xccdf eval` |
 | `parameters.control_id` | CIS control ID (e.g., `cis_fedora_1-1.1.1`) | Maps the rule back to its parent control |
 
 **Important:** All entries share the same `parameters` values (except `control_id`). The provider merges parameters from all assessment configurations, and later entries override earlier ones for the same key.
@@ -296,11 +280,7 @@ policies:
   - id: policies/cis-fedora-l1-workstation
     evaluator_config:
       openscap:
-        workspace: ./.complytime/scan
         profile: cis_workstation_l1
-        policy: tailoring.xml
-        arf: arf-results.xml
-        results: xccdf-results.xml
 targets:
   - id: local
     policy_ids:
@@ -327,7 +307,7 @@ bin/complyctl generate --policy-id policies/cis-fedora-l1-workstation
 ```
 
 This dispatches the Generate RPC to the OpenSCAP plugin, which:
-1. Loads the merged parameters (`workspace`, `profile`, `datastream`, `policy`, `arf`, `results`)
+1. Resolves the host-supplied workspace and merged `profile`/`datastream` variables
 2. Auto-detects the datastream from `/usr/share/xml/scap/ssg/content/` if not set
 3. Validates that all rule IDs exist in the datastream
 4. Generates a tailoring XML file extending the profile
@@ -336,8 +316,8 @@ This dispatches the Generate RPC to the OpenSCAP plugin, which:
 **Verify:**
 
 ```bash
-ls ./.complytime/scan/openscap/policy/
-ls ./.complytime/scan/openscap/remediations/
+ls .complytime/openscap/policy/
+ls .complytime/openscap/remediations/
 ```
 
 Expected: `tailoring.xml` in the policy directory, remediation scripts in the remediations directory.
@@ -387,34 +367,94 @@ Policy Layer (OCI Registry)
   ├── id: kernel_module_cramfs_disabled ─── RequirementID (XCCDF rule short name, from Gemara requirement-id)
   ├── evaluator_id: openscap            ─── Routes to complyctl-provider-openscap
   └── parameters:
-        workspace: ./.complytime/scan         ─── Plugin working directory
         profile: cis_workstation_l1      ─── SSG profile short name
-        policy: tailoring.xml            ─── Tailoring file name
-        arf: arf-results.xml             ─── ARF output name
-        results: xccdf-results.xml       ─── XCCDF results name
         control_id: cis_fedora_1-1.1.1   ─── Parent CIS control
 
 Generate RPC
   │
-  ├── mergeParameters() ─── Flattens all config parameters into one map
-  ├── Config.LoadSettings() ─── Sets workspace, profile, policy, arf, results
-  │     └── validate() ─── Auto-detects datastream from /etc/os-release + SSG
+  ├── GenerateWorkspace() ─── Resolves and validates the host workspace
+  ├── mergeVariables() ─── Resolves profile and datastream context
+  │     └── ResolveDatastream() ─── Auto-detects datastream from /etc/os-release + SSG
   ├── PolicyToXML() ─── Creates tailoring XML extending the SSG profile
   └── OscapGenerateFix() ─── Generates bash/ansible/blueprint remediations
 
 Scan RPC
   │
-  ├── ScanSystem() ─── Runs: oscap xccdf eval --profile cis_workstation_l1_complytime
-  │                          --tailoring-file <policy> --results-arf <arf>
-  ├── Parse ARF XML ─── Matches rule-results to requirement IDs via OVAL checks
+  ├── Allocate() ─── Reserves a fresh target/profile evaluation directory
+  ├── ScanSystem() ─── Runs oscap with explicit tailoring, ARF and XCCDF paths
+  ├── Read retained XML ─── Parses and hashes the same constrained artifact bytes
+  ├── RecordMetadata()/Finalize() ─── Verifies execution-account ownership/private modes
   └── Returns AssessmentLog[] ─── One entry per requirement with PASSED/FAILED/SKIPPED
 ```
 
-## Cleanup
+## Retained evidence lifecycle
 
-```bash
-rm -rf .complytime/scan complytime.yaml
-rm -rf ~/.cache/complytime/policies/policies/cis-fedora-l1-workstation
-rm ~/.local/share/complytime/providers/complyctl-provider-openscap
-# Kill mock registry (Ctrl+C in its terminal)
+Use the Gemara Evaluation Log to locate historical ARF evidence after later scans.
+The log alone defines the evidence set; nearby XCCDF results and metadata are
+supporting outputs, not implicit evidence. Each executed system scan retains:
+
+```text
+<workspace>/.complytime/openscap/results/<target>/<profile>/evaluation-<UTC time>-<token>/
+  arf.xml
+  results.xml
+  metadata.json
 ```
+
+Labels are bounded readable grouping hints; an absent request target uses `system`.
+The UTC directory time uses `YYYYMMDDTHHMMSSZ` and the random token distinguishes
+evaluations even when times, labels or output bytes match. Every assessment from
+an evaluation references the same ARF using `arf_<token>` evidence and an
+`openscap-arf_<token>` mapping reference. `CollectedAt` records collection start.
+The retained ARF's stored bytes determine its `sha256:<hex>` digest.
+
+Locate the selected workspace through complyctl's `--workspace`, then
+`COMPLYTIME_WORKSPACE`, then invoking-directory selection. Complyctl supplies that
+root to Generate/Scan; the provider does not repeat environment precedence.
+Absent/empty RPC workspace values fall back to provider CWD for direct callers;
+invalid or conflicting values fail. Relative datastream paths resolve against this
+root, while absolute external inputs stay absolute. Subprocesses use the workspace
+without changing provider CWD. Generate still writes `policy/tailoring.xml` and
+`remediations/` beneath `.complytime/openscap`; these are replaceable configuration,
+not retained policy snapshots. The old `policy`, `arf` and `results` filename
+parameters do not override the retained layout.
+
+Resolve each evidence coordinate against the selected workspace, not the log's
+directory or the reader's CWD. Its escaped absolute `file://` URL identifies the
+same original file, including spaces, percent signs and non-ASCII names. Hash the
+file and compare it with the log's digest. A copied workspace can resolve the same
+relative coordinate, but does not relocate its original absolute URL.
+
+New evaluation directories use `0700`; evidence and supporting files use `0600`.
+They remain owned by the provider's execution account, including root after sudo.
+The original non-root user needs authorized elevated access to read/hash root-run
+evidence; there is no automatic ownership handoff. The execution account needs a
+writable workspace and traversal access through every parent. New context parents
+permit traversal without widening private leaves or changing unrelated directories.
+
+Preservation is always on with no cleanup or retention settings. Storage grows on
+every scan, including identical results and unreferenced partial outputs after a
+failure. Required output, parsing, hashing, close or finalization errors return an
+RPC error without a response; old fixed-path output never substitutes for missing
+new output. Metadata write/close failures only warn, so metadata may be absent or
+incomplete. For access errors, check execution-account and parent permissions;
+for disk-space errors, provide sufficient writable capacity. Do not widen evidence
+modes or treat partial files as published evidence.
+
+Preserve both the Evaluation Log and its log-selected evidence files. Uploading the
+log alone does not transfer artifact bytes. Downstream collection must keep both
+retrievable, verify transferred bytes against logged digests, and map moved files
+to original references without modifying the log. Collection, validation of collected
+copies and optional packaging are separate future complyctl capabilities. Storage
+backends, transfers and longevity remain customer-owned.
+
+**Breaking upgrade/rollback:** output paths and IDs are evaluation-qualified, with
+no fixed-path aliases; relative input/configuration lookup uses the selected workspace
+rather than invocation CWD. Existing fixed-path results stop being refreshed; they
+and historical logs remain untouched and are not migrated. Previously overwritten
+evidence cannot be recovered.
+Older binaries resume overwriting their fixed paths on rollback, while retained
+directories remain readable by authorized users. Preserve logs and referenced files
+before any deliberate workspace removal.
+
+See the [OpenSCAP man page](../../docs/man/complyctl-provider-openscap.md) and
+the [root README](../../README.md) for related provider guidance.

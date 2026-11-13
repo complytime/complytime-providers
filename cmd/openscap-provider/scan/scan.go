@@ -12,28 +12,38 @@ import (
 	"github.com/complytime/complytime-providers/cmd/openscap-provider/xccdf"
 )
 
-func validateOpenSCAPFiles(policyPath, datastreamPath string) (map[string]string, error) {
+// Options carries explicit workspace, input and fresh evaluation-output paths.
+// The caller reserves private outputs before execution and validates them afterward.
+type Options struct {
+	Workspace, PolicyPath, DatastreamPath, Profile, ResultsPath, ARFPath string
+}
+
+func validateOpenSCAPFiles(options Options) (map[string]string, error) {
+	policyPath := options.PolicyPath
 	if _, err := os.Stat(policyPath); err != nil {
 		return nil, err
 	}
 
 	isXML, err := config.IsXMLFile(policyPath)
-	if err != nil || !isXML {
+	if err != nil {
 		return nil, err
+	}
+	if !isXML {
+		return nil, fmt.Errorf("tailoring file is not XML")
 	}
 
 	return map[string]string{
-		"datastream": datastreamPath,
+		"datastream": options.DatastreamPath,
 		"policy":     policyPath,
-		"results":    config.ResultsPath,
-		"arf":        config.ARFPath,
+		"results":    options.ResultsPath,
+		"arf":        options.ARFPath,
 	}, nil
 }
 
-// ScanSystem runs an OpenSCAP evaluation using the convention-based file
-// paths and the provided datastream + profile.
-func ScanSystem(ctx context.Context, datastreamPath, profile string) ([]byte, error) {
-	openscapFiles, err := validateOpenSCAPFiles(config.PolicyPath, datastreamPath)
+// ScanSystem runs OpenSCAP synchronously using only the explicitly supplied paths.
+// Valid noncompliant outcomes succeed; tool/input failures return an error.
+func ScanSystem(ctx context.Context, options Options) ([]byte, error) {
+	openscapFiles, err := validateOpenSCAPFiles(options)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("absent openscap files: %w\n\nDid you run the generate command?", err)
@@ -41,9 +51,9 @@ func ScanSystem(ctx context.Context, datastreamPath, profile string) ([]byte, er
 		return nil, fmt.Errorf("invalid openscap files: %w", err)
 	}
 
-	tailoringProfile := fmt.Sprintf("%s_%s", profile, xccdf.XCCDFTailoringSuffix)
+	tailoringProfile := fmt.Sprintf("%s_%s", options.Profile, xccdf.XCCDFTailoringSuffix)
 
-	output, err := oscap.OscapScan(ctx, openscapFiles, tailoringProfile)
+	output, err := oscap.OscapScan(ctx, openscapFiles, tailoringProfile, options.Workspace)
 	if err != nil {
 		return output, fmt.Errorf("failed during scan: %w", err)
 	}

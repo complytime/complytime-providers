@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/antchfx/xmlquery"
 	"github.com/hashicorp/go-hclog"
@@ -16,7 +14,6 @@ import (
 	"github.com/complytime/complyctl/pkg/provider"
 	"github.com/complytime/complytime-providers/cmd/openscap-provider/config"
 	"github.com/complytime/complytime-providers/cmd/openscap-provider/oscap"
-	"github.com/complytime/complytime-providers/cmd/openscap-provider/scan"
 	"github.com/complytime/complytime-providers/cmd/openscap-provider/xccdf"
 	"github.com/complytime/complytime-providers/internal/evidence"
 	"github.com/complytime/complytime-providers/internal/version"
@@ -24,15 +21,21 @@ import (
 
 var _ provider.Provider = (*ProviderServer)(nil)
 
+// ProviderServer implements the OpenSCAP plugin with request-scoped artifact paths.
 type ProviderServer struct {
+	logger   hclog.Logger
+	identity func() (evidence.Identity, error)
+	allocate func(evidence.StorageOptions, ...string) (*evidence.Evaluation, error)
 	// ruleToMatchID maps XCCDF rule short names to the original match
 	// IDs from AssessmentConfiguration. Built during Generate so that
 	// Scan can restore the original IDs on assessment results.
 	ruleToMatchID map[string]string
 }
 
+// New constructs an OpenSCAP provider using OS execution identity and private storage.
 func New() *ProviderServer {
-	return &ProviderServer{}
+	return &ProviderServer{logger: hclog.Default(), identity: evidence.ExecutionIdentity,
+		allocate: evidence.Allocate}
 }
 
 func (s *ProviderServer) Describe(_ context.Context, _ *provider.DescribeRequest) (*provider.DescribeResponse, error) {
@@ -44,7 +47,11 @@ func (s *ProviderServer) Describe(_ context.Context, _ *provider.DescribeRequest
 }
 
 func (s *ProviderServer) Generate(ctx context.Context, req *provider.GenerateRequest) (*provider.GenerateResponse, error) {
-	if err := generateArtifacts(ctx, req); err != nil {
+	root, err := evidence.GenerateWorkspace(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := generateArtifacts(ctx, req, config.WorkspaceConfig{Root: root}); err != nil {
 		return &provider.GenerateResponse{
 			Success:      false,
 			ErrorMessage: err.Error(),
@@ -54,20 +61,20 @@ func (s *ProviderServer) Generate(ctx context.Context, req *provider.GenerateReq
 	return &provider.GenerateResponse{Success: true}, nil
 }
 
-func generateArtifacts(ctx context.Context, req *provider.GenerateRequest) error {
+func generateArtifacts(ctx context.Context, req *provider.GenerateRequest, cfg config.WorkspaceConfig) error {
 	if len(req.Configuration) == 0 {
 		return fmt.Errorf("no assessment configurations provided")
 	}
 
-	profile, datastream, err := resolveProfileAndDatastream(req)
+	profile, datastream, err := resolveProfileAndDatastream(req, cfg)
 	if err != nil {
 		return err
 	}
 
-	return executeGeneration(ctx, req.Configuration, datastream, profile)
+	return executeGeneration(ctx, req.Configuration, datastream, profile, cfg)
 }
 
-func resolveProfileAndDatastream(req *provider.GenerateRequest) (string, string, error) {
+func resolveProfileAndDatastream(req *provider.GenerateRequest, cfg config.WorkspaceConfig) (string, string, error) {
 	vars := mergeVariables(req.GlobalVariables, req.TargetVariables)
 
 	profile, err := config.SanitizeInput(vars["profile"])
@@ -75,134 +82,53 @@ func resolveProfileAndDatastream(req *provider.GenerateRequest) (string, string,
 		return "", "", fmt.Errorf("invalid profile: %w", err)
 	}
 
-	datastream, err := config.ResolveDatastream(vars["datastream"])
+	datastream, err := cfg.ResolveDatastream(vars["datastream"])
 	if err != nil {
 		return "", "", fmt.Errorf("datastream error: %w", err)
 	}
 	return profile, datastream, nil
 }
 
-func executeGeneration(ctx context.Context, configurations []provider.AssessmentConfiguration, datastream, profile string) error {
-	if err := config.EnsureDirectories(); err != nil {
+func executeGeneration(ctx context.Context, configurations []provider.AssessmentConfiguration, datastream, profile string, cfg config.WorkspaceConfig) error {
+	if err := cfg.EnsureDirectories(); err != nil {
 		return fmt.Errorf("directory setup failed: %w", err)
 	}
 
-	if err := writeTailoringFile(configurations, datastream, profile); err != nil {
+	if err := writeTailoringFile(configurations, datastream, profile, cfg.PolicyPath()); err != nil {
 		return err
 	}
 
 	hclog.Default().Info("Generating remediation files")
-	providerDir := filepath.Join(provider.WorkspaceDir, config.ProviderDir)
-	if err := oscap.OscapGenerateFix(ctx, providerDir, profile, config.PolicyPath, datastream); err != nil {
+	if err := oscap.OscapGenerateFix(ctx, cfg.ProviderPath(), profile, cfg.PolicyPath(), datastream, cfg.Root); err != nil {
 		return fmt.Errorf("remediation generation failed: %w", err)
 	}
 	return nil
 }
 
-func writeTailoringFile(configurations []provider.AssessmentConfiguration, datastream, profile string) error {
+func writeTailoringFile(configurations []provider.AssessmentConfiguration, datastream, profile, policyPath string) error {
 	hclog.Default().Info("Generating a tailoring file")
 	tailoringXML, err := xccdf.PolicyToXML(configurations, datastream, profile)
 	if err != nil {
 		return fmt.Errorf("tailoring generation failed: %w", err)
 	}
 
-	dst, err := os.Create(config.PolicyPath)
+	dst, err := os.Create(policyPath)
 	if err != nil {
 		return fmt.Errorf("failed to create policy file: %w", err)
 	}
-	defer dst.Close()
-	if _, err := dst.WriteString(tailoringXML); err != nil {
-		return fmt.Errorf("failed to write policy file: %w", err)
+	_, writeErr := dst.WriteString(tailoringXML)
+	if err := errors.Join(writeErr, dst.Close()); err != nil {
+		return fmt.Errorf("failed to save policy file: %w", err)
 	}
 	return nil
 }
 
-func (s *ProviderServer) Scan(ctx context.Context, req *provider.ScanRequest) (*provider.ScanResponse, error) {
-	if len(req.Targets) == 0 {
-		return nil, fmt.Errorf("no targets provided")
-	}
-
-	collectedAt := time.Now().UTC().Format(time.RFC3339)
-
-	xmlnode, err := runScanAndParseARF(ctx, req.Targets[0].Variables)
-	if err != nil {
-		return nil, err
-	}
-
-	digest, err := evidence.FileDigest(config.ARFPath)
-	if err != nil {
-		return nil, fmt.Errorf("evidence digest failed: %w", err)
-	}
-
-	assessments, err := buildAssessmentsFromARF(xmlnode, s.ruleToMatchID)
-	if err != nil {
-		return nil, err
-	}
-
-	hostRemark := evidence.HostRemark()
-	attachARFEvidence(assessments, collectedAt, digest, hostRemark)
-
-	return &provider.ScanResponse{
-		Assessments:       assessments,
-		MappingReferences: buildMappingReferences(),
-	}, nil
-}
-
 // attachARFEvidence adds a single ARF evidence entry to each assessment
 // log, linking every assessment result to the OpenSCAP ARF source artifact.
-func attachARFEvidence(
-	assessments []provider.AssessmentLog,
-	collectedAt, digest, remarks string,
-) {
+func attachARFEvidence(assessments []provider.AssessmentLog, item provider.Evidence) {
 	for i := range assessments {
-		assessments[i].Evidence = []provider.Evidence{
-			{
-				ID:          evidence.IDOpenSCAPARF,
-				Type:        evidence.TypeARF,
-				CollectedAt: collectedAt,
-				Source: &provider.EvidenceSource{
-					ReferenceID: evidence.RefOpenSCAPARF,
-					Coordinate:  config.ARFPath,
-					Digest:      digest,
-					Remarks:     remarks,
-				},
-			},
-		}
+		assessments[i].Evidence = []provider.Evidence{item}
 	}
-}
-
-// buildMappingReferences returns the mapping references for the scan
-// response, identifying the OpenSCAP ARF artifact as an evidence source.
-func buildMappingReferences() []provider.MappingReference {
-	return []provider.MappingReference{
-		{
-			ID:    evidence.RefOpenSCAPARF,
-			Title: "OpenSCAP ARF scan result",
-			Description: "Asset Reporting Format result " +
-				"from OpenSCAP evaluation",
-			URL: evidence.FileURL(config.ARFPath),
-		},
-	}
-}
-
-func runScanAndParseARF(ctx context.Context, vars map[string]string) (*xmlquery.Node, error) {
-	profile, err := config.SanitizeInput(vars["profile"])
-	if err != nil {
-		return nil, fmt.Errorf("invalid profile: %w", err)
-	}
-
-	datastream, err := config.ResolveDatastream(vars["datastream"])
-	if err != nil {
-		return nil, fmt.Errorf("datastream error: %w", err)
-	}
-
-	hclog.Default().Info("Running scan", "profile", profile, "datastream", datastream)
-	_, err = scan.ScanSystem(ctx, datastream, profile)
-	if err != nil {
-		return nil, fmt.Errorf("scan failed: %w", err)
-	}
-
-	return xccdf.ParseARFFile(config.ARFPath)
 }
 
 func buildAssessmentsFromARF(xmlnode *xmlquery.Node, ruleToMatchID map[string]string) ([]provider.AssessmentLog, error) {
@@ -211,6 +137,9 @@ func buildAssessmentsFromARF(xmlnode *xmlquery.Node, ruleToMatchID map[string]st
 		return nil, errors.New("result has no 'target' attribute")
 	}
 	target := targetEl.InnerText()
+	if xmlnode.SelectElement("//ds:component/xccdf-1.2:Benchmark") == nil {
+		return nil, errors.New("result has no XCCDF Benchmark")
+	}
 
 	ruleTable := xccdf.NewRuleHashTable(xmlnode)
 	results := xmlnode.SelectElements("//rule-result")

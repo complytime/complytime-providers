@@ -1,6 +1,6 @@
 % COMPLYCTL-PROVIDER-AMPEL(1) ComplyTime Manual
 % Marcus Burghardt <maburgha@redhat.com>
-% September 2026
+% November 2026
 
 # NAME
 
@@ -37,8 +37,9 @@ are not set manually by the user.
     Example: **https://github.com/org/repo**
 
 **specs** (required)
-:   Comma-separated list of spec references identifying the policy files
-    to evaluate. Example: **builtin:github/branch-rules.yaml**. Path
+:   Comma-separated collection spec references for snappy, not policy identities.
+    Example: **builtin:github/branch-rules.yaml**. Relative spec file paths
+    resolve against the selected workspace. Built-in references pass through to snappy. Path
     traversal sequences (**../**) are rejected.
 
 **branches** (optional)
@@ -84,22 +85,30 @@ separately. See the Carabiner project for installation instructions:
 # FILES
 
 *.complytime/ampel/*
-:   Provider workspace directory. All paths below are relative to the
-    current working directory.
+:   Provider artifact directory. All paths below are relative to the selected
+    workspace root, not the invoking directory or the Evaluation Log's directory.
 
-*.complytime/ampel/results/\<repo\>-\<branch\>-\<spec\>-snappy.intoto.json*
+*.complytime/ampel/results/\<repository\>/\<branch\>/\<spec\>/evaluation-\<time\>-\<token\>/snappy.intoto.json*
 :   In-toto attestation produced by **snappy snap**. Contains raw API data
-    collected from the repository (e.g., branch protection rules). The
-    filename encodes the sanitized repository URL, branch, and spec label.
+    collected from the repository (e.g., branch protection rules).
 
-*.complytime/ampel/results/\<repo\>-\<branch\>-\<spec\>-ampel.intoto.json*
+*.complytime/ampel/results/\<repository\>/\<branch\>/\<spec\>/evaluation-\<time\>-\<token\>/ampel.intoto.json*
 :   In-toto attestation produced by **ampel verify**. Contains the policy
-    evaluation results against the snappy-collected data. The filename
-    follows the same pattern as the snappy attestation.
+    evaluation results against the snappy-collected data.
 
-*.complytime/ampel/results/\<repo\>-\<branch\>.json*
-:   Per-repository result JSON summarizing findings for a single
-    repository and branch combination.
+*.complytime/ampel/results/\<repository\>/\<branch\>/\<spec\>/evaluation-\<time\>-\<token\>/metadata.json*
+:   Best-effort supporting context: source identity, original branch and collection
+    spec, available policy/configuration provenance, evaluation token and collection
+    start. Metadata omits credentials and evidence digests; it is not evidence authority.
+
+Repository, branch and spec labels are non-empty ASCII components of at most 80 bytes.
+Slashes become hyphens, so **release/1** groups under **release-1**. Labels can collide;
+the atomically allocated evaluation leaf remains distinct. **time** uses UTC
+**YYYYMMDDTHHMMSSZ**; **token** contains 128 bits of cryptographic randomness.
+
+**Breaking change:** former flat attestation paths and normalized per-repository
+JSON summaries are no longer written or refreshed. No fixed-path alias replaces
+them. Existing legacy files and historical logs remain untouched and are not migrated.
 
 *.complytime/ampel/generated/\<content-key\>/scan-config.json*
 :   Scan configuration written by the **Generate** RPC. Records the
@@ -128,9 +137,9 @@ repository/branch/spec combination:
     attestation. This attestation captures the observed state of the
     repository at scan time.
 
-    - **Source.Coordinate**: path to the snappy attestation file
+    - **Source.Coordinate**: workspace-root-relative path to the retained snappy attestation
     - **Source.Digest**: **sha256:\<hex\>** digest of the attestation file
-    - **Source.ReferenceID**: **snappy-\<repo\>-\<branch\>-\<spec-label\>**
+    - **Source.ReferenceID**: **snappy_\<token\>**, matching its mapping reference
 
 **Ampel attestation** (type: **IntotoAttestation**)
 :   The **ampel** tool evaluates granular security policies against the
@@ -138,9 +147,60 @@ repository/branch/spec combination:
     the evaluation results. A non-zero exit code indicates policy
     failures, not tool errors.
 
-    - **Source.Coordinate**: path to the ampel result attestation file
+    - **Source.Coordinate**: workspace-root-relative path to the retained ampel attestation
     - **Source.Digest**: **sha256:\<hex\>** digest of the attestation file
-    - **Source.ReferenceID**: **ampel-\<repo\>-\<branch\>-\<spec-label\>**
+    - **Source.ReferenceID**: **ampel_\<token\>**, matching its mapping reference
+
+**Breaking change:** evidence and reference IDs identify artifact instances, not
+future evaluations of the same target. Evidence IDs use **snappy_\<token\>** and
+**ampel_\<token\>**. Both artifacts use the evaluation's UTC collection-start time
+for **CollectedAt**. Many assessments share these files rather than creating copies.
+Three scans retain three independent attestation pairs per repository/branch/spec,
+including valid failing-compliance results and byte-identical repeated outputs.
+
+The Gemara Evaluation Log alone defines the evidence set. Read its evidence mappings,
+resolve each coordinate against the selected workspace root, and compare the stored
+file's SHA256 digest with the log. Mapping references retain escaped absolute
+**file://** URLs identifying the same files, including percent-encoding for spaces,
+percent signs and non-ASCII names. A collection spec describes data collection; it
+is not a policy identity. Metadata and other unreferenced files are supporting
+outputs, not implicit evidence.
+
+**Workspace selection:** unchanged **complyctl** chooses **--workspace**, then
+**COMPLYTIME_WORKSPACE**, then its invoking directory. The provider receives that
+root in Generate global/Scan target **workspace** variables. Legacy/direct callers
+omitting the variable use the provider's current directory. All targets in a request
+must agree on the root. Relative provider input/configuration paths now resolve
+against that workspace; absolute paths stay absolute. This is a breaking change
+for invocation-relative configurations. No process-wide directory change is required.
+
+Local preservation is always on, without retention settings, cleanup, compression
+or deduplication. Storage grows with every evaluation's output plus filesystem and
+metadata overhead; interrupted attempts can leave unreferenced partial files.
+Metadata write/close failures warn without withholding complete, verified evidence.
+Required output, parse, digest or ownership/mode failures withhold the affected evidence.
+
+Fresh evaluation directories use **0700** and evidence/supporting files use **0600**,
+owned by the provider process's effective UID/GID. Existing parents must permit
+traversal and the workspace must be writable by that execution account. Normal
+scans are user-owned; direct-root and sudo scans stay root-owned. The original
+non-root user needs authorized elevated access to read and hash root-owned files;
+there is no automatic ownership handoff or access grant. For permission or disk-space
+errors, check execution-account access, parent traversal and available capacity.
+Do not widen evidence permissions or alter earlier owners to bypass these checks.
+
+Preserving or uploading the Evaluation Log alone does not preserve or transfer its
+referenced bytes. Downstream integrations own storage, transfers, access policy and
+longevity: keep the log and its selected files retrievable and verify transferred
+bytes against the recorded digests. Collection and optional packaging remain future
+complyctl capabilities. Any moved artifacts need mapping to their original references
+without rewriting the log. Absolute URLs remain origin-specific after relocation;
+workspace-relative coordinates can resolve against a copied, layout-preserving root.
+
+Upgrade stops refreshing fixed-path outputs, leaves legacy files/logs unchanged
+without migration and cannot recover evidence overwritten before upgrade.
+Rollback to an older provider resumes its overwrite behavior for
+new scans; retained evaluation directories remain readable by authorized readers.
 
 # EXIT CODES
 

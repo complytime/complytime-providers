@@ -19,6 +19,7 @@ import (
 	"github.com/complytime/complytime-providers/cmd/opa-provider/generate"
 	"github.com/complytime/complytime-providers/cmd/opa-provider/loader"
 	"github.com/complytime/complytime-providers/cmd/opa-provider/results"
+	"github.com/complytime/complytime-providers/internal/evidence"
 )
 
 func TestInputSelectionError_PreservesClassificationAndCause(t *testing.T) {
@@ -43,13 +44,10 @@ func TestRejectTargetResults_PreservesEarlierOperationalErrors(t *testing.T) {
 	assert.Equal(t, []*results.PerTargetResult{prior, passed}, previous)
 }
 
-func TestProcessRemoteBranches_RejectionPreservesWriteErrors(t *testing.T) {
+func TestProcessRemoteBranches_RejectionPreservesArtifactWriteErrors(t *testing.T) {
 	workspace := t.TempDir()
-	cfg := config.NewConfig(workspace)
+	cfg := config.NewWorkspaceConfig(workspace)
 	require.NoError(t, cfg.EnsureDirectories())
-	// A regular file at the results directory deterministically blocks writes.
-	require.NoError(t, os.Remove(cfg.ResultsDirPath()))
-	require.NoError(t, os.WriteFile(cfg.ResultsDirPath(), []byte("blocked"), 0600))
 	ldr := &mockLoader{loadFn: func(target provider.Target, _ string) (string, error) {
 		clone := filepath.Join(workspace, target.Variables[loader.VarBranch])
 		require.NoError(t, os.Mkdir(clone, 0750))
@@ -61,16 +59,27 @@ func TestProcessRemoteBranches_RejectionPreservesWriteErrors(t *testing.T) {
 		}
 		return []byte(conftestAllSuccessJSON), nil
 	}}
-	srv := New(ServerOptions{Runner: runner, Loader: ldr, WorkspaceDir: workspace})
+	srv := newWorkspaceTestServer(t, ServerOptions{Runner: runner, Loader: ldr, WorkspaceDir: workspace})
+	srv.opts.Allocate = func(options evidence.StorageOptions, labels ...string) (*evidence.Evaluation, error) {
+		if labels[len(labels)-1] == "main" {
+			options.Operations.Write = func(*os.File, []byte) (int, error) {
+				return 0, errors.New("injected artifact write failure")
+			}
+		}
+		return evidence.Allocate(options, labels...)
+	}
 	target := remoteTarget("", "https://example.com/org/repo")
 	branchResults, err := srv.processRemoteBranches(context.Background(), hclog.NewNullLogger(),
 		target, []string{"main", "second"}, cfg.PolicyDirPath(), cfg,
 		&generate.ScanConfig{IDs: []string{"main"}})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "creating results directory")
-	assert.Contains(t, err.Error(), cfg.ResultsDirPath())
-	require.Len(t, branchResults, 1)
+	require.NoError(t, err)
+	require.Len(t, branchResults, 2)
 	assert.Equal(t, "error", branchResults[0].Status)
-	assert.Equal(t, "second", branchResults[0].Branch)
-	assert.Contains(t, branchResults[0].Error, "no eligible input")
+	assert.Equal(t, "main", branchResults[0].Branch)
+	assert.Contains(t, branchResults[0].Error, "injected artifact write failure")
+	assert.Equal(t, "second", branchResults[1].Branch)
+	assert.Contains(t, branchResults[1].Error, "no eligible input")
+	response := results.ToScanResponse(branchResults, nil)
+	assert.Empty(t, response.Assessments)
+	assert.Empty(t, response.MappingReferences)
 }

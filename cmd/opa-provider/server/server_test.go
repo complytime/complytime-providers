@@ -7,10 +7,17 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,15 +25,190 @@ import (
 	"github.com/complytime/complyctl/pkg/provider"
 	"github.com/complytime/complytime-providers/cmd/opa-provider/config"
 	"github.com/complytime/complytime-providers/cmd/opa-provider/generate"
+	"github.com/complytime/complytime-providers/cmd/opa-provider/scan"
+	"github.com/complytime/complytime-providers/internal/evidence"
 	"github.com/complytime/complytime-providers/internal/genindex"
 )
 
 // --- Mocks ---
 
+func TestScan_ThreeScansRetainResultEvidence(t *testing.T) {
+	for _, kind := range []string{"local-file", "local-directory", "enclosing-directory", "remote"} {
+		t.Run(kind, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "workspace % café")
+			require.NoError(t, os.Mkdir(root, 0755))
+			cfg := config.NewWorkspaceConfig(root)
+			require.NoError(t, cfg.EnsureDirectories())
+			policy := filepath.Join(root, "policies")
+			require.NoError(t, os.Mkdir(policy, 0755))
+			require.NoError(t, generate.WriteScanConfig(cfg.GeneratedDirPath(), []string{"main", "other"},
+				map[string]string{"main": "req-1", "other": "req-2"}, policy))
+			legacy := filepath.Join(cfg.ResultsDirPath(), "legacy-main.json")
+			require.NoError(t, os.WriteFile(legacy, []byte("legacy summary"), 0600))
+			input := filepath.Join(root, "input")
+			require.NoError(t, os.Mkdir(input, 0755))
+			inputFile := filepath.Join(input, "input.json")
+			require.NoError(t, os.WriteFile(inputFile, []byte(`{"old":true}`), 0600))
+			target := localTarget(t, input, "")
+			target.TargetID = "local/target"
+			if kind == "local-file" {
+				target.Variables["input_path"] = inputFile
+			}
+			if kind == "enclosing-directory" {
+				t.Setenv(conftestIgnoreEnv, "")
+				t.Setenv(conftestConfigFileEnv, "")
+				target.Variables["input_path"] = root
+			}
+			if kind == "remote" {
+				target = remoteTarget("", "https://user:secret@example.com/org/repo?token=secret#secret")
+				target.Variables["branches"] = "main,release/1"
+				target.Variables["scan_path"] = "manifests"
+			}
+			target.Variables[evidence.WorkspaceVariable] = root
+			var currentOutput []byte
+			runner := &mockRunner{outputFn: func(_ string, args []string) (scan.CommandOutput, error) {
+				assert.Contains(t, args, "--no-fail")
+				if kind == "enclosing-directory" {
+					assert.Contains(t, args, "--ignore")
+				}
+				return scan.CommandOutput{Stdout: currentOutput, Stderr: []byte("diagnostic warning\n")}, nil
+			}}
+			cloneRoots := map[string]bool{}
+			ldr := &mockLoader{loadFn: func(target provider.Target, workDir string) (string, error) {
+				clone := filepath.Join(workDir, "example-com-org-repo", target.Variables["branch"])
+				cloneRoots[clone] = true
+				// Only the known temporary working clone is replaceable, never results.
+				require.NoError(t, os.RemoveAll(clone))
+				scanPath := filepath.Join(clone, target.Variables["scan_path"])
+				require.NoError(t, os.MkdirAll(scanPath, 0755))
+				require.NoError(t, os.WriteFile(filepath.Join(scanPath, "input.json"), currentOutput, 0600))
+				return scanPath, nil
+			}}
+			opts := ServerOptions{Runner: runner, ToolChecker: func() ([]string, error) { return nil, nil }}
+			if kind == "remote" {
+				opts.Loader = ldr
+			}
+			srv := New(opts)
+			start := time.Date(2026, 11, 10, 23, 59, 59, 0, time.UTC)
+			srv.opts.Allocate = func(options evidence.StorageOptions, labels ...string) (*evidence.Evaluation, error) {
+				options.Clock = func() time.Time { return start }
+				return evidence.Allocate(options, labels...)
+			}
+			retained := map[string][]byte{}
+			identities := map[string]bool{}
+			urls := map[string]string{}
+			for iteration := range 3 {
+				currentOutput = []byte(conftestAllSuccessJSON + "\n")
+				if iteration > 0 {
+					currentOutput = []byte(strings.Replace(conftestAllSuccessJSON, `"successes": 5`,
+						`"successes": 0, "failures": [{"msg":"policy failed"}]`, 1) + "\n\n")
+				}
+				response, err := srv.Scan(context.Background(), &provider.ScanRequest{Targets: []provider.Target{target}})
+				require.NoError(t, err)
+				assert.Empty(t, response.Errors)
+				require.Len(t, response.Assessments, 2)
+				references := map[string]provider.MappingReference{}
+				for _, ref := range response.MappingReferences {
+					references[ref.ID] = ref
+					assert.NotContains(t, ref.Title+ref.Description+ref.URL, "secret")
+				}
+				seen := map[string]bool{}
+				for _, assessment := range response.Assessments {
+					for _, item := range assessment.Evidence {
+						require.NotNil(t, item.Source)
+						coordinate := item.Source.Coordinate
+						assert.True(t, strings.HasPrefix(coordinate, filepath.Join(provider.WorkspaceDir, "opa", "results")+"/"))
+						assert.Equal(t, "conftest.json", filepath.Base(coordinate))
+						path := filepath.Join(root, coordinate)
+						stored, err := os.ReadFile(path)
+						require.NoError(t, err)
+						assert.Equal(t, currentOutput, stored)
+						digest := sha256.Sum256(stored)
+						assert.Equal(t, "sha256:"+hex.EncodeToString(digest[:]), item.Source.Digest)
+						assert.Equal(t, start.Format(time.RFC3339), item.CollectedAt)
+						ref, exists := references[item.Source.ReferenceID]
+						require.True(t, exists)
+						parsed, err := url.Parse(ref.URL)
+						require.NoError(t, err)
+						assert.Equal(t, "file", parsed.Scheme)
+						assert.Equal(t, path, parsed.Path)
+						assert.Contains(t, ref.URL, "%25")
+						if !seen[coordinate] {
+							assert.False(t, identities[item.ID], "different executions need different identities")
+							identities[item.ID] = true
+							seen[coordinate] = true
+							retained[coordinate] = append([]byte(nil), stored...)
+							urls[coordinate] = ref.URL
+						}
+						assertRetainedPrivate(t, path, 0600)
+						assertRetainedPrivate(t, filepath.Dir(path), 0700)
+						entries, err := os.ReadDir(filepath.Dir(path))
+						require.NoError(t, err)
+						assert.Len(t, entries, 2, "only result and metadata, never input snapshots")
+						metadataPath := filepath.Join(filepath.Dir(path), evidence.MetadataFile)
+						assertRetainedPrivate(t, metadataPath, 0600)
+						metadata, err := os.ReadFile(metadataPath)
+						require.NoError(t, err)
+						assert.NotContains(t, string(metadata), "secret")
+						var envelope map[string]any
+						require.NoError(t, json.Unmarshal(metadata, &envelope))
+						assert.Equal(t, item.CollectedAt, envelope["collected_at"])
+						assert.Equal(t, "conftest_"+envelope["evaluation_id"].(string), item.ID)
+						assert.Equal(t, "conftest-result_"+envelope["evaluation_id"].(string), ref.ID)
+						assert.Contains(t, filepath.Base(filepath.Dir(path)), start.Format(evidence.EvaluationTimeFormat))
+					}
+				}
+				assert.Len(t, seen, len(response.MappingReferences))
+				for coordinate, original := range retained {
+					data, err := os.ReadFile(filepath.Join(root, coordinate))
+					require.NoError(t, err)
+					assert.Equal(t, original, data)
+				}
+				require.NoError(t, os.WriteFile(inputFile, []byte(`{"changed":true}`), 0600))
+			}
+			require.NoError(t, os.RemoveAll(input))
+			if kind == "remote" {
+				assert.Len(t, cloneRoots, 2, "one replaceable clone per branch")
+				assert.Len(t, retained, 6)
+			} else {
+				assert.Len(t, retained, 3)
+			}
+			legacyBytes, err := os.ReadFile(legacy)
+			require.NoError(t, err)
+			assert.Equal(t, "legacy summary", string(legacyBytes))
+			copied := t.TempDir()
+			require.NoError(t, os.CopyFS(copied, os.DirFS(root)))
+			for coordinate, original := range retained {
+				data, err := os.ReadFile(filepath.Join(copied, coordinate))
+				require.NoError(t, err)
+				assert.Equal(t, sha256.Sum256(original), sha256.Sum256(data))
+				parsed, err := url.Parse(urls[coordinate])
+				require.NoError(t, err)
+				assert.Equal(t, filepath.Join(root, coordinate), parsed.Path)
+			}
+		})
+	}
+}
+
+func assertRetainedPrivate(t *testing.T, path string, mode os.FileMode) {
+	t.Helper()
+	parent, err := os.OpenRoot(filepath.Dir(path))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, parent.Close()) }()
+	info, err := parent.Stat(filepath.Base(path))
+	require.NoError(t, err)
+	assert.Equal(t, mode, info.Mode().Perm())
+	stat := info.Sys().(*syscall.Stat_t)
+	assert.Equal(t, int64(os.Geteuid()), int64(stat.Uid))
+	assert.Equal(t, int64(os.Getegid()), int64(stat.Gid))
+}
+
 type mockRunner struct {
 	calls    []mockCall
 	callFn   func(name string, args []string) ([]byte, error)
+	outputFn func(name string, args []string) (scan.CommandOutput, error)
 	response []byte
+	stderr   []byte
 	err      error
 }
 
@@ -36,20 +218,39 @@ type mockCall struct {
 	args []string
 }
 
-func (m *mockRunner) Run(name string, args ...string) ([]byte, error) {
+func (m *mockRunner) Run(name string, args ...string) (scan.CommandOutput, error) {
 	m.calls = append(m.calls, mockCall{name: name, args: args})
-	if m.callFn != nil {
-		return m.callFn(name, args)
+	if m.outputFn != nil {
+		return m.outputFn(name, args)
 	}
-	return m.response, m.err
+	if m.callFn != nil {
+		return m.callOutput(name, args)
+	}
+	return m.output(m.response, m.err)
 }
 
-func (m *mockRunner) RunWithEnv(env []string, name string, args ...string) ([]byte, error) {
+func (m *mockRunner) RunWithEnv(env []string, name string, args ...string) (scan.CommandOutput, error) {
 	m.calls = append(m.calls, mockCall{env: env, name: name, args: args})
-	if m.callFn != nil {
-		return m.callFn(name, args)
+	if m.outputFn != nil {
+		return m.outputFn(name, args)
 	}
-	return m.response, m.err
+	if m.callFn != nil {
+		return m.callOutput(name, args)
+	}
+	return m.output(m.response, m.err)
+}
+
+func (m *mockRunner) callOutput(name string, args []string) (scan.CommandOutput, error) {
+	data, err := m.callFn(name, args)
+	return m.output(data, err)
+}
+
+func (m *mockRunner) output(data []byte, err error) (scan.CommandOutput, error) {
+	// Existing failure fixtures describe tool diagnostics, now delivered on stderr.
+	if err != nil {
+		return scan.CommandOutput{Stderr: append(append([]byte(nil), m.stderr...), data...)}, err
+	}
+	return scan.CommandOutput{Stdout: data, Stderr: m.stderr}, nil
 }
 
 type mockLoader struct {
@@ -94,7 +295,7 @@ var conftestAllSuccessJSON = `[{
 
 func newTestServer(
 	t *testing.T, runner *mockRunner, ldr *mockLoader,
-) *ProviderServer {
+) *workspaceTestServer {
 	t.Helper()
 	if ldr == nil {
 		ldr = &mockLoader{
@@ -103,7 +304,7 @@ func newTestServer(
 			},
 		}
 	}
-	return New(ServerOptions{
+	return newWorkspaceTestServer(t, ServerOptions{
 		Loader:       ldr,
 		Runner:       runner,
 		ToolChecker:  func() ([]string, error) { return nil, nil },
@@ -160,7 +361,7 @@ func remoteTarget(bundleRef, url string) provider.Target {
 // work without a prior Generate call.
 func writeScanConfig(t *testing.T, workDir string) {
 	t.Helper()
-	cfg := config.NewConfig(workDir)
+	cfg := config.NewWorkspaceConfig(workDir)
 	require.NoError(t, os.MkdirAll(cfg.GeneratedDirPath(), 0750))
 	require.NoError(t, generate.WriteScanConfig(
 		cfg.GeneratedDirPath(),
@@ -195,12 +396,12 @@ func writePolicyMapping(t *testing.T, policyDir, mapping string) {
 // --- Constructor tests ---
 
 func TestNew_ReturnsProviderServer(t *testing.T) {
-	srv := New(ServerOptions{})
+	srv := newWorkspaceTestServer(t, ServerOptions{})
 	require.NotNil(t, srv)
 }
 
 func TestNew_DefaultOptions(t *testing.T) {
-	srv := New(ServerOptions{})
+	srv := newWorkspaceTestServer(t, ServerOptions{})
 	assert.NotNil(t, srv.opts.Loader)
 	assert.NotNil(t, srv.opts.Runner)
 	assert.NotNil(t, srv.opts.ToolChecker)
@@ -213,7 +414,7 @@ func TestNew_CustomOptions(t *testing.T) {
 	checker := func() ([]string, error) { return []string{"missing"}, nil }
 	dir := t.TempDir()
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Loader:       ldr,
 		Runner:       runner,
 		ToolChecker:  checker,
@@ -227,7 +428,7 @@ func TestNew_CustomOptions(t *testing.T) {
 // --- Describe tests ---
 
 func TestDescribe_Healthy(t *testing.T) {
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		ToolChecker: func() ([]string, error) { return nil, nil },
 	})
 	resp, err := srv.Describe(
@@ -239,7 +440,7 @@ func TestDescribe_Healthy(t *testing.T) {
 }
 
 func TestDescribe_Unhealthy(t *testing.T) {
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		ToolChecker: func() ([]string, error) { return []string{"conftest"}, nil },
 	})
 	resp, err := srv.Describe(
@@ -251,7 +452,7 @@ func TestDescribe_Unhealthy(t *testing.T) {
 }
 
 func TestDescribe_Variables(t *testing.T) {
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		ToolChecker: func() ([]string, error) { return nil, nil },
 	})
 	resp, err := srv.Describe(
@@ -268,7 +469,7 @@ func TestDescribe_Variables(t *testing.T) {
 
 func TestDescribe_UsesToolPresenceOnly(t *testing.T) {
 	runner := &mockRunner{}
-	srv := New(ServerOptions{Runner: runner,
+	srv := newWorkspaceTestServer(t, ServerOptions{Runner: runner,
 		ToolChecker: func() ([]string, error) { return nil, nil }})
 	response, err := srv.Describe(context.Background(), &provider.DescribeRequest{})
 	require.NoError(t, err)
@@ -280,7 +481,7 @@ func TestDescribe_UsesToolPresenceOnly(t *testing.T) {
 // --- Generate tests ---
 
 func TestGenerate_EmptyConfiguration(t *testing.T) {
-	srv := New(ServerOptions{})
+	srv := newWorkspaceTestServer(t, ServerOptions{})
 	resp, err := srv.Generate(
 		context.Background(), &provider.GenerateRequest{},
 	)
@@ -292,7 +493,7 @@ func TestGenerate_EmptyConfiguration(t *testing.T) {
 func TestGenerate_WithMapping(t *testing.T) {
 	workDir := t.TempDir()
 	bundleRef := "ghcr.io/org/bundle:v1"
-	cfg := config.NewConfig(workDir)
+	cfg := config.NewWorkspaceConfig(workDir)
 	require.NoError(t, cfg.EnsureDirectories())
 	policyDir := cfg.PolicyDirForBundle(bundleRef)
 	require.NoError(t, os.MkdirAll(policyDir, 0750))
@@ -313,7 +514,7 @@ func TestGenerate_WithMapping(t *testing.T) {
 		return []byte("ok"), nil
 	}}
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner:       runner,
 		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: workDir,
@@ -342,7 +543,7 @@ func TestGenerate_WithMapping(t *testing.T) {
 
 func TestGenerate_MultipleTargets_WritesTargetIndexedConfigs(t *testing.T) {
 	workDir := t.TempDir()
-	cfg := config.NewConfig(workDir)
+	cfg := config.NewWorkspaceConfig(workDir)
 	require.NoError(t, cfg.EnsureDirectories())
 
 	bundleRefA := "ghcr.io/org/bundle-a:v1"
@@ -352,7 +553,7 @@ func TestGenerate_MultipleTargets_WritesTargetIndexedConfigs(t *testing.T) {
 	writePolicyMapping(t, policyDirA, `{"version":"1","mappings":[{"id":"namespace-a","requirement_id":"REQ-A"}]}`)
 	writePolicyMapping(t, policyDirB, `{"version":"1","mappings":[{"id":"namespace-b","requirement_id":"REQ-B"}]}`)
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner:       &mockRunner{response: []byte("ok")},
 		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: workDir,
@@ -395,7 +596,7 @@ func TestGenerate_MultipleTargets_WritesTargetIndexedConfigs(t *testing.T) {
 
 func TestGenerate_IdenticalRequirementsDifferentPolicies_UsesDistinctContentKeys(t *testing.T) {
 	workDir := t.TempDir()
-	cfg := config.NewConfig(workDir)
+	cfg := config.NewWorkspaceConfig(workDir)
 	require.NoError(t, cfg.EnsureDirectories())
 
 	bundleRefA := "ghcr.io/org/bundle-a:v1"
@@ -406,7 +607,7 @@ func TestGenerate_IdenticalRequirementsDifferentPolicies_UsesDistinctContentKeys
 	writePolicyMapping(t, policyDirA, mapping)
 	writePolicyMapping(t, policyDirB, mapping)
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner:       &mockRunner{response: []byte("ok")},
 		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: workDir,
@@ -432,7 +633,7 @@ func TestGenerate_IdenticalRequirementsDifferentPolicies_UsesDistinctContentKeys
 
 func TestGenerate_InputPathTarget_IndexesInputPath(t *testing.T) {
 	workDir := t.TempDir()
-	cfg := config.NewConfig(workDir)
+	cfg := config.NewWorkspaceConfig(workDir)
 	require.NoError(t, cfg.EnsureDirectories())
 
 	bundleRef := "ghcr.io/org/bundle:v1"
@@ -440,7 +641,7 @@ func TestGenerate_InputPathTarget_IndexesInputPath(t *testing.T) {
 	writePolicyMapping(t, policyDir, `{"version":"1","mappings":[{"id":"namespace","requirement_id":"REQ-1"}]}`)
 	inputPath := filepath.Join(t.TempDir(), "input.yaml")
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner:       &mockRunner{response: []byte("ok")},
 		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: workDir,
@@ -464,7 +665,7 @@ func TestGenerate_InputPathTarget_IndexesInputPath(t *testing.T) {
 func TestGenerate_WithoutMapping(t *testing.T) {
 	workDir := t.TempDir()
 	bundleRef := "ghcr.io/org/bundle:v1"
-	cfg := config.NewConfig(workDir)
+	cfg := config.NewWorkspaceConfig(workDir)
 	require.NoError(t, cfg.EnsureDirectories())
 	policyDir := cfg.PolicyDirForBundle(bundleRef)
 	require.NoError(t, os.MkdirAll(policyDir, 0750))
@@ -474,7 +675,7 @@ func TestGenerate_WithoutMapping(t *testing.T) {
 		return []byte("ok"), nil
 	}}
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner:       runner,
 		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: workDir,
@@ -496,7 +697,7 @@ func TestGenerate_WithoutMapping(t *testing.T) {
 }
 
 func TestGenerate_MissingBundleRef(t *testing.T) {
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner:       &mockRunner{},
 		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: t.TempDir(),
@@ -514,7 +715,7 @@ func TestGenerate_MissingBundleRef(t *testing.T) {
 
 func TestGenerate_WithComplypackContentPath(t *testing.T) {
 	workDir := t.TempDir()
-	cfg := config.NewConfig(workDir)
+	cfg := config.NewWorkspaceConfig(workDir)
 	require.NoError(t, cfg.EnsureDirectories())
 
 	// Create a complypack content directory with Rego + mapping.
@@ -532,7 +733,7 @@ func TestGenerate_WithComplypackContentPath(t *testing.T) {
 		[]byte(mappingContent), 0600,
 	))
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner:       &mockRunner{},
 		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: workDir,
@@ -561,7 +762,7 @@ func TestGenerate_WithComplypackContentPath(t *testing.T) {
 
 func TestGenerate_ComplypackPreferredOverBundleRef(t *testing.T) {
 	workDir := t.TempDir()
-	cfg := config.NewConfig(workDir)
+	cfg := config.NewWorkspaceConfig(workDir)
 	require.NoError(t, cfg.EnsureDirectories())
 
 	complypackDir := filepath.Join(t.TempDir(), "complypack-content")
@@ -586,7 +787,7 @@ func TestGenerate_ComplypackPreferredOverBundleRef(t *testing.T) {
 		return []byte("ok"), nil
 	}}
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner:       runner,
 		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: workDir,
@@ -631,7 +832,7 @@ func buildTarGz(t *testing.T, files map[string][]byte) []byte {
 
 func TestGenerate_WithComplypackContentPath_TarGz(t *testing.T) {
 	workDir := t.TempDir()
-	cfg := config.NewConfig(workDir)
+	cfg := config.NewWorkspaceConfig(workDir)
 	require.NoError(t, cfg.EnsureDirectories())
 
 	// Build a tar.gz archive containing the mapping file.
@@ -652,7 +853,7 @@ func TestGenerate_WithComplypackContentPath_TarGz(t *testing.T) {
 	archivePath := filepath.Join(complypackCacheDir, "content.tar.gz")
 	require.NoError(t, os.WriteFile(archivePath, archiveBytes, 0600))
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner:       &mockRunner{},
 		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: workDir,
@@ -694,7 +895,7 @@ func TestGenerate_WithComplypackContentPath_TarGz(t *testing.T) {
 
 func TestGenerate_WithComplypackContentPath_TarGz_Idempotent(t *testing.T) {
 	workDir := t.TempDir()
-	cfg := config.NewConfig(workDir)
+	cfg := config.NewWorkspaceConfig(workDir)
 	require.NoError(t, cfg.EnsureDirectories())
 
 	mappingContent := `{
@@ -712,7 +913,7 @@ func TestGenerate_WithComplypackContentPath_TarGz_Idempotent(t *testing.T) {
 	archivePath := filepath.Join(complypackCacheDir, "content.tar.gz")
 	require.NoError(t, os.WriteFile(archivePath, archiveBytes, 0600))
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner:       &mockRunner{},
 		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: workDir,
@@ -736,7 +937,7 @@ func TestGenerate_WithComplypackContentPath_TarGz_Idempotent(t *testing.T) {
 }
 
 func TestGenerate_ToolCheckFailure(t *testing.T) {
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		ToolChecker: func() ([]string, error) {
 			return []string{"conftest"}, nil
 		},
@@ -760,7 +961,7 @@ func TestGenerate_BundlePullFailure(t *testing.T) {
 		},
 	}
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner:       runner,
 		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: t.TempDir(),
@@ -780,7 +981,7 @@ func TestGenerate_BundlePullFailure(t *testing.T) {
 func TestGenerate_MalformedMapping(t *testing.T) {
 	workDir := t.TempDir()
 	bundleRef := "ghcr.io/org/bundle:v1"
-	cfg := config.NewConfig(workDir)
+	cfg := config.NewWorkspaceConfig(workDir)
 	require.NoError(t, cfg.EnsureDirectories())
 	policyDir := cfg.PolicyDirForBundle(bundleRef)
 	require.NoError(t, os.MkdirAll(policyDir, 0750))
@@ -795,7 +996,7 @@ func TestGenerate_MalformedMapping(t *testing.T) {
 		return []byte("ok"), nil
 	}}
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner:       runner,
 		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: workDir,
@@ -815,7 +1016,7 @@ func TestGenerate_MalformedMapping(t *testing.T) {
 func TestGenerate_PartialMatch(t *testing.T) {
 	workDir := t.TempDir()
 	bundleRef := "ghcr.io/org/bundle:v1"
-	cfg := config.NewConfig(workDir)
+	cfg := config.NewWorkspaceConfig(workDir)
 	require.NoError(t, cfg.EnsureDirectories())
 	policyDir := cfg.PolicyDirForBundle(bundleRef)
 	require.NoError(t, os.MkdirAll(policyDir, 0750))
@@ -835,7 +1036,7 @@ func TestGenerate_PartialMatch(t *testing.T) {
 		return []byte("ok"), nil
 	}}
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner:       runner,
 		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: workDir,
@@ -863,7 +1064,7 @@ func TestGenerate_Scan_WithMapping(t *testing.T) {
 	// verify Gemara IDs in response and --namespace flags used (not --all-namespaces).
 	workDir := t.TempDir()
 	bundleRef := "ghcr.io/org/bundle:v1"
-	cfg := config.NewConfig(workDir)
+	cfg := config.NewWorkspaceConfig(workDir)
 	require.NoError(t, cfg.EnsureDirectories())
 	policyDir := cfg.PolicyDirForBundle(bundleRef)
 	require.NoError(t, os.MkdirAll(policyDir, 0750))
@@ -904,7 +1105,7 @@ func TestGenerate_Scan_WithMapping(t *testing.T) {
 		},
 	}
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Loader:       ldr,
 		Runner:       runner,
 		ToolChecker:  func() ([]string, error) { return nil, nil },
@@ -1002,7 +1203,7 @@ func TestGenerate_Scan_MissingMappingReturnsError(t *testing.T) {
 		return nil, fmt.Errorf("unexpected: %s", name)
 	}}
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner:       runner,
 		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: workDir,
@@ -1033,7 +1234,7 @@ func TestScan_LocalPath_HappyPath(t *testing.T) {
 		},
 	}
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Loader:       ldr,
 		Runner:       runner,
 		ToolChecker:  func() ([]string, error) { return nil, nil },
@@ -1048,9 +1249,8 @@ func TestScan_LocalPath_HappyPath(t *testing.T) {
 	assert.NotEmpty(t, resp.Assessments)
 }
 
-func TestScan_LocalPath_StatFailure(t *testing.T) {
-	// When the input path becomes inaccessible after conftest evaluation,
-	// the stat error must be propagated (not silently ignored).
+func TestScan_LocalPath_DeletedAfterEvaluationRetainsResults(t *testing.T) {
+	// Input provenance may disappear after conftest finishes; result bytes remain evidence.
 	workDir := t.TempDir()
 	writeScanConfig(t, workDir)
 
@@ -1066,7 +1266,7 @@ func TestScan_LocalPath_StatFailure(t *testing.T) {
 		},
 	}
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Loader:       ldr,
 		Runner:       runner,
 		ToolChecker:  func() ([]string, error) { return nil, nil },
@@ -1079,12 +1279,14 @@ func TestScan_LocalPath_StatFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// The stat failure should surface as an error on the target result,
-	// not be silently swallowed.
-	require.NotEmpty(t, resp.Errors,
-		"stat failure must appear in response errors")
-	assert.Contains(t, resp.Errors[0], "stat input for digest",
-		"error message should reference the stat failure")
+	assert.Empty(t, resp.Errors)
+	require.NotEmpty(t, resp.Assessments)
+	item := resp.Assessments[0].Evidence[0]
+	assert.Equal(t, "conftest.json", filepath.Base(item.Source.Coordinate))
+	stored, err := os.ReadFile(filepath.Join(workDir, item.Source.Coordinate))
+	require.NoError(t, err)
+	assert.Equal(t, conftestHappyJSON, string(stored))
+	assert.NoFileExists(t, inputPath)
 }
 
 func TestScan_RemoteURL_HappyPath(t *testing.T) {
@@ -1098,7 +1300,7 @@ func TestScan_RemoteURL_HappyPath(t *testing.T) {
 		},
 	}
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Loader:       ldr,
 		Runner:       runner,
 		ToolChecker:  func() ([]string, error) { return nil, nil },
@@ -1116,7 +1318,7 @@ func TestScan_RemoteURL_HappyPath(t *testing.T) {
 
 func TestScan_IndexResolvesURLAndInputPathTargets(t *testing.T) {
 	workDir := t.TempDir()
-	cfg := config.NewConfig(workDir)
+	cfg := config.NewWorkspaceConfig(workDir)
 	require.NoError(t, cfg.EnsureDirectories())
 
 	urlTarget := remoteTarget("ghcr.io/org/bundle-a:v1", "https://example.com/repo-a")
@@ -1169,7 +1371,7 @@ func TestScan_IndexResolvesURLAndInputPathTargets(t *testing.T) {
 		}
 		return target.Variables["input_path"], nil
 	}}
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Loader:       ldr,
 		Runner:       runner,
 		ToolChecker:  func() ([]string, error) { return nil, nil },
@@ -1226,7 +1428,7 @@ func TestScan_PresentIndexFailuresDoNotUseLegacyConfig(t *testing.T) {
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			workDir := t.TempDir()
-			cfg := config.NewConfig(workDir)
+			cfg := config.NewWorkspaceConfig(workDir)
 			require.NoError(t, cfg.EnsureDirectories())
 			writeScanConfig(t, workDir)
 			require.NoError(t, genindex.WriteIndex(cfg.GeneratedDirPath(), testCase.index))
@@ -1234,7 +1436,7 @@ func TestScan_PresentIndexFailuresDoNotUseLegacyConfig(t *testing.T) {
 			runner := &mockRunner{callFn: func(name string, args []string) ([]byte, error) {
 				return nil, fmt.Errorf("legacy config must not be evaluated: %s %v", name, args)
 			}}
-			srv := New(ServerOptions{
+			srv := newWorkspaceTestServer(t, ServerOptions{
 				Runner:       runner,
 				ToolChecker:  func() ([]string, error) { return nil, nil },
 				WorkspaceDir: workDir,
@@ -1256,7 +1458,7 @@ func TestScan_UnusableIndexDoesNotUseLegacyConfig(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			workDir := t.TempDir()
-			cfg := config.NewConfig(workDir)
+			cfg := config.NewWorkspaceConfig(workDir)
 			require.NoError(t, cfg.EnsureDirectories())
 			writeScanConfig(t, workDir)
 			require.NoError(t, os.WriteFile(
@@ -1264,7 +1466,7 @@ func TestScan_UnusableIndexDoesNotUseLegacyConfig(t *testing.T) {
 			))
 
 			runner := &mockRunner{}
-			srv := New(ServerOptions{
+			srv := newWorkspaceTestServer(t, ServerOptions{
 				Runner:       runner,
 				ToolChecker:  func() ([]string, error) { return nil, nil },
 				WorkspaceDir: workDir,
@@ -1305,7 +1507,7 @@ func TestScan_RemoteURL_WithBranches(t *testing.T) {
 		},
 	}
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Loader:       ldr,
 		Runner:       runner,
 		ToolChecker:  func() ([]string, error) { return nil, nil },
@@ -1354,7 +1556,7 @@ func TestScan_RemoteURL_WithScanPath(t *testing.T) {
 		},
 	}
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Loader:       ldr,
 		Runner:       runner,
 		ToolChecker:  func() ([]string, error) { return nil, nil },
@@ -1459,7 +1661,7 @@ func TestScan_WithoutPriorGenerate_ReturnsError(t *testing.T) {
 }
 
 func TestScan_ToolCheckFailure(t *testing.T) {
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		ToolChecker:  func() ([]string, error) { return []string{"conftest"}, nil },
 		WorkspaceDir: t.TempDir(),
 	})
@@ -1777,7 +1979,7 @@ func TestScan_PerTargetBundles_MissingRef(t *testing.T) {
 		},
 	}
 
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Loader:       ldr,
 		Runner:       runner,
 		ToolChecker:  func() ([]string, error) { return nil, nil },
@@ -1848,23 +2050,21 @@ func TestScan_WriteError_PopulatesRespErrors(t *testing.T) {
 		},
 	}
 
-	// Create a valid workspace so EnsureDirectories succeeds, then
-	// make the results directory non-writable to trigger write errors
-	// from WritePerTargetResult.
 	wsDir := t.TempDir()
-	srv := New(ServerOptions{
+	writeScanConfig(t, wsDir)
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner:       runner,
 		Loader:       ldr,
 		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: wsDir,
 	})
 
-	// Pre-create the results directory, then make it read-only so
-	// WritePerTargetResult's os.WriteFile fails.
-	resultsDir := filepath.Join(wsDir, "opa", "results")
-	require.NoError(t, os.MkdirAll(resultsDir, 0750))
-	require.NoError(t, os.Chmod(resultsDir, 0500))
-	t.Cleanup(func() { _ = os.Chmod(resultsDir, 0750) })
+	srv.opts.Allocate = func(options evidence.StorageOptions, labels ...string) (*evidence.Evaluation, error) {
+		options.Operations.Write = func(*os.File, []byte) (int, error) {
+			return 0, fmt.Errorf("injected required-output write failure")
+		}
+		return evidence.Allocate(options, labels...)
+	}
 
 	req := makeScanRequest(t, []provider.Target{
 		localTarget(t, t.TempDir(), "ghcr.io/org/bundle:dev"),
@@ -1873,6 +2073,9 @@ func TestScan_WriteError_PopulatesRespErrors(t *testing.T) {
 	require.NoError(t, err, "write errors should not cause gRPC-level failure")
 	require.NotNil(t, resp)
 	assert.NotEmpty(t, resp.Errors, "write errors should appear in resp.Errors")
+	assert.Contains(t, resp.Errors[0], "injected required-output write failure")
+	assert.Empty(t, resp.Assessments)
+	assert.Empty(t, resp.MappingReferences)
 }
 
 // --- Validation tests ---
@@ -1985,13 +2188,13 @@ func TestScan_NoGlobals(t *testing.T) {
 		},
 	}
 
-	srv1 := New(ServerOptions{
+	srv1 := newWorkspaceTestServer(t, ServerOptions{
 		Runner:       runner1,
 		Loader:       ldr1,
 		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: t.TempDir(),
 	})
-	srv2 := New(ServerOptions{
+	srv2 := newWorkspaceTestServer(t, ServerOptions{
 		Runner:       runner2,
 		Loader:       ldr2,
 		ToolChecker:  func() ([]string, error) { return nil, nil },

@@ -15,12 +15,14 @@ import (
 
 	"github.com/complytime/complyctl/pkg/provider"
 	"github.com/complytime/complytime-providers/cmd/opa-provider/loader"
+	"github.com/complytime/complytime-providers/internal/evidence"
 )
 
 func TestScan_RemoteBranchRejectionDiscardsTargetAssessments(t *testing.T) {
 	for _, scenario := range []string{
 		"symlink", "hardlink", "directory cycle", "empty", "fully ignored", "missing evidence",
 		"invalid output", "valid",
+		"preflight cancellation",
 	} {
 		for _, order := range []string{"main,second", "second,main"} {
 			t.Run(scenario+"/"+order, func(t *testing.T) {
@@ -65,8 +67,18 @@ func TestScan_RemoteBranchRejectionDiscardsTargetAssessments(t *testing.T) {
 					}
 					return []byte(conftestAllSuccessJSON), nil
 				}}
-				srv := New(ServerOptions{Runner: runner, Loader: ldr, WorkspaceDir: workspace,
+				srv := newWorkspaceTestServer(t, ServerOptions{Runner: runner, Loader: ldr, WorkspaceDir: workspace,
 					ToolChecker: func() ([]string, error) { return nil, nil }})
+				if scenario == "preflight cancellation" {
+					cancelled := false
+					srv.localTraversal.lstat = func(path string) (os.FileInfo, error) {
+						if !cancelled && path == filepath.Join(workspace, "second") {
+							cancelled = true
+							return nil, context.Canceled
+						}
+						return os.Lstat(path)
+					}
+				}
 				target := remoteTarget("", "https://example.com/org/repo")
 				target.TargetID = "multi-branch"
 				target.Variables[loader.VarBranches] = order
@@ -102,14 +114,77 @@ func TestScan_RemoteBranchRejectionDiscardsTargetAssessments(t *testing.T) {
 					cause = "directory symlink cycle"
 				case "invalid output":
 					cause = "parsing conftest output"
+				case "preflight cancellation":
+					cause = "context canceled"
 				}
 				assert.Contains(t, response.Errors[0], cause)
 				require.Len(t, assessment.Steps, 1)
 				assert.Equal(t, validFile, assessment.Steps[0].Name)
 				assert.Equal(t, provider.ResultPassed, assessment.Steps[0].Result)
 				require.Len(t, assessment.Evidence, 1)
-				assert.Equal(t, validFile, assessment.Evidence[0].Source.Coordinate)
+				coordinate := assessment.Evidence[0].Source.Coordinate
+				assert.Equal(t, "conftest.json", filepath.Base(coordinate))
+				stored, err := os.ReadFile(filepath.Join(workspace, coordinate))
+				require.NoError(t, err)
+				assert.Equal(t, conftestAllSuccessJSON, string(stored))
 				assert.Len(t, response.MappingReferences, 1)
+				// Complete and partial rejected-branch artifacts remain on disk;
+				// directory contents must never expand the response's evidence set.
+				retained, err := filepath.Glob(filepath.Join(workspace, provider.WorkspaceDir, "opa", "results",
+					"example-com-org-repo", "*", "evaluation-*", "conftest.json"))
+				require.NoError(t, err)
+				if order == "main,second" {
+					assert.NotEmpty(t, retained)
+				}
+			})
+		}
+	}
+}
+
+func TestScan_OrdinaryBranchFailuresRemainBranchScoped(t *testing.T) {
+	for _, failure := range []string{"clone", "tool", "storage"} {
+		for _, order := range []string{"main,second", "second,main"} {
+			t.Run(failure+"/"+order, func(t *testing.T) {
+				root := t.TempDir()
+				writeScanConfig(t, root)
+				ldr := &mockLoader{loadFn: func(target provider.Target, workDir string) (string, error) {
+					branch := target.Variables[loader.VarBranch]
+					if failure == "clone" && branch == "second" {
+						return "", errors.New("injected clone failure")
+					}
+					path := filepath.Join(workDir, "repo", branch)
+					require.NoError(t, os.MkdirAll(path, 0755))
+					require.NoError(t, os.WriteFile(filepath.Join(path, "input.json"), []byte(`{}`), 0600))
+					return path, nil
+				}}
+				runner := &mockRunner{callFn: func(_ string, args []string) ([]byte, error) {
+					if failure == "tool" && filepath.Base(args[1]) == "second" {
+						return nil, errors.New("injected tool failure")
+					}
+					return []byte(conftestAllSuccessJSON), nil
+				}}
+				srv := New(ServerOptions{Runner: runner, Loader: ldr,
+					ToolChecker: func() ([]string, error) { return nil, nil }})
+				if failure == "storage" {
+					srv.opts.Allocate = func(options evidence.StorageOptions, labels ...string) (*evidence.Evaluation, error) {
+						if labels[len(labels)-1] == "second" {
+							options.Operations.Write = func(*os.File, []byte) (int, error) { return 0, errors.New("injected storage failure") }
+						}
+						return evidence.Allocate(options, labels...)
+					}
+				}
+				target := remoteTarget("", "https://example.com/org/repo")
+				target.Variables[loader.VarBranches] = order
+				target.Variables[evidence.WorkspaceVariable] = root
+				response, err := srv.Scan(context.Background(), &provider.ScanRequest{Targets: []provider.Target{target}})
+				require.NoError(t, err)
+				require.Len(t, response.Errors, 1)
+				assert.Contains(t, response.Errors[0], "@second:")
+				assert.Contains(t, response.Errors[0], "injected "+failure+" failure")
+				require.Len(t, response.Assessments, 1)
+				require.Len(t, response.Assessments[0].Evidence, 1)
+				assert.Len(t, response.MappingReferences, 1)
+				assert.Contains(t, response.Assessments[0].Evidence[0].Source.Coordinate, "/main/")
 			})
 		}
 	}
@@ -136,7 +211,7 @@ func TestScan_RejectedCloneCyclePreservesIndependentTargets(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(validClone, "input.json"), []byte(`{}`), 0600))
 		return validClone, nil
 	}}
-	srv := New(ServerOptions{Runner: runner, Loader: ldr, WorkspaceDir: workspace,
+	srv := newWorkspaceTestServer(t, ServerOptions{Runner: runner, Loader: ldr, WorkspaceDir: workspace,
 		ToolChecker: func() ([]string, error) { return nil, nil }})
 	rejected := remoteTarget("", "https://example.com/org/rejected")
 	rejected.TargetID = "rejected-target"
@@ -172,7 +247,14 @@ func TestScan_RejectedCloneCyclePreservesIndependentTargets(t *testing.T) {
 			require.NotNil(t, evidence.Source)
 			coordinates = append(coordinates, evidence.Source.Coordinate)
 		}
-		assert.ElementsMatch(t, []string{localFile, validClone}, coordinates)
+		require.Len(t, coordinates, 2)
+		assert.NotEqual(t, coordinates[0], coordinates[1])
+		for _, coordinate := range coordinates {
+			assert.Equal(t, "conftest.json", filepath.Base(coordinate))
+			stored, err := os.ReadFile(filepath.Join(workspace, coordinate))
+			require.NoError(t, err)
+			assert.Equal(t, conftestAllSuccessJSON, string(stored))
+		}
 		assert.Len(t, response.MappingReferences, 2)
 		link, err := os.Readlink(filepath.Join(rejectedClone, "cycle"))
 		require.NoError(t, err, "rejected clones must remain on disk")

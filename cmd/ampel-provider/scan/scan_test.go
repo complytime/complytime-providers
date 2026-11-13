@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/complytime/complytime-providers/cmd/ampel-provider/intoto"
-	"github.com/complytime/complytime-providers/cmd/ampel-provider/targets"
+	"github.com/complytime/complytime-providers/internal/evidence"
 )
 
 func makeTestAttestation(hash string) []byte {
@@ -277,6 +277,17 @@ func writeTempPolicy(t *testing.T, dir string) string {
 	return path
 }
 
+func testEvaluation(t *testing.T, root string) *evidence.Evaluation {
+	t.Helper()
+	identity, err := evidence.ExecutionIdentity()
+	require.NoError(t, err)
+	evaluation, err := evidence.Allocate(evidence.StorageOptions{WorkspaceRoot: root,
+		ResultsRoot: filepath.Join(root, "results"), Identity: identity}, "repo", "main", "spec")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, evaluation.Close()) })
+	return evaluation
+}
+
 func TestValidatePolicyFile(t *testing.T) {
 	t.Run("existing file", func(t *testing.T) {
 		tmpDir := t.TempDir()
@@ -306,7 +317,7 @@ func TestScanRepository_MockSuccess(t *testing.T) {
 	}
 	cfg := ScanConfig{
 		PolicyPath: writeTempPolicy(t, tmpDir),
-		OutputDir:  tmpDir,
+		Evaluation: testEvaluation(t, tmpDir),
 		SpecDir:    filepath.Join(tmpDir, "specs"),
 	}
 
@@ -316,16 +327,13 @@ func TestScanRepository_MockSuccess(t *testing.T) {
 	require.NotNil(t, result)
 	require.Equal(t, ampelOutput, result.Output)
 
-	// Verify snappy attestation was saved with spec label in filename.
-	// SanitizeSpecName includes the parent directory ("github--branch-rules").
-	specLabel := SanitizeSpecName(specPath)
-	attestationFile := filepath.Join(tmpDir, targets.SanitizeRepoURL(repo.URL)+"-main-"+specLabel+"-snappy.intoto.json")
+	// Both tool outputs belong to the explicitly supplied evaluation.
+	attestationFile := cfg.Evaluation.Path(evidence.SnappyFile)
 	saved, err := os.ReadFile(attestationFile)
 	require.NoError(t, err)
 	require.Equal(t, attestation, saved)
 
-	// Verify ampel verify result was saved with spec label in filename
-	ampelResultFile := filepath.Join(tmpDir, targets.SanitizeRepoURL(repo.URL)+"-main-"+specLabel+"-ampel.intoto.json")
+	ampelResultFile := cfg.Evaluation.Path(evidence.AmpelFile)
 	savedAmpel, err := os.ReadFile(ampelResultFile)
 	require.NoError(t, err)
 	require.Equal(t, ampelOutput, savedAmpel)
@@ -346,7 +354,7 @@ func TestScanRepository_GitLabSupported(t *testing.T) {
 	}
 	cfg := ScanConfig{
 		PolicyPath: writeTempPolicy(t, tmpDir),
-		OutputDir:  tmpDir,
+		Evaluation: testEvaluation(t, tmpDir),
 		SpecDir:    t.TempDir(),
 	}
 
@@ -364,7 +372,7 @@ func TestScanRepository_SnappyError(t *testing.T) {
 	repo := RepoTarget{URL: "https://github.com/myorg/myrepo", Platform: "github"}
 	cfg := ScanConfig{
 		PolicyPath: writeTempPolicy(t, tmpDir),
-		OutputDir:  tmpDir,
+		Evaluation: testEvaluation(t, tmpDir),
 		SpecDir:    t.TempDir(),
 	}
 
@@ -385,7 +393,7 @@ func TestScanRepository_AmpelExitError_SavesResult(t *testing.T) {
 	repo := RepoTarget{URL: "https://github.com/myorg/myrepo", Platform: "github"}
 	cfg := ScanConfig{
 		PolicyPath: writeTempPolicy(t, tmpDir),
-		OutputDir:  tmpDir,
+		Evaluation: testEvaluation(t, tmpDir),
 		SpecDir:    t.TempDir(),
 	}
 
@@ -396,8 +404,7 @@ func TestScanRepository_AmpelExitError_SavesResult(t *testing.T) {
 	require.Equal(t, ampelOutput, result.Output)
 
 	// Verify ampel intoto file was saved despite non-zero exit
-	specLabel := SanitizeSpecName(specPath)
-	ampelResultFile := filepath.Join(tmpDir, targets.SanitizeRepoURL(repo.URL)+"-main-"+specLabel+"-ampel.intoto.json")
+	ampelResultFile := cfg.Evaluation.Path(evidence.AmpelFile)
 	saved, err := os.ReadFile(ampelResultFile)
 	require.NoError(t, err)
 	require.Equal(t, ampelOutput, saved)
@@ -413,7 +420,7 @@ func TestScanRepository_AmpelNonExecError(t *testing.T) {
 	repo := RepoTarget{URL: "https://github.com/myorg/myrepo", Platform: "github"}
 	cfg := ScanConfig{
 		PolicyPath: writeTempPolicy(t, tmpDir),
-		OutputDir:  tmpDir,
+		Evaluation: testEvaluation(t, tmpDir),
 		SpecDir:    t.TempDir(),
 	}
 
@@ -431,7 +438,7 @@ func TestScanRepository_InvalidAttestationHash(t *testing.T) {
 	repo := RepoTarget{URL: "https://github.com/myorg/myrepo", Platform: "github"}
 	cfg := ScanConfig{
 		PolicyPath: writeTempPolicy(t, tmpDir),
-		OutputDir:  tmpDir,
+		Evaluation: testEvaluation(t, tmpDir),
 		SpecDir:    t.TempDir(),
 	}
 
@@ -456,7 +463,7 @@ func TestScanRepository_WithAccessToken_GitHub(t *testing.T) {
 	}
 	cfg := ScanConfig{
 		PolicyPath: writeTempPolicy(t, tmpDir),
-		OutputDir:  tmpDir,
+		Evaluation: testEvaluation(t, tmpDir),
 		SpecDir:    t.TempDir(),
 	}
 
@@ -492,7 +499,7 @@ func TestScanRepository_WithAccessToken_GitLab(t *testing.T) {
 	}
 	cfg := ScanConfig{
 		PolicyPath: writeTempPolicy(t, tmpDir),
-		OutputDir:  tmpDir,
+		Evaluation: testEvaluation(t, tmpDir),
 		SpecDir:    t.TempDir(),
 	}
 
@@ -527,7 +534,7 @@ func TestScanRepository_NoAccessToken_UsesRun(t *testing.T) {
 	}
 	cfg := ScanConfig{
 		PolicyPath: writeTempPolicy(t, tmpDir),
-		OutputDir:  tmpDir,
+		Evaluation: testEvaluation(t, tmpDir),
 		SpecDir:    t.TempDir(),
 	}
 
@@ -547,7 +554,7 @@ func TestScanRepository_MissingPolicyFile(t *testing.T) {
 	repo := RepoTarget{URL: "https://github.com/myorg/myrepo", Platform: "github"}
 	cfg := ScanConfig{
 		PolicyPath: filepath.Join(tmpDir, "nonexistent-policy.json"),
-		OutputDir:  tmpDir,
+		Evaluation: testEvaluation(t, tmpDir),
 		SpecDir:    t.TempDir(),
 	}
 
@@ -568,7 +575,7 @@ func TestScanRepository_AmpelExitError_NoResultFile(t *testing.T) {
 	repo := RepoTarget{URL: "https://github.com/myorg/myrepo", Platform: "github"}
 	cfg := ScanConfig{
 		PolicyPath: writeTempPolicy(t, tmpDir),
-		OutputDir:  tmpDir,
+		Evaluation: testEvaluation(t, tmpDir),
 		SpecDir:    t.TempDir(),
 	}
 
