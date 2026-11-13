@@ -117,9 +117,9 @@ error while adding the new finalization errors from D6/D9.
 
 ## 3. OpenSCAP retention
 
-- [ ] 3.1 Replace Scan-time global result-path use with explicitly threaded evaluation ARF/XCCDF paths through command construction, parsing, digesting, and response construction; verify commands and readers use the same allocated paths without mutating package globals.
-- [ ] 3.2 Attempt to record request target, observed ARF target, profile, datastream, and tailoring context, and build instance-qualified ARF references; verify a three-scan regression preserves prior ARFs and digests, including valid noncompliant results and an evaluation crossing a timestamp boundary.
-- [ ] 3.3 Add operational-error tests for allocation, missing/invalid required outputs, and digest failures; verify no prior fixed-path ARF is reused, incomplete evaluations publish no evidence, and metadata failures warn without suppressing complete evidence.
+- [x] 3.1 Replace Scan-time global result-path use with explicitly threaded evaluation ARF/XCCDF paths through command construction, parsing, digesting, and response construction; verify commands and readers use the same allocated paths without mutating package globals.
+- [x] 3.2 Attempt to record request target, observed ARF target, profile, datastream, and tailoring context, and build instance-qualified ARF references; verify a three-scan regression preserves prior ARFs and digests, including valid noncompliant results and an evaluation crossing a timestamp boundary.
+- [x] 3.3 Add operational-error tests for allocation, missing/invalid required outputs, and digest failures; verify no prior fixed-path ARF is reused, incomplete evaluations publish no evidence, and metadata failures warn without suppressing complete evidence.
 - [ ] 3.4 Update OpenSCAP man-page FILES/EVIDENCE sections with target/profile
   grouping, retained ARF semantics, and changed coordinate/ID forms marked as
   breaking. Document execution-account ownership, approved modes and parent

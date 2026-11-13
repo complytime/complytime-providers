@@ -17,6 +17,8 @@ import (
 	"github.com/antchfx/xmlquery"
 	"github.com/complytime/complyctl/pkg/provider"
 	"github.com/hashicorp/go-hclog"
+
+	"github.com/complytime/complytime-providers/internal/evidence"
 )
 
 const (
@@ -28,7 +30,16 @@ const (
 	DefaultSystemInfoFile string = "/etc/os-release"
 	DatastreamsDirEnvVar  string = "SSG_CONTENT_DIR"
 	SystemInfoFileEnvVar  string = "OS_RELEASE_FILE"
+	TailoringFile         string = "tailoring.xml"
 )
+
+// StorageOptions supplies the resolved provider results root and execution account
+// without changing legacy package globals. Workspace must be resolved per RPC.
+func StorageOptions(workspace string, identity evidence.Identity) evidence.StorageOptions {
+	return evidence.StorageOptions{WorkspaceRoot: workspace,
+		ResultsRoot: filepath.Join(workspace, provider.WorkspaceDir, ProviderDir, ResultsDir),
+		Identity:    identity}
+}
 
 // getDatastreamsDir returns the directory containing SSG datastream files.
 // Checks SSG_CONTENT_DIR environment variable first, falls back to default.
@@ -88,12 +99,12 @@ func cpeMatches(systemCPE, datastreamCPE string) bool {
 	return true
 }
 
-// Resolved convention-based file paths. These are constants — the provider
-// always reads/writes to these locations under the workspace directory.
+// Legacy convention-based paths remain for compatibility with existing files.
+// New evaluations use explicitly allocated paths and never refresh these results.
 var (
-	PolicyPath  = filepath.Join(provider.WorkspaceDir, ProviderDir, PolicyDir, "tailoring.xml")
-	ResultsPath = filepath.Join(provider.WorkspaceDir, ProviderDir, ResultsDir, "results.xml")
-	ARFPath     = filepath.Join(provider.WorkspaceDir, ProviderDir, ResultsDir, "arf.xml")
+	PolicyPath  = filepath.Join(provider.WorkspaceDir, ProviderDir, PolicyDir, TailoringFile)
+	ResultsPath = filepath.Join(provider.WorkspaceDir, ProviderDir, ResultsDir, evidence.XCCDFFile)
+	ARFPath     = filepath.Join(provider.WorkspaceDir, ProviderDir, ResultsDir, evidence.ARFFile)
 )
 
 // EnsureDirectories creates the provider workspace directory structure.
@@ -118,7 +129,7 @@ func EnsureDirectories() error {
 // path is empty.
 func ResolveDatastream(path string) (string, error) {
 	if path == "" {
-		return findMatchingDatastream()
+		return findMatchingDatastream(WorkspaceConfig{})
 	}
 
 	cleanPath, err := SanitizePath(path)
@@ -237,8 +248,7 @@ func extractCPEFromOsRelease(r io.Reader) (string, error) {
 }
 
 // getSystemCPE returns the CPE_NAME from the system's os-release file.
-func getSystemCPE() (string, error) {
-	systemInfoFile := getSystemInfoFile()
+func getSystemCPE(systemInfoFile string) (string, error) {
 	file, err := os.Open(systemInfoFile)
 	if err != nil {
 		return "", fmt.Errorf("failed to open %s: %w", systemInfoFile, err)
@@ -339,13 +349,13 @@ func matchDatastreamByCPE(fsys fs.FS, systemCPE, datastreamDir string) (string, 
 
 // findMatchingDatastream auto-detects the appropriate SSG datastream by
 // matching the system's CPE_NAME against CPE entries in datastream files.
-func findMatchingDatastream() (string, error) {
-	systemCPE, err := getSystemCPE()
+func findMatchingDatastream(cfg WorkspaceConfig) (string, error) {
+	systemCPE, err := getSystemCPE(cfg.Path(getSystemInfoFile()))
 	if err != nil {
 		return "", fmt.Errorf("failed to determine system CPE: %w. Set variables.datastream explicitly to override auto-detection", err)
 	}
 
-	datastreamDir := getDatastreamsDir()
+	datastreamDir := cfg.Path(getDatastreamsDir())
 
 	// Check if directory exists
 	if _, err := os.Stat(datastreamDir); err != nil {
