@@ -6,18 +6,30 @@ to bypass or edit quality/governance gates.
 
 ## 1. Reviewed prerequisites
 
-- [ ] 1.1 Verify the companion complyctl change has merged and its full
+- [x] 1.1 Verify the companion complyctl change has merged and its full
   immutable commit supplies mapped evidence checks and
   `COMPLYCTL_BIN_DIR`; record the verified commit and interface before
   writing a harness pin, without inventing an unmerged revision.
-- [ ] 1.2 Obtain maintainer resolution of the historical-harness
-  protection in the existing diagnostic test and prior design; verify
-  the reviewed resolution preserves released-host validation. Stop
-  affected implementation while unresolved; do not rename around it.
-- [ ] 1.3 Check this delta against the completed unpromoted
+  Verified 2026-11-13: approved complyctl PR #975 merged as
+  `3cdfdd2a4f2d66f186b91e8558710d07e6df6413`. GitHub tree hashes for
+  the integration script, host-selection helper, and evidence helpers
+  match the locally inspected and offline-tested PR files.
+  `COMPLYCTL_BIN_DIR` selects both prebuilt host executables from an
+  absolute directory; assertions and fixtures remain harness-owned.
+- [x] 1.2 Record maintainer resolution of the historical-harness test
+  contract in the existing diagnostic test and prior design; preserve
+  released-host validation and review the replacement assertions with
+  implementation, without a separate prerequisite PR or gate exemption.
+  Resolved 2026-11-13 in the maintainer conversation: replace obsolete
+  dispatch assertions with stronger executed provenance checks, keep
+  the suite and all quality/governance gates enabled. See design.
+- [x] 1.3 Check this delta against the completed unpromoted
   `validate-complyctl-release-compatibility` change; record the exact
   harness-contract supersession and archive ordering without modifying
   historical artifacts or weakening baseline/dependency requirements.
+  Recorded in design: supersede only the release-owned harness decision
+  at the earlier design's lines 103-113; reconcile the older change
+  before promotion and never promote its obsolete contract afterward.
 
 ## 2. Canonical harness preparation
 

@@ -103,27 +103,40 @@ tokens through the canonical harness's existing token handling.
 Do not collapse a harness checkout failure into release resolution,
 or label a real provider/evidence failure as a preparation failure.
 
-### Resolve the historical-harness protection before implementation
+### Replace the historical test contract with provenance protections
 
 The existing diagnostic test requires the exact historical Make
 invocation and rejects `_compatibility_harness`. These checks express
 the earlier contract; choosing another directory name to evade them
 would violate their intent.
 
-The maintainer confirmed during exploration that current complyctl
-owns the authoritative assertions while the selected release remains
-the implementation tested. This establishes design intent, not an
-automatic exemption from the repository's gatekeeping rule. A
-maintainer must resolve the existing protection in a reviewed change
-before an implementation agent can replace the historical invocation.
-Stop if that resolution has not occurred. Do not remove the tests,
-change CI flags, or alter quality/governance policy to obtain a pass.
+On 2026-11-13, after discussing the exact assertion and the merged
+complyctl PR #975, the maintainer directed this change to proceed.
+The resolution is to replace the ordinary historical-dispatch test
+contract alongside its intentional behavior change, with review of
+the replacement in this implementation PR. No separate prerequisite
+PR or quality/governance exemption is required. The earlier stop
+condition is resolved by this maintainer decision, not by renaming
+the harness checkout or treating the companion merge as approval.
+
+Keep the diagnostic suite enabled. Do not change CI flags, timeouts,
+permissions, quality thresholds, or quality/governance policy. Replace
+only the obsolete historical-dispatch assertions and add executed
+host-provenance and failure-propagation regressions in the same change.
 
 Preserve their useful guarantees through stronger execution coverage:
 the released checkout remains exact, providers use its dependency,
 the released host and registry actually execute, and any integration
 failure remains a job failure. This planning change does not edit
 those existing tests, the old spec artifacts, or any workflow.
+
+This supersedes the release-owned harness decision at
+`validate-complyctl-release-compatibility/design.md:103-113`, not
+the released checkout identity, dependency validation, build/test,
+or failure requirements. Preserve the older artifacts as history.
+Before spec promotion, reconcile the older change first so its
+historical-harness requirement cannot overwrite this replacement;
+do not independently promote the older contract after this change.
 
 ### Prove wiring by executing it, not matching YAML alone
 
@@ -144,8 +157,9 @@ these behavior tests and verify step ordering and permissions.
 
 ## Risks / Trade-offs
 
-- [Existing protection blocks wiring] -> Leave the implementation
-  task blocked pending maintainer handling; never rename around it.
+- [Historical test contract conflicts with wiring] -> Replace it under
+  the recorded maintainer decision with execution-based provenance
+  protections; never disable the suite or rename around the assertions.
 - [Pinned assertions age] -> Refresh via reviewed immutable pins,
   recording host compatibility and execution-test results each time.
 - [A new harness silently requires a newer host] -> Run the released
@@ -164,8 +178,8 @@ these behavior tests and verify step ordering and permissions.
    from the provider retention implementation.
 2. Wait for the companion complyctl harness PR to merge. Verify and
    record its full commit as the initial canonical harness pin.
-3. Obtain maintainer resolution of the historical-harness protection;
-   until then, implementation of affected wiring is blocked.
+3. Record the maintainer's test-contract resolution above and commit/push
+   this clarification before implementing the affected wiring.
 4. Implement harness checkout/preparation and explicit host dispatch,
    preserving the resolver and provider dependency/build checks.
 5. Run all baseline shell suites, added execution regressions, workflow
