@@ -5,7 +5,6 @@ package results
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -424,51 +423,16 @@ func TestParseAmpelOutput_OversizedGuidance(t *testing.T) {
 	require.Contains(t, err.Error(), "guidance field exceeds maximum size")
 }
 
-func TestWritePerRepoResult(t *testing.T) {
-	dir := t.TempDir()
-	result := &PerRepoResult{
-		Repository: "https://github.com/myorg/repo1",
-		Branch:     "main",
-		Status:     "pass",
-		Findings: []Finding{
-			{TenetID: "t1", Title: "Test", Result: "pass", Reason: "OK"},
-		},
-	}
-	err := WritePerRepoResult(result, dir)
-	require.NoError(t, err)
-
-	files, err := os.ReadDir(dir)
-	require.NoError(t, err)
-	require.Len(t, files, 1)
-	require.Contains(t, files[0].Name(), "myorg-repo1-main.json")
-}
-
-func TestWritePerRepoResult_Overwrites(t *testing.T) {
-	dir := t.TempDir()
-	r1 := &PerRepoResult{Repository: "https://github.com/org/repo", Branch: "main", Status: "pass"}
-	r2 := &PerRepoResult{Repository: "https://github.com/org/repo", Branch: "main", Status: "fail"}
-
-	require.NoError(t, WritePerRepoResult(r1, dir))
-	require.NoError(t, WritePerRepoResult(r2, dir))
-
-	files, err := os.ReadDir(dir)
-	require.NoError(t, err)
-	require.Len(t, files, 1)
-
-	data, err := os.ReadFile(filepath.Join(dir, files[0].Name()))
-	require.NoError(t, err)
-	require.Contains(t, string(data), `"fail"`)
-}
-
-func TestWritePerRepoResult_InvalidDir(t *testing.T) {
+func TestToScanResponse_OperationalFailureHasNoSummaryOrEvidence(t *testing.T) {
 	result := &PerRepoResult{
 		Repository: "https://github.com/org/repo",
 		Branch:     "main",
-		Status:     "pass",
+		Status:     "error", Error: "required artifact write failed",
 	}
-	err := WritePerRepoResult(result, "/dev/null/impossible")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "creating results directory")
+	response := ToScanResponse([]*PerRepoResult{result}, nil)
+	require.Len(t, response.Errors, 1)
+	require.Empty(t, response.Assessments)
+	require.Empty(t, response.MappingReferences)
 }
 
 func TestToScanResponse(t *testing.T) {

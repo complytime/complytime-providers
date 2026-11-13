@@ -34,8 +34,8 @@ var embeddedSpecs embed.FS
 // ScanConfig holds configuration for scanning a repository.
 type ScanConfig struct {
 	PolicyPath string
-	OutputDir  string
 	SpecDir    string
+	Evaluation *evidence.Evaluation
 }
 
 // RawScanResult holds the raw output from an AMPEL verify operation.
@@ -52,17 +52,19 @@ type CommandRunner interface {
 }
 
 // ExecRunner executes commands using os/exec.
-type ExecRunner struct{}
+type ExecRunner struct{ WorkingDirectory string }
 
 // Run executes the named command with the given arguments.
 func (r ExecRunner) Run(name string, args ...string) ([]byte, error) {
 	cmd := exec.Command(name, args...)
+	cmd.Dir = r.WorkingDirectory
 	return cmd.CombinedOutput()
 }
 
 // RunWithEnv executes the named command with a custom environment.
 func (r ExecRunner) RunWithEnv(env []string, name string, args ...string) ([]byte, error) {
 	cmd := exec.Command(name, args...)
+	cmd.Dir = r.WorkingDirectory
 	cmd.Env = env
 	return cmd.CombinedOutput()
 }
@@ -270,8 +272,9 @@ func ScanRepository(repo RepoTarget, branch, specPath string, cfg ScanConfig, ru
 		host = parsedURL.Hostname()
 	}
 
-	specLabel := SanitizeSpecName(specPath)
-	filePrefix := targets.SanitizeRepoURL(repo.URL) + "-" + branch + "-" + specLabel
+	if cfg.Evaluation == nil {
+		return nil, fmt.Errorf("evaluation storage is required")
+	}
 
 	// Run snappy to collect branch protection data as an in-toto attestation
 	snappyArgs := constructSnappyCommand(platform, host, org, repoName, branch, specPath)
@@ -289,13 +292,17 @@ func ScanRepository(repo RepoTarget, branch, specPath string, cfg ScanConfig, ru
 	}
 
 	// Save snappy attestation as in-toto file
-	attestationFile := filepath.Join(cfg.OutputDir, filePrefix+"-snappy.intoto.json")
-	if err := os.WriteFile(attestationFile, attestationData, 0600); err != nil { // #nosec G703 -- attestationFile path is constructed from validated inputs
+	if err := cfg.Evaluation.Write(evidence.SnappyFile, attestationData); err != nil {
 		return nil, fmt.Errorf("writing attestation for %s branch %s: %w", repo.URL, branch, err)
 	}
+	snappyArtifact, err := cfg.Evaluation.Read(evidence.SnappyFile)
+	if err != nil {
+		return nil, fmt.Errorf("reading snappy attestation: %w", err)
+	}
+	attestationFile := snappyArtifact.Path
 
 	// Extract subject hash from the attestation
-	subjectHash, err := extractSubjectHash(attestationData)
+	subjectHash, err := extractSubjectHash(snappyArtifact.Data)
 	if err != nil {
 		return nil, fmt.Errorf("extracting subject hash for %s branch %s: %w", repo.URL, branch, err)
 	}
@@ -307,7 +314,10 @@ func ScanRepository(repo RepoTarget, branch, specPath string, cfg ScanConfig, ru
 	// Run ampel verify with the subject hash, policy, and attestation.
 	// ampel writes the in-toto attestation with results to resultsPath.
 	// A non-zero exit code means policy checks failed, not a tool error.
-	ampelResultFile := filepath.Join(cfg.OutputDir, filePrefix+"-ampel.intoto.json")
+	ampelResultFile, err := cfg.Evaluation.Prepare(evidence.AmpelFile)
+	if err != nil {
+		return nil, fmt.Errorf("reserving ampel results: %w", err)
+	}
 	ampelArgs := constructAmpelVerifyCommand(subjectHash, cfg.PolicyPath, attestationFile, ampelResultFile)
 	logger.Info("running ampel verify", "repo", repo.URL, "branch", branch, "spec", specPath, "subject", subjectHash)
 	ampelCmdOutput, err := runner.Run(ampelArgs[0], ampelArgs[1:]...)
@@ -323,13 +333,16 @@ func ScanRepository(repo RepoTarget, branch, specPath string, cfg ScanConfig, ru
 	}
 
 	// Read the in-toto attestation written by ampel
-	ampelOut, err := os.ReadFile(ampelResultFile)
+	ampelArtifact, err := cfg.Evaluation.Read(evidence.AmpelFile)
 	if err != nil {
 		return nil, fmt.Errorf("reading ampel results for %s branch %s: %w (ampel output: %s)", repo.URL, branch, err, string(ampelCmdOutput))
 	}
+	if len(ampelArtifact.Data) == 0 {
+		return nil, fmt.Errorf("reading ampel results: required output is empty (ampel output: %s)", ampelCmdOutput)
+	}
 
 	return &RawScanResult{
-		Output:                ampelOut,
+		Output:                ampelArtifact.Data,
 		AmpelAttestationPath:  ampelResultFile,
 		SnappyAttestationPath: attestationFile,
 	}, nil
