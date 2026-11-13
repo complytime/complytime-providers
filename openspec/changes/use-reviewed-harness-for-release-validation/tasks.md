@@ -87,14 +87,19 @@ to bypass or edit quality/governance gates.
 
 ## 5. Live verification and review
 
-- [ ] 5.1 Run real retained-provider integration against the selected
+- [x] 5.1 Run real retained-provider integration against the selected
   unchanged released host through the pinned canonical harness; record
   host/provider/harness revisions, tool versions, mapped evidence
   results, and the unmodified released source identity.
-- [ ] 5.2 Verify the separate main-consumer job still completes its
+  Agent-executed local acceptance passed against v1.2.0 and main using
+  PR #238's retained providers, including two-scan history validation.
+  Exact revisions, tools, logs, and snapshots are in verification.md.
+- [x] 5.2 Verify the separate main-consumer job still completes its
   Ampel/OPA assertions; record its host revision independently and do
   not use its success to stand in for task 5.1.
-- [ ] 5.3 Validate this change strictly and complete required pre-PR
+  PR #241 CI passed 19 assertions independently on each host. Main
+  resolved to 3cdfdd2a; released v1.2.0 resolved to f10c1426.
+- [x] 5.3 Validate this change strictly and complete required pre-PR
   review; verify all blocking findings are resolved and no subsequent
   implementation changes invalidate final approval. Missing live
   prerequisites leave affected verification tasks incomplete.

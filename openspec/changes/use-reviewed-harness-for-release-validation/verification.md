@@ -78,34 +78,127 @@ the entire main-consumer job is unchanged. Workflow permissions are
 unchanged, actions remain full-SHA pinned, no continue-on-error was added,
 and the provider Make target still enforces its 120-second bound.
 
-## Verification still required
+## PR #241 CI verification
 
-`GITHUB_TOKEN` is not set in this session. No credentials were retrieved
-from another source. Tasks 5.1 and 5.2 remain incomplete: no real retained
-provider scan was run against either the released host or main. Earlier
-companion-PR results and local offline fixtures do not establish those
-results for this provider change.
+All GitHub Actions workflows passed for provider PR head
+`22c81fb75d0a09a5c2f9c121a1191e1fb5ca9783`. Actions tested GitHub's
+merge commit `04e7036bf30d84a3d8e6c250e2c89135eecc6536` against
+base `d8d9107e9c5b1af5fe78de699b7e745fd67c558a`.
 
-Before completion, run the real released-host job with the pinned harness
-and separately run the unchanged main-consumer job. Record actual provider,
-host, and harness revisions, tool versions, mapped evidence results, and
-released source identity. The workflow-derived isolated released build
-and tests passed above with real Go tools, but do not replace live scans.
+- [Released-host job][released-job]: v1.2.0 at
+  `f10c1426f3674bbcb967a8aad8ca529b32e21212`, canonical harness
+  `3cdfdd2a4f2d66f186b91e8558710d07e6df6413`: 19 assertions passed,
+  zero failed. Isolated released-dependency builds/tests and the actual
+  integration step succeeded, not skipped.
+- [Independent main-host job][main-job]: host and harness at
+  `3cdfdd2a4f2d66f186b91e8558710d07e6df6413`: 19 assertions passed,
+  zero failed.
+- Both logs show real Ampel/Snappy mapped-evidence validation and OPA
+  failing/compliant fixtures. These CI providers used legacy artifact
+  paths; these results alone do not prove retention across evaluations.
+- Build/unit tests, linters, security scans, CRAP analysis, action-version
+  verification, SonarCloud, RPM builds, and reported Testing Farm jobs
+  passed. Dependabot-only jobs skipped; two auxiliary annotations were
+  neutral. No failed or pending checks remained when last inspected.
 
-Task 5.3 remains open: strict validation passed, but required pre-PR
-review council has not run. At the maintainer's request to open a PR,
-the council command and dispatch skill were loaded. Tool discovery did
-not expose its required `capture_review_diff`, `plan_review_dispatch`,
-or `dispatch_review_runs` tools. No reviewer sessions were launched,
-no council approval or finalization artifact was produced, and no PR
-was opened. The available native subagent and forge-review tools are
-not substitutes for the command's required dispatch policy.
+## Agent-executed retained-provider acceptance
 
-The maintainer intends to run pending live local checks after PR
-creation; keep those tasks open and report CI results independently.
-Council review must first run in a runtime providing its required tools.
-Do not submit or archive this implementation as complete until live
-prerequisites and review are satisfied.
+On 2026-11-13, the maintainer explicitly authorized managing local tests
+and using existing `gh` authentication on their behalf. The token was
+retrieved into memory and passed only through credentialed test-process
+environments, not printed or saved by the test driver. Earlier missing
+`GITHUB_TOKEN` reports describe the initial blocked attempt, not a remaining
+verification blocker.
+
+Disposable local clones under
+`/tmp/opencode/retained-acceptance.4Jl9HD/` used these immutable revisions:
+
+| Component | Revision |
+| --- | --- |
+| Retained providers from PR #238 | `d59b46ae86bcf5ff801cd524d51137faa8fd1e20` |
+| Canonical assertions/fixtures | `3cdfdd2a4f2d66f186b91e8558710d07e6df6413` |
+| Released host v1.2.0 | `f10c1426f3674bbcb967a8aad8ca529b32e21212` |
+| Main host, matching PR #241 CI | `3cdfdd2a4f2d66f186b91e8558710d07e6df6413` |
+| Provider dispatch helpers from PR #241 | `22c81fb75d0a09a5c2f9c121a1191e1fb5ca9783` |
+
+Both host checkouts ran `make build`. Each of two separate retained-provider
+checkouts replaced its complyctl module with its matching host checkout,
+ran `go mod tidy`, and passed `GOFLAGS=-mod=mod make build` and
+`GOFLAGS=-mod=mod make test`. Original working trees were untouched.
+Host tracked source and provider `cmd/`/`internal/` source remained clean.
+
+The released-provider clone additionally received only the two provider
+preparation/dispatch helpers from PR #241 as an explicit temporary test
+layer; its Makefile and provider implementation were not patched. The
+released integration executed that dispatcher and the provider Make target.
+The main integration executed its provider Make target with explicit
+`COMPLYCTL_BIN_DIR`. Both used the same pinned canonical script and fixtures,
+both actually ran with PR #238 providers, and both passed 19 assertions with
+zero failures. Verified artifacts used distinct `evaluation-*` directories,
+not legacy aliases. No copied or patched complyctl harness was used.
+
+For each host, a separate persistent workspace and isolated HOME/XDG paths
+then ran real Get, Generate, and two Ampel Scan invocations. Each invocation's
+reported JSON EvaluationLog was selected with `select_evaluation_log` and
+copied immediately into snapshot A or B, avoiding report-filename collisions.
+After scan B, the canonical `validate_evidence_history` succeeded on both
+snapshots. Independent calls to `validate_mapped_evidence` and byte hashing
+also confirmed all four Ampel/Snappy artifacts per host still existed with
+their recorded SHA-256 digests. A/B evidence IDs, references, coordinates,
+and resolved paths remained independently addressable.
+
+These are actual credentialed evaluations, not fixture assertions or
+maintainer-reported results. Both owned mock registries were terminated and
+waited for after testing. Persistent history workspaces and snapshots remain
+available for inspection; canonical integration's temporary workspaces were
+cleaned by its normal exit trap.
+
+Local tools: Go `go1.26.10-X:nodwarf5 linux/amd64`; Snappy module v0.2.6;
+Ampel module v1.4.2; Conftest module v0.68.2. Module identities were read
+from the actual executable build metadata with `go version -m`, not inferred
+from source or required as a runtime compatibility gate.
+
+Evidence under the private acceptance directory:
+
+- `preparation.json`: exact build/test commands, results, and tool metadata.
+- `live-integration.json` and `logs/{released,main}-live-integration.log`:
+  actual integration outcomes and verified retained artifact paths.
+- `history-results.json`: post-second-scan evidence records and digests.
+- `{released,main}-history/snapshots/evaluation-{A,B}.json`: log snapshots.
+- `{released,main}-history/`: scan output, history-check logs, and retained
+  workspace artifacts for independent revalidation.
+
+The retained provider implementation remains a separate PR; these combined
+acceptance results do not imply PR #238 has merged into PR #241.
+
+## Pre-PR council and remaining human review
+
+The initial plugin-backed command could not start because its required UF
+tools were unavailable. After the maintainer updated the local review commands,
+native execution completed before opening draft PR #241: Adversary, Architect,
+Curator, Guard, and SRE each returned a successful assessment. The result was
+APPROVE WITH ADVISORIES with no HIGH/CRITICAL findings. Every reviewer used
+the verified inherited `complytime/gpt-6.1-sol#default` runtime identity.
+Testing was skipped by scope policy; content-only personas were excluded.
+
+The native record is retained at
+`.uf/workflows/uf.review-council/945e07cd-7b74-4535-baf6-c12c1e78576f/state.json`.
+It is native evidence, not a plugin-validated canonical artifact. Gaze's wait
+request failed before a final report; its child was explicitly interrupted and
+verified terminal with no pending work. Gaze was not counted as successful.
+
+Four nonblocking documentation/workflow advisories were recorded. This
+verification update resolves stale guidance about plugin-only prerequisites.
+The other advisories concern separate, uncommitted native-command migration
+work, which is not included or modified here. No implementation source changed
+after council approval; this follow-up updates verification bookkeeping only.
+
+Tasks 5.1-5.3 now have executed evidence. Required human maintainer reviews,
+draft readiness/merge, and reconciliation of the older unpromoted capability
+before archive remain separate follow-up actions, not claims of test coverage.
+
+[released-job]: https://github.com/complytime/complytime-providers/actions/runs/43435940192/job/131921128668
+[main-job]: https://github.com/complytime/complytime-providers/actions/runs/43435940192/job/131920957547
 
 ## Documentation impact
 
