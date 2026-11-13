@@ -11,6 +11,10 @@
 
 ### Fixed
 
+- **ci**: Validate the unchanged released complyctl host with a separately pinned,
+  reviewed canonical harness so evidence assertions no longer depend on historical
+  filename assumptions. Preserve released dependency/build/test validation and report
+  host/harness provenance separately; offline execution tests reject wrong-host fallback.
 - **ci**: Reject indirect, excluded, and replacement-only complyctl entries when resolving the
   release baseline, report module parse failures with stage context, restore Renovate tracking
   for the checksum-pinned Conftest release, and fix the shell-test lint failure.

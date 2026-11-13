@@ -33,55 +33,55 @@ to bypass or edit quality/governance gates.
 
 ## 2. Canonical harness preparation
 
-- [ ] 2.1 Add the verified immutable canonical harness pin and separate
+- [x] 2.1 Add the verified immutable canonical harness pin and separate
   checkout to the released-baseline job (FR-002); verify checkout HEAD
   matches the pin and no mutable or historical fallback is possible.
-- [ ] 2.2 Add focused preparation validation for the harness script,
+- [x] 2.2 Add focused preparation validation for the harness script,
   fixture root, and host-selection interface; verify offline positive,
   missing-path, wrong-revision, and unsupported-interface cases.
-- [ ] 2.3 Report the released tag/commit and canonical harness commit
+- [x] 2.3 Report the released tag/commit and canonical harness commit
   in logs and the job summary (FR-006); verify diagnostics tests retain
   stage categories and identify harness preparation separately.
-- [ ] 2.4 Document pin provenance and the reviewed refresh procedure in
+- [x] 2.4 Document pin provenance and the reviewed refresh procedure in
   existing integration/contributor guidance; verify the documented
   pin names a merged commit and both revision identities are clear.
 
 ## 3. Released host dispatch and behavior tests
 
-- [ ] 3.1 After task 1.2 is resolved, dispatch via the provider Make
+- [x] 3.1 After task 1.2 is resolved, dispatch via the provider Make
   target with canonical `COMPLYCTL_DIR`, absolute released
   `COMPLYCTL_BIN_DIR`, and isolated provider binaries (FR-003/004);
   verify an executed fixture trace identifies the intended inputs.
-- [ ] 3.2 Add distinct default/released host and registry fixture
+- [x] 3.2 Add distinct default/released host and registry fixture
   executables (FR-007); verify only the released pair executes and
   neither canonical checkout nor released source is rebuilt/patched
   by the dispatch path.
-- [ ] 3.3 Add negative execution cases for missing binaries, absent
+- [x] 3.3 Add negative execution cases for missing binaries, absent
   harness, revision mismatch, and nonzero integration (FR-002/003/005);
   verify failures remain nonzero with no fallback execution.
-- [ ] 3.4 Preserve isolated released dependency replacement and all
+- [x] 3.4 Preserve isolated released dependency replacement and all
   provider build/test steps (FR-004); verify failures stop integration
   and tests reject reuse of binaries built against another host.
-- [ ] 3.5 Document local invocation and provenance inspection; verify
+- [x] 3.5 Document local invocation and provenance inspection; verify
   paths with spaces and commands use prebuilt released binaries rather
   than the historical released Make integration target.
 
 ## 4. Workflow protections and local CI parity
 
-- [ ] 4.1 Verify the maintainer-resolved diagnostic contract exists
+- [x] 4.1 Verify the maintainer-resolved diagnostic contract exists
   without disabling the suite; verify stronger host-provenance and
   failure-propagation checks pass and old requirements are explicitly
   superseded, not evaded by checkout names.
-- [ ] 4.2 Run all existing release-baseline shell suites plus the new
+- [x] 4.2 Run all existing release-baseline shell suites plus the new
   execution suite; verify resolver behavior, prerequisite rejection,
   integration failure propagation, and distinct main/released results.
-- [ ] 4.3 Run shellcheck on helpers/tests and configured yamllint and
+- [x] 4.3 Run shellcheck on helpers/tests and configured yamllint and
   actionlint on the workflow; verify action pinning, permissions,
   timeouts, jobs, and quality/governance gates are unchanged.
-- [ ] 4.4 Run workflow-derived provider build/tests and project lint;
+- [x] 4.4 Run workflow-derived provider build/tests and project lint;
   record commands and outcomes without treating missing tools or
   skipped behavioral checks as successful verification.
-- [ ] 4.5 Assess `CHANGELOG.md`, `AGENTS.md`, and `README.md`; verify
+- [x] 4.5 Assess `CHANGELOG.md`, `AGENTS.md`, and `README.md`; verify
   necessary helper/test-command and integration usage documentation is
   updated, or record why a file needs no change.
 

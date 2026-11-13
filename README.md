@@ -55,6 +55,9 @@ make test    # Run all unit tests
 make lint    # Run golangci-lint
 ```
 
+For cross-repository checks with a pinned canonical harness and prebuilt released
+complyctl binaries, see [released-host integration](docs/dev-testing-environment.md#released-host-integration).
+
 ## Project Structure
 
 ```text
