@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"path/filepath"
 
 	"github.com/antchfx/xmlquery"
 	"github.com/hashicorp/go-hclog"
@@ -94,7 +94,7 @@ func executeGeneration(ctx context.Context, configurations []provider.Assessment
 		return fmt.Errorf("directory setup failed: %w", err)
 	}
 
-	if err := writeTailoringFile(configurations, datastream, profile, cfg.PolicyPath()); err != nil {
+	if err := writeTailoringFile(configurations, datastream, profile, cfg); err != nil {
 		return err
 	}
 
@@ -105,19 +105,18 @@ func executeGeneration(ctx context.Context, configurations []provider.Assessment
 	return nil
 }
 
-func writeTailoringFile(configurations []provider.AssessmentConfiguration, datastream, profile, policyPath string) error {
+func writeTailoringFile(configurations []provider.AssessmentConfiguration, datastream, profile string, cfg config.WorkspaceConfig) error {
 	hclog.Default().Info("Generating a tailoring file")
 	tailoringXML, err := xccdf.PolicyToXML(configurations, datastream, profile)
 	if err != nil {
 		return fmt.Errorf("tailoring generation failed: %w", err)
 	}
 
-	dst, err := os.Create(policyPath)
+	relative, err := filepath.Rel(cfg.Root, cfg.PolicyPath())
 	if err != nil {
-		return fmt.Errorf("failed to create policy file: %w", err)
+		return fmt.Errorf("resolving policy file: %w", err)
 	}
-	_, writeErr := dst.WriteString(tailoringXML)
-	if err := errors.Join(writeErr, dst.Close()); err != nil {
+	if err := evidence.ReplaceFile(cfg.Root, relative, []byte(tailoringXML)); err != nil {
 		return fmt.Errorf("failed to save policy file: %w", err)
 	}
 	return nil

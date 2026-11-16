@@ -134,7 +134,15 @@ func ParseAmpelOutput(raw []byte, repo, branch string) (*PerRepoResult, error) {
 	if err := json.Unmarshal(raw, &stmt); err != nil {
 		return nil, fmt.Errorf("parsing ampel verify attestation: %w", err)
 	}
-	if stmt.Predicate.Status == "" && stmt.Predicate.Error == nil {
+	status := strings.ToUpper(strings.TrimSpace(stripControlChars(stmt.Predicate.Status)))
+	errorMessage := ""
+	if stmt.Predicate.Error != nil {
+		if len(stmt.Predicate.Error.Message) > maxFieldSize {
+			return nil, fmt.Errorf("ampel output error field exceeds maximum size")
+		}
+		errorMessage = strings.TrimSpace(stripControlChars(stmt.Predicate.Error.Message))
+	}
+	if status == "" && errorMessage == "" {
 		return nil, fmt.Errorf("ampel attestation has no result-set status or error")
 	}
 
@@ -145,13 +153,13 @@ func ParseAmpelOutput(raw []byte, repo, branch string) (*PerRepoResult, error) {
 	}
 
 	// Handle ResultSet-level error
-	if stmt.Predicate.Error != nil && stmt.Predicate.Error.Message != "" {
-		if len(stmt.Predicate.Error.Message) > maxFieldSize {
-			return nil, fmt.Errorf("ampel output error field exceeds maximum size")
-		}
+	if errorMessage != "" {
 		result.Status = "error"
-		result.Error = stripControlChars(stmt.Predicate.Error.Message)
+		result.Error = errorMessage
 		return result, nil
+	}
+	if status != "PASS" && status != "FAIL" && status != "SKIP" {
+		return nil, fmt.Errorf("ampel attestation has unsupported result-set status")
 	}
 
 	// Extract findings from each policy result's tenet evaluations
@@ -205,7 +213,10 @@ func ParseAmpelOutput(raw []byte, repo, branch string) (*PerRepoResult, error) {
 		}
 	}
 
-	switch strings.ToUpper(stmt.Predicate.Status) {
+	if status == "FAIL" && len(result.Findings) == 0 {
+		return nil, fmt.Errorf("ampel failed result set has no findings or error")
+	}
+	switch status {
 	case "PASS":
 		result.Status = "pass"
 	case "SKIP":

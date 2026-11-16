@@ -22,6 +22,29 @@ func loadFixture(t *testing.T, path string) []byte {
 	return data
 }
 
+func TestParseAmpelOutput_RejectsMeaninglessResultSets(t *testing.T) {
+	for _, raw := range []string{
+		`{"predicate":{"error":{}}}`,
+		`{"predicate":{"status":" \t","error":{"message":"\n\t"}}}`,
+		`{"predicate":{"status":"UNKNOWN","error":{}}}`,
+		`{"predicate":{"status":"FAIL","error":{}}}`,
+	} {
+		result, err := ParseAmpelOutput([]byte(raw), "https://example.com/repo", "main")
+		require.Error(t, err, raw)
+		require.Nil(t, result)
+	}
+	result, err := ParseAmpelOutput([]byte(`{"predicate":{"error":{"message":"tool failed"}}}`),
+		"https://example.com/repo", "main")
+	require.NoError(t, err)
+	require.Equal(t, "error", result.Status)
+	require.Equal(t, "tool failed", result.Error)
+	result, err = ParseAmpelOutput(loadFixture(t, "testdata/ampel-verify-fail.json"),
+		"https://example.com/repo", "main")
+	require.NoError(t, err)
+	require.Equal(t, "fail", result.Status)
+	require.NotEmpty(t, result.Findings, "legitimate noncompliance remains an evaluation, not an operational error")
+}
+
 func TestAllFindingsSkipped(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -87,8 +87,21 @@ func (c *Config) PolicyDirForBundle(bundleRef string) string {
 	return filepath.Join(c.OpaDir(), PolicyDir, sanitized)
 }
 
-// EnsureDirectories creates all workspace subdirectories with mode 0750.
+// EnsureDirectories creates private working directories with mode 0700 and
+// ordinary retained-result context parents. Existing working leaves must already
+// be private; unrelated ancestors retain their modes and ownership.
 func (c *Config) EnsureDirectories() error {
+	root := c.WorkspaceRoot
+	if root == "" {
+		var err error
+		root, err = filepath.Abs(c.WorkspaceDir)
+		if err != nil {
+			return fmt.Errorf("resolving provider workspace: %w", err)
+		}
+		if err := os.MkdirAll(root, evidence.DirectoryMode); err != nil {
+			return fmt.Errorf("creating provider workspace: %w", err)
+		}
+	}
 	directories := []string{
 		c.OpaDir(),
 		c.PolicyDirPath(),
@@ -97,17 +110,20 @@ func (c *Config) EnsureDirectories() error {
 		c.GeneratedDirPath(),
 	}
 	for _, dir := range directories {
-		if c.WorkspaceRoot != "" {
-			relative, err := filepath.Rel(c.WorkspaceRoot, dir)
-			if err != nil {
-				return fmt.Errorf("resolving provider directory: %w", err)
-			}
-			if err := evidence.EnsureDirectories(c.WorkspaceRoot, relative); err != nil {
-				return fmt.Errorf("creating directory %s: %w", dir, err)
-			}
-			continue
+		absolute, err := filepath.Abs(dir)
+		if err != nil {
+			return fmt.Errorf("resolving provider directory: %w", err)
 		}
-		if err := os.MkdirAll(dir, 0750); err != nil {
+		relative, err := filepath.Rel(root, absolute)
+		if err != nil {
+			return fmt.Errorf("resolving provider directory: %w", err)
+		}
+		if dir == c.ResultsDirPath() {
+			err = evidence.EnsureDirectories(root, relative)
+		} else {
+			err = evidence.EnsurePrivateDirectory(root, relative)
+		}
+		if err != nil {
 			return fmt.Errorf("creating directory %s: %w", dir, err)
 		}
 	}

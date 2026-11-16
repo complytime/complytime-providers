@@ -84,7 +84,8 @@ func (s *ProviderServer) scanEvaluation(ctx context.Context, cfg config.Workspac
 	item, reference, err := evaluation.Reference(evidence.ARFFile,
 		evidence.IDOpenSCAPARF+"_", evidence.RefOpenSCAPARF+"_", evidence.TypeARF,
 		"OpenSCAP ARF scan result", fmt.Sprintf("OpenSCAP evaluation of %s with profile %s",
-			evidence.HostTargetKey(target.TargetID), profile), evidence.HostRemark())
+			evidence.DisplayContext(evidence.HostTargetKey(target.TargetID)),
+			evidence.DisplayContext(profile)), evidence.HostRemark())
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +115,7 @@ func readEvaluation(evaluation *evidence.Evaluation) (*xmlquery.Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading retained XCCDF results: %w", err)
 	}
-	if _, err := xccdf.ParseARF(bytes.NewReader(results.Data)); err != nil {
+	if _, err := xccdf.ParseResults(bytes.NewReader(results.Data)); err != nil {
 		return nil, fmt.Errorf("invalid retained XCCDF results: %w", err)
 	}
 	return node, nil

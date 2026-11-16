@@ -283,7 +283,7 @@ func TestPublicOperationalError_ExcludesCredentials(t *testing.T) {
 	locator := url.URL{Scheme: "https", Host: "example.com", Path: "/repository",
 		User: url.UserPassword("account", "url-password"), RawQuery: "token=query-token", Fragment: "private"}
 	message := publicOperationalError(fmt.Errorf("request failed for %s using access-value", locator.String()), "access-value")
-	require.Contains(t, message, "https://example.com/repository")
+	require.Contains(t, message, "provider operation failed")
 	require.Contains(t, message, "[redacted]")
 	for _, secret := range []string{"url-password", "query-token", "private", "access-value"} {
 		require.NotContains(t, message, secret)

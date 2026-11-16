@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 )
 
 var contextURLPattern = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^\s]+`)
@@ -63,6 +64,11 @@ func PublicContext(value string) string {
 	if !strings.Contains(value, "://") {
 		return value
 	}
+	// Whitespace may be part of malformed userinfo or a query value, not a
+	// boundary between safe context and a URL. Never retain an ambiguous suffix.
+	if strings.ContainsFunc(value, unicode.IsSpace) || !contextURLPattern.MatchString(value) {
+		return ""
+	}
 	return contextURLPattern.ReplaceAllStringFunc(value, func(candidate string) string {
 		parsed, err := url.Parse(candidate)
 		if err != nil {
@@ -85,7 +91,16 @@ func RemoteTargetKey(value string) string {
 	return "url:" + parsed.Host + parsed.EscapedPath()
 }
 
+// DisplayContext sanitizes one untrusted context value before it is interpolated
+// into trusted prose. URLs become scheme-independent host/path keys so the final
+// sentence cannot be mistaken for an ambiguous credential-bearing URL value.
+func DisplayContext(value string) string {
+	return contextURLPattern.ReplaceAllStringFunc(PublicContext(value), RemoteTargetKey)
+}
+
 // LocalTargetKey uses a cleaned absolute path, which is origin-specific.
+// The caller must supply an already-absolute, workspace-resolved path; this helper
+// does not resolve relative paths against the process working directory.
 func LocalTargetKey(path string) string { return "path:" + filepath.Clean(path) }
 
 // HostTargetKey identifies request targets independently of observed ARF targets.

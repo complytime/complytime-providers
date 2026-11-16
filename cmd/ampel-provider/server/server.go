@@ -308,8 +308,9 @@ func finalizeEvaluation(evaluation *evidence.Evaluation, parsed *results.PerRepo
 			return fmt.Errorf("evidence digest failed: %w", err)
 		}
 		item, reference, err := evaluation.Reference(artifact.name, artifact.prefix, artifact.prefix,
-			evidence.TypeIntotoAttestation, artifact.title+" for "+parsed.Repository+"@"+parsed.Branch,
-			"Retained in-toto attestation; collection spec: "+parsed.SpecLabel, remarks)
+			evidence.TypeIntotoAttestation, artifact.title+" for "+
+				evidence.DisplayContext(parsed.Repository)+"@"+evidence.DisplayContext(parsed.Branch),
+			"Retained in-toto attestation; collection spec: "+evidence.DisplayContext(parsed.SpecLabel), remarks)
 		if err != nil {
 			return err
 		}
@@ -324,7 +325,10 @@ func publicOperationalError(err error, accessToken string) string {
 	if accessToken != "" {
 		message = strings.ReplaceAll(message, accessToken, "[redacted]")
 	}
-	return evidence.PublicContext(message)
+	if public := evidence.PublicContext(message); public != "" {
+		return public
+	}
+	return "provider operation failed: [redacted] ambiguous URL context"
 }
 
 func resolveTargetArtifacts(

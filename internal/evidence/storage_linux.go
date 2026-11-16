@@ -193,11 +193,17 @@ func Allocate(options StorageOptions, labels ...string) (*Evaluation, error) {
 }
 
 func contextDirectory(parent *os.File, name string, open func(*os.File, string) (*os.File, error)) (*os.File, error) {
+	return directoryWithMode(parent, name, ContextDirectoryMode, open)
+}
+
+func directoryWithMode(parent *os.File, name string, mode uint32,
+	open func(*os.File, string) (*os.File, error),
+) (*os.File, error) {
 	parentFD, err := directoryDescriptor(parent)
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Mkdirat(parentFD, name, ContextDirectoryMode); err != nil &&
+	if err := syscall.Mkdirat(parentFD, name, mode); err != nil &&
 		!errors.Is(err, syscall.EEXIST) {
 		return nil, fmt.Errorf("creating evaluation context %q: %w", name, err)
 	}
@@ -212,6 +218,17 @@ func contextDirectory(parent *os.File, name string, open func(*os.File, string) 
 // without following any child symlinks. Every path must be workspace-relative and
 // local. Existing parents retain their modes and ownership; no process chdir occurs.
 func EnsureDirectories(root string, paths ...string) error {
+	return ensureDirectories(root, ContextDirectoryMode, paths...)
+}
+
+// EnsurePrivateDirectory creates a private working-directory leaf beneath root,
+// using no-follow traversal. Existing leaves must already be execution-account
+// owned with mode 0700; neither they nor unrelated ancestors are chmodded.
+func EnsurePrivateDirectory(root, path string) error {
+	return ensureDirectories(root, DirectoryMode, path)
+}
+
+func ensureDirectories(root string, leafMode uint32, paths ...string) error {
 	if !filepath.IsAbs(root) {
 		return fmt.Errorf("directory root must be absolute")
 	}
@@ -225,8 +242,13 @@ func EnsureDirectories(root string, paths ...string) error {
 		if err != nil {
 			return fmt.Errorf("opening provider workspace: %w", err)
 		}
-		for _, component := range strings.Split(filepath.Clean(path), string(filepath.Separator)) {
-			next, openErr := contextDirectory(parent, component, openDirectory)
+		components := strings.Split(filepath.Clean(path), string(filepath.Separator))
+		for index, component := range components {
+			mode := uint32(ContextDirectoryMode)
+			if index == len(components)-1 {
+				mode = leafMode
+			}
+			next, openErr := directoryWithMode(parent, component, mode, openDirectory)
 			closeErr := parent.Close()
 			if openErr != nil {
 				return openErr
@@ -235,6 +257,16 @@ func EnsureDirectories(root string, paths ...string) error {
 				return errors.Join(closeErr, next.Close())
 			}
 			parent = next
+		}
+		if leafMode == DirectoryMode {
+			info, err := parent.Stat()
+			if err != nil {
+				return errors.Join(err, parent.Close())
+			}
+			owner, ok := info.Sys().(*syscall.Stat_t)
+			if !ok || int(owner.Uid) != os.Geteuid() || info.Mode().Perm() != DirectoryMode {
+				return errors.Join(fmt.Errorf("working directory %q must be execution-account owned with mode 0700; inspect and secure it before retrying", path), parent.Close())
+			}
 		}
 		if err := parent.Close(); err != nil {
 			return fmt.Errorf("closing provider directory: %w", err)
@@ -296,6 +328,9 @@ func (evaluation *Evaluation) Path(name string) string {
 // Prepare exclusively reserves a private, empty tool-output file. Tool execution
 // must finish before Read and Finalize. Existing artifacts are never truncated.
 func (evaluation *Evaluation) Prepare(name string) (string, error) {
+	if err := evaluation.verifyLocator(); err != nil {
+		return "", &VerificationError{Err: err}
+	}
 	file, err := openAt(evaluation.dir, name, syscall.O_WRONLY|syscall.O_CREAT|syscall.O_EXCL, FileMode)
 	if err != nil {
 		return "", fmt.Errorf("reserving output %q: %w", name, err)
@@ -303,12 +338,18 @@ func (evaluation *Evaluation) Prepare(name string) (string, error) {
 	if err := evaluation.operations.Close(file); err != nil {
 		return "", fmt.Errorf("closing output %q: %w", name, err)
 	}
+	if err := evaluation.verifyLocator(); err != nil {
+		return "", &VerificationError{Err: err}
+	}
 	return evaluation.Path(name), nil
 }
 
 // Write exclusively writes a provider-owned output and checks its close error.
 // A failure can leave unreferenced partial bytes; it never replaces an earlier file.
 func (evaluation *Evaluation) Write(name string, data []byte) error {
+	if err := evaluation.verifyLocator(); err != nil {
+		return &VerificationError{Err: err}
+	}
 	file, err := openAt(evaluation.dir, name, syscall.O_WRONLY|syscall.O_CREAT|syscall.O_EXCL, FileMode)
 	if err != nil {
 		return fmt.Errorf("creating artifact %q: %w", name, err)
@@ -319,6 +360,9 @@ func (evaluation *Evaluation) Write(name string, data []byte) error {
 	}
 	if err := errors.Join(writeErr, evaluation.operations.Close(file)); err != nil {
 		return fmt.Errorf("saving artifact %q: %w", name, err)
+	}
+	if err := evaluation.verifyLocator(); err != nil {
+		return &VerificationError{Err: err}
 	}
 	return nil
 }
@@ -360,8 +404,8 @@ func (evaluation *Evaluation) snapshot(name string) (*Artifact, error) {
 	if statErr != nil {
 		return nil, errors.Join(statErr, file.Close())
 	}
-	if !info.Mode().IsRegular() {
-		return nil, errors.Join(fmt.Errorf("artifact %q is not regular", name), file.Close())
+	if err := singleLinkOutput(info); err != nil {
+		return nil, errors.Join(fmt.Errorf("artifact %q: %w", name, err), file.Close())
 	}
 	data, readErr := evaluation.operations.Read(file)
 	var identity *os.File
@@ -394,13 +438,32 @@ func (evaluation *Evaluation) pinIdentity(name string, expected os.FileInfo) (*o
 		return nil, errors.Join(fmt.Errorf("artifact %q replaced during validation", name),
 			identity.Close())
 	}
+	if err := singleLinkOutput(info); err != nil {
+		return nil, errors.Join(err, identity.Close())
+	}
 	return identity, nil
+}
+
+func singleLinkOutput(info os.FileInfo) error {
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("output is not a regular file")
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || stat.Nlink != 1 {
+		return fmt.Errorf("output has hard links or unavailable link count")
+	}
+	return nil
 }
 
 func (evaluation *Evaluation) verifyFile(file *os.File, mode os.FileMode) error {
 	info, err := evaluation.operations.Stat(file)
 	if err != nil {
 		return fmt.Errorf("checking evaluation ownership: %w", err)
+	}
+	if mode == FileMode {
+		if err := singleLinkOutput(info); err != nil {
+			return err
+		}
 	}
 	owner, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || int(owner.Uid) != evaluation.owner.UID || int(owner.Gid) != evaluation.owner.GID {
@@ -431,6 +494,9 @@ func (evaluation *Evaluation) Finalize() error {
 }
 
 func (evaluation *Evaluation) finalize() error {
+	if err := evaluation.verifyLocator(); err != nil {
+		return err
+	}
 	if err := evaluation.verifyFile(evaluation.dir, DirectoryMode); err != nil {
 		return err
 	}
@@ -452,8 +518,8 @@ func (evaluation *Evaluation) finalize() error {
 		if statErr != nil {
 			return errors.Join(statErr, file.Close())
 		}
-		if !info.Mode().IsRegular() {
-			return errors.Join(fmt.Errorf("output %q is not a regular file", entry.Name()), file.Close())
+		if err := singleLinkOutput(info); err != nil {
+			return errors.Join(fmt.Errorf("output %q: %w", entry.Name(), err), file.Close())
 		}
 		if expected := evaluation.validated[entry.Name()]; expected != nil {
 			data, readErr := evaluation.operations.Read(file)

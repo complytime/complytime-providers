@@ -436,9 +436,13 @@ func resolveTargetScanConfig(
 }
 
 func targetError(target, targetURL, branch string, err error) *results.PerTargetResult {
+	message := evidence.PublicContext(err.Error())
+	if message == "" {
+		message = "target evaluation failed; verify repository access and input configuration (sensitive URL context omitted)"
+	}
 	return &results.PerTargetResult{
 		Target: evidence.PublicContext(target), TargetURL: evidence.PublicContext(targetURL),
-		Branch: branch, Status: "error", Error: evidence.PublicContext(err.Error()),
+		Branch: branch, Status: "error", Error: message,
 	}
 }
 
@@ -699,9 +703,11 @@ func (s *ProviderServer) evaluateRetained(logger hclog.Logger, evaluation *evide
 	result.InputPath = inputPath
 	result.TargetURL = evidence.PublicContext(target.Variables[loader.VarURL])
 	result.ScannedAt = evaluation.CollectionTime
+	referenceTarget := evidence.DisplayContext(displayName)
 	item, reference, err := evaluation.Reference(evidence.ConftestFile,
 		evidence.IDPrefixConftest, evidence.RefPrefixConftest, evidence.TypeConftestResult,
-		"Conftest results: "+displayName, "Conftest evaluation of "+displayName+" "+branch,
+		"Conftest results: "+referenceTarget,
+		"Conftest evaluation of "+referenceTarget+" "+evidence.DisplayContext(branch),
 		evidence.HostRemark())
 	if err != nil {
 		return nil, err

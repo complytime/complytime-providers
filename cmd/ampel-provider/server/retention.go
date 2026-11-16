@@ -50,6 +50,10 @@ func (s *ProviderServer) scanEvaluation(
 	options.configuration.SpecPath = scan.ResolveSpecPath(specRef, options.scanConfig.SpecDir)
 	result, err = s.executeEvaluation(options, branch)
 	if err != nil {
+		var verification *evidence.VerificationError
+		if errors.As(err, &verification) {
+			return nil, err
+		}
 		return &results.PerRepoResult{
 			Repository: repoURL, Branch: branch, Status: "error",
 			Error: publicOperationalError(err, options.repository.AccessToken),

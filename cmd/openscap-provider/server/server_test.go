@@ -117,7 +117,8 @@ case "$TEST_OSCAP_MODE" in
  missing-results) rm "$results";;
  empty-results) ;;
  invalid-results) printf '<broken' > "$results";;
- *) printf '<Benchmark><TestResult/></Benchmark>\n' > "$results";;
+ unrelated-results) printf '<root/>' > "$results";;
+ *) printf '<Benchmark xmlns="http://checklists.nist.gov/xccdf/1.2"><TestResult/></Benchmark>\n' > "$results";;
 esac
 printf 'done' > "$TEST_OSCAP_DONE"
 exit "$TEST_OSCAP_STATUS"
@@ -280,7 +281,7 @@ func mustReadOpenSCAPFile(t *testing.T, path string) []byte {
 
 func TestProviderServer_Scan_RetentionFailures(t *testing.T) {
 	for _, failure := range []string{"allocation", "reserve-close", "missing-arf", "empty-arf", "invalid-arf",
-		"no-target", "no-benchmark", "symlink", "directory", "missing-results", "empty-results", "invalid-results", "tool",
+		"no-target", "no-benchmark", "symlink", "directory", "missing-results", "empty-results", "invalid-results", "unrelated-results", "tool",
 		"digest", "identity", "ownership", "mode", "changed-output"} {
 		t.Run(failure, func(t *testing.T) {
 			s, root, req := setupOpenSCAPRetention(t)

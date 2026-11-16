@@ -7,15 +7,131 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"syscall"
 	"testing"
 
+	"github.com/complytime/complyctl/pkg/provider"
 	"github.com/stretchr/testify/require"
 
+	"github.com/complytime/complytime-providers/cmd/ampel-provider/results"
+	"github.com/complytime/complytime-providers/cmd/ampel-provider/scan"
 	"github.com/complytime/complytime-providers/internal/evidence"
 )
+
+func TestScan_EmptyResultSetErrorCannotPublishSyntheticPass(t *testing.T) {
+	for _, configured := range []bool{false, true} {
+		t.Run(fmt.Sprintf("configured-requirements-%t", configured), func(t *testing.T) {
+			server, root := setupRetentionServer(t)
+			request := retentionRequest(root)
+			request.Targets[0].Variables["branches"] = "main"
+			request.Targets[0].Variables["specs"] = "builtin:github/branch-rules.yaml"
+			ScanRunner = &mockScanRunner{snappyOutput: makeTestAttestation(),
+				ampelOutput: []byte(`{"predicate":{"error":{}}}`)}
+			var response *provider.ScanResponse
+			if configured {
+				var err error
+				response, err = server.Scan(context.Background(), request)
+				require.NoError(t, err)
+			} else {
+				// Exercise the per-evaluation adapter with no requirement IDs,
+				// without a missing-index error masking the malformed tool output.
+				policy := filepath.Join(t.TempDir(), "policy.json")
+				require.NoError(t, os.WriteFile(policy, []byte("{}"), evidence.FileMode))
+				identity, err := evidence.ExecutionIdentity()
+				require.NoError(t, err)
+				result, err := server.scanEvaluation(evaluationOptions{
+					repository: scan.RepoTarget{URL: "https://github.com/myorg/repo1"},
+					scanConfig: scan.ScanConfig{PolicyPath: policy}, runner: ScanRunner,
+					storage: evidence.StorageOptions{WorkspaceRoot: root,
+						ResultsRoot: filepath.Join(root, "results"), Identity: identity},
+				}, "main", "builtin:github/branch-rules.yaml")
+				require.NoError(t, err)
+				require.Equal(t, "error", result.Status)
+				response = results.ToScanResponse([]*results.PerRepoResult{result}, nil)
+			}
+			require.NotEmpty(t, response.Errors)
+			require.Contains(t, response.Errors[0], "no result-set status or error")
+			require.Empty(t, response.Assessments)
+			require.Empty(t, response.MappingReferences)
+		})
+	}
+}
+
+func TestFinalizeEvaluation_PreservesReadableSanitizedReferences(t *testing.T) {
+	root := t.TempDir()
+	identity, err := evidence.ExecutionIdentity()
+	require.NoError(t, err)
+	evaluation, err := evidence.Allocate(evidence.StorageOptions{WorkspaceRoot: root,
+		ResultsRoot: filepath.Join(root, "results"), Identity: identity})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, evaluation.Close()) })
+	for _, name := range []string{evidence.AmpelFile, evidence.SnappyFile} {
+		require.NoError(t, evaluation.Write(name, []byte("{}")))
+	}
+	locator := url.URL{Scheme: "https", Host: "example.com", Path: "/org/repo",
+		User: url.UserPassword("alice", "password"), RawQuery: "token=secret"}
+	parsed := &results.PerRepoResult{
+		Repository: locator.String(), Branch: "main",
+		SpecLabel: "https://spec.example.com/check.yaml?token=secret",
+	}
+	require.NoError(t, finalizeEvaluation(evaluation, parsed, "host"))
+	require.Len(t, parsed.References, 2)
+	for _, reference := range parsed.References {
+		require.Contains(t, reference.Title, "for url:example.com/org/repo@main")
+		require.Equal(t, "Retained in-toto attestation; collection spec: url:spec.example.com/check.yaml", reference.Description)
+		for _, secret := range []string{"alice", "password", "secret"} {
+			require.NotContains(t, reference.Title+reference.Description, secret)
+		}
+	}
+}
+
+func TestScan_ExecutionVerificationFailureStopsPublication(t *testing.T) {
+	for _, phase := range []string{"write", "prepare"} {
+		t.Run(phase, func(t *testing.T) {
+			server, root := setupRetentionServer(t)
+			ScanRunner = &mockScanRunner{snappyOutput: makeTestAttestation(),
+				ampelOutput: makeAmpelResultAttestation()}
+			moved := filepath.Join(t.TempDir(), "moved-results")
+			allocations := 0
+			server.allocate = func(options evidence.StorageOptions, labels ...string) (*evidence.Evaluation, error) {
+				allocations++
+				if phase == "write" {
+					options.Operations.Write = func(file *os.File, data []byte) (int, error) {
+						written, err := file.Write(data)
+						if err != nil {
+							return written, err
+						}
+						return written, os.Rename(options.ResultsRoot, moved)
+					}
+				} else {
+					options.Operations.Read = func(file *os.File) ([]byte, error) {
+						data, err := io.ReadAll(file)
+						if err != nil {
+							return data, err
+						}
+						return data, os.Rename(options.ResultsRoot, moved)
+					}
+				}
+				return evidence.Allocate(options, labels...)
+			}
+			response, err := server.Scan(context.Background(), retentionRequest(root))
+			var verification *evidence.VerificationError
+			require.ErrorAs(t, err, &verification)
+			require.Nil(t, response, "verification failures must suppress the whole RPC response")
+			require.Equal(t, 1, allocations, "do not continue to later branches/specs")
+			files, err := filepath.Glob(filepath.Join(moved, "*", "*", "*", "evaluation-*", evidence.SnappyFile))
+			require.NoError(t, err)
+			require.Len(t, files, 1)
+			data, err := os.ReadFile(files[0])
+			require.NoError(t, err)
+			require.Equal(t, makeTestAttestation(), data)
+			require.NoFileExists(t, filepath.Join(filepath.Dir(files[0]), evidence.AmpelFile))
+		})
+	}
+}
 
 func TestScan_EvaluationErrorsPreserveLaterSpecEvidence(t *testing.T) {
 	for _, failure := range []string{"allocation", "tool", "parse"} {

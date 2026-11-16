@@ -362,7 +362,7 @@ func remoteTarget(bundleRef, url string) provider.Target {
 func writeScanConfig(t *testing.T, workDir string) {
 	t.Helper()
 	cfg := config.NewWorkspaceConfig(workDir)
-	require.NoError(t, os.MkdirAll(cfg.GeneratedDirPath(), 0750))
+	require.NoError(t, cfg.EnsureDirectories())
 	require.NoError(t, generate.WriteScanConfig(
 		cfg.GeneratedDirPath(),
 		[]string{"main"},
@@ -380,6 +380,7 @@ func writeIndexedScanConfig(
 	policyDir string,
 ) {
 	t.Helper()
+	require.NoError(t, cfg.EnsureDirectories())
 	generatedDir := cfg.GeneratedDirForKey(contentKey)
 	require.NoError(t, os.MkdirAll(generatedDir, 0750))
 	require.NoError(t, generate.WriteScanConfig(generatedDir, ids, reverseMapping, policyDir))
@@ -1624,6 +1625,30 @@ func TestScan_RemoteURL_UnauthenticatedClone(t *testing.T) {
 	req := makeScanRequest(t, []provider.Target{target})
 	_, err := srv.Scan(context.Background(), req)
 	require.NoError(t, err)
+}
+
+func TestScan_FailedHTTPSClonePreservesSafeDiagnostic(t *testing.T) {
+	for _, cloneURL := range []string{"https://example.com/org/repo", "https://alice:secret password@example.com/org/repo"} {
+		t.Run(cloneURL, func(t *testing.T) {
+			ldr := &mockLoader{loadFn: func(provider.Target, string) (string, error) {
+				return "", fmt.Errorf("cloning repository %q: exit status 128", cloneURL)
+			}}
+			srv := newTestServer(t, conftestRunner(conftestAllSuccessJSON), ldr)
+			writeScanConfig(t, srv.opts.WorkspaceDir)
+			response, err := srv.Scan(context.Background(), makeScanRequest(t, []provider.Target{
+				remoteTarget("ghcr.io/org/bundle:dev", "https://example.com/org/repo"),
+			}))
+			require.NoError(t, err)
+			require.Len(t, ldr.calls, 1)
+			require.Len(t, response.Errors, 1)
+			assert.Contains(t, response.Errors[0], "verify repository access and input configuration")
+			for _, secret := range []string{"alice", "password", "secret"} {
+				assert.NotContains(t, response.Errors[0], secret)
+			}
+			assert.Empty(t, response.Assessments)
+			assert.Empty(t, response.MappingReferences)
+		})
+	}
 }
 
 // --- Scan: error path tests ---
