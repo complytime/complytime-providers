@@ -27,14 +27,14 @@ type mockCall struct {
 	args []string
 }
 
-func (m *mockRunner) Run(name string, args ...string) ([]byte, error) {
+func (m *mockRunner) Run(name string, args ...string) (scan.CommandOutput, error) {
 	m.calls = append(m.calls, mockCall{name: name, args: args})
-	return m.response, m.err
+	return scan.CommandOutput{Stdout: m.response}, m.err
 }
 
-func (m *mockRunner) RunWithEnv(env []string, name string, args ...string) ([]byte, error) {
+func (m *mockRunner) RunWithEnv(env []string, name string, args ...string) (scan.CommandOutput, error) {
 	m.calls = append(m.calls, mockCall{env: env, name: name, args: args})
-	return m.response, m.err
+	return scan.CommandOutput{Stdout: m.response}, m.err
 }
 
 var _ scan.CommandRunner = (*mockRunner)(nil)

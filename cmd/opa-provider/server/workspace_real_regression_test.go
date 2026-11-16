@@ -25,41 +25,43 @@ import (
 type realConftestCall struct {
 	args   []string
 	output []byte
+	stderr []byte
 	err    error
 }
 
 // recordingRealRunner executes the real tool while retaining its structured
 // output; remote clone URLs are redirected to a local test repository.
 type recordingRealRunner struct {
-	gitSource string
-	clonePath string
-	postClone func(string) error
-	calls     []realConftestCall
+	workingDirectory string
+	gitSource        string
+	clonePath        string
+	postClone        func(string) error
+	calls            []realConftestCall
 }
 
-func (runner *recordingRealRunner) Run(name string, args ...string) ([]byte, error) {
+func (runner *recordingRealRunner) Run(name string, args ...string) (scan.CommandOutput, error) {
 	return runner.execute(nil, name, args)
 }
 
-func (runner *recordingRealRunner) RunWithEnv(env []string, name string, args ...string) ([]byte, error) {
+func (runner *recordingRealRunner) RunWithEnv(env []string, name string, args ...string) (scan.CommandOutput, error) {
 	return runner.execute(env, name, args)
 }
 
-func (runner *recordingRealRunner) execute(env []string, name string, args []string) ([]byte, error) {
+func (runner *recordingRealRunner) execute(env []string, name string, args []string) (scan.CommandOutput, error) {
 	actualArgs := append([]string(nil), args...)
 	if name == "git" {
 		if runner.gitSource == "" || len(actualArgs) != 7 || actualArgs[0] != "clone" {
-			return nil, fmt.Errorf("unexpected git invocation %q", actualArgs)
+			return scan.CommandOutput{}, fmt.Errorf("unexpected git invocation %q", actualArgs)
 		}
 		actualArgs[5] = runner.gitSource
 		runner.clonePath = actualArgs[6]
 	}
-	var output []byte
+	var output scan.CommandOutput
 	var err error
 	if env == nil {
-		output, err = (scan.ExecRunner{}).Run(name, actualArgs...)
+		output, err = (scan.ExecRunner{WorkingDirectory: runner.workingDirectory}).Run(name, actualArgs...)
 	} else {
-		output, err = (scan.ExecRunner{}).RunWithEnv(env, name, actualArgs...)
+		output, err = (scan.ExecRunner{WorkingDirectory: runner.workingDirectory}).RunWithEnv(env, name, actualArgs...)
 	}
 	if name == "git" && err == nil && runner.postClone != nil {
 		if err := runner.postClone(runner.clonePath); err != nil {
@@ -67,7 +69,9 @@ func (runner *recordingRealRunner) execute(env []string, name string, args []str
 		}
 	}
 	if name == "conftest" && len(actualArgs) > 0 && actualArgs[0] == "test" {
-		runner.calls = append(runner.calls, realConftestCall{args: actualArgs, output: output, err: err})
+		runner.calls = append(runner.calls, realConftestCall{
+			args: actualArgs, output: output.Stdout, stderr: output.Stderr, err: err,
+		})
 	}
 	return output, err
 }
@@ -104,10 +108,11 @@ func isolateRealConftest(t *testing.T, base string) {
 
 func realPolicyFixture(t *testing.T, workspace, policyDir string) {
 	t.Helper()
+	require.NoError(t, os.MkdirAll(workspace, 0750))
 	require.NoError(t, os.MkdirAll(policyDir, 0750))
 	require.NoError(t, os.WriteFile(filepath.Join(policyDir, "policy.rego"), []byte(
 		"package main\ndeny contains input.marker if input.blocked == true\n"), 0600))
-	cfg := config.NewConfig(workspace)
+	cfg := config.NewWorkspaceConfig(workspace)
 	require.NoError(t, cfg.EnsureDirectories())
 	require.NoError(t, generate.WriteScanConfig(cfg.GeneratedDirPath(), []string{"main"},
 		map[string]string{"main": "test-req"}, policyDir))
@@ -171,7 +176,7 @@ func TestScan_RealConftestWorkspaceIsolation(t *testing.T) {
 	} {
 		raw, err := scan.EvalPolicyWithNamespacesAndIgnore(test.path, policy, []string{"main"}, control, "", nil)
 		require.NoError(t, err)
-		records := decodeRealCall(t, realConftestCall{output: raw})
+		records := decodeRealCall(t, realConftestCall{output: raw.Stdout})
 		require.Len(t, records, 1)
 		assert.Equal(t, test.path, records[0].Filename)
 		assert.Equal(t, test.success, records[0].Successes)
@@ -187,9 +192,11 @@ func TestScan_RealConftestWorkspaceIsolation(t *testing.T) {
 	assert.Contains(t, err.Error(), workspaceMalformed)
 
 	runner := &recordingRealRunner{}
-	srv := New(ServerOptions{Runner: runner, WorkspaceDir: workspace,
+	srv := newWorkspaceTestServer(t, ServerOptions{Runner: runner, WorkspaceDir: workspace,
 		ToolChecker: func() ([]string, error) { return nil, nil }})
-	for index, path := range []string{filepath.Base(input), input, input} {
+	relativeInput, err := filepath.Rel(workspace, input)
+	require.NoError(t, err)
+	for index, path := range []string{relativeInput, input, input} {
 		t.Run(fmt.Sprintf("scan-%d", index+1), func(t *testing.T) {
 			runner.calls = nil
 			response, err := srv.Scan(context.Background(), makeScanRequest(t, []provider.Target{
@@ -258,7 +265,7 @@ func TestScan_RealConftestWorkspaceIsolation(t *testing.T) {
 			assert.Empty(t, response.Assessments)
 			require.Len(t, runner.calls, 1)
 			require.Error(t, runner.calls[0].err)
-			assert.Contains(t, string(runner.calls[0].output), "no files found")
+			assert.Contains(t, string(runner.calls[0].stderr), "no files found")
 		})
 	}
 }
@@ -310,7 +317,7 @@ func TestScan_RealConftestLocalAliases(t *testing.T) {
 				require.True(t, os.SameFile(artifactInfo, aliasInfo))
 			}
 			runner := &recordingRealRunner{}
-			srv := New(ServerOptions{Runner: runner, WorkspaceDir: workspace,
+			srv := newWorkspaceTestServer(t, ServerOptions{Runner: runner, WorkspaceDir: workspace,
 				ToolChecker: func() ([]string, error) { return nil, nil }})
 			selected := input
 			if scenario == "explicit hard link" {
@@ -452,7 +459,7 @@ func TestScan_RealConftestRemoteCloneAliases(t *testing.T) {
 				require.NoError(t, os.Symlink("nested", alias))
 			}
 			commitRealGitRepository(t, repository)
-			srv := New(ServerOptions{Runner: runner, WorkspaceDir: workspace,
+			srv := newWorkspaceTestServer(t, ServerOptions{Runner: runner, WorkspaceDir: workspace,
 				ToolChecker: func() ([]string, error) { return nil, nil }})
 			target := remoteTarget("", "https://example.com/org/repo")
 			target.Variables[loader.VarScanPath] = scanPath

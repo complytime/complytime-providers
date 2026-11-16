@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,9 +31,18 @@ func ParseARFFile(arfPath string) (*xmlquery.Node, error) {
 	}
 	defer file.Close()
 
-	xmlnode, err := xmlquery.Parse(bufio.NewReader(file))
+	return ParseARF(bufio.NewReader(file))
+}
+
+// ParseARF parses a retained XML snapshot without reopening its output pathname.
+// Missing document roots and malformed XML return errors before evidence publication.
+func ParseARF(reader io.Reader) (*xmlquery.Node, error) {
+	xmlnode, err := xmlquery.Parse(reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse ARF: %w", err)
+	}
+	if xmlnode.SelectElement("*") == nil {
+		return nil, fmt.Errorf("failed to parse ARF: missing document root")
 	}
 	return xmlnode, nil
 }

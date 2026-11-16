@@ -112,9 +112,10 @@ adherence:
 func (f *complyctlFixture) seedWorkspace(t *testing.T, base string) {
 	t.Helper()
 	ws := filepath.Join(base, ".complytime")
-	for _, dir := range []string{filepath.Join(ws, "generation"), filepath.Join(ws, "opa", "generated")} {
-		require.NoError(t, os.MkdirAll(dir, 0750))
-	}
+	require.NoError(t, os.MkdirAll(filepath.Join(ws, "generation"), 0o750))
+	// Seed only generated working data, not retained-result directories: tests
+	// must still detect accidental writes into an unrelated invocation workspace.
+	require.NoError(t, os.MkdirAll(filepath.Join(ws, "opa", "generated"), 0o700))
 	state := `{"policy_id":"test-policy","policy_digest":"","evaluator_ids":["opa"]}`
 	require.NoError(t, os.WriteFile(filepath.Join(ws, "generation", "test-policy.json"), []byte(state), 0600))
 	scanConfig, err := json.Marshal(map[string]any{"ids": []string{"main"},
@@ -125,11 +126,24 @@ func (f *complyctlFixture) seedWorkspace(t *testing.T, base string) {
 
 func (f *complyctlFixture) scan(t *testing.T, cwd, workspace, binDir, fakeVersion string) (string, error) {
 	t.Helper()
+	return f.command(t, cwd, workspace, binDir, map[string]string{"FAKE_VERSION": fakeVersion},
+		"scan", "--policy-id", "test-policy")
+}
+
+func (f *complyctlFixture) command(
+	t *testing.T, cwd, workspace, binDir string, environment map[string]string, command ...string,
+) (string, error) {
+	t.Helper()
 	args := []string{"--unshare-net", "--bind", "/", "/", "--dev-bind", "/dev", "/dev", "--proc", "/proc",
 		"--chdir", cwd, "--setenv", "HOME", f.home, "--setenv", "XDG_DATA_HOME", f.data,
 		"--setenv", "XDG_CACHE_HOME", f.cache, "--setenv", "PATH", binDir + ":/usr/bin:/bin",
-		"--setenv", "FAKE_VERSION", fakeVersion, "--setenv", "CONFTEST_IGNORE", "",
-		"--setenv", "CONFTEST_CONFIG_FILE", "", "--", f.complyctl, "scan", "--policy-id", "test-policy"}
+		"--setenv", "COMPLYTIME_WORKSPACE", "", "--setenv", "CONFTEST_IGNORE", "",
+		"--setenv", "CONFTEST_CONFIG_FILE", ""}
+	for name, value := range environment {
+		args = append(args, "--setenv", name, value)
+	}
+	args = append(args, "--", f.complyctl)
+	args = append(args, command...)
 	if workspace != "" {
 		args = append(args, "--workspace", workspace)
 	}

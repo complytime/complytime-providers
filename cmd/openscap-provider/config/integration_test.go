@@ -18,12 +18,12 @@ import (
 // Run with: go test -tags=integration -v ./cmd/openscap-provider/config
 func TestCPEMatching_RealSystem(t *testing.T) {
 	// Get system CPE
-	cpe, err := getSystemCPE()
+	cpe, err := getSystemCPE(getSystemInfoFile())
 	require.NoError(t, err, "Failed to read CPE_NAME from %s", getSystemInfoFile())
 	t.Logf("System CPE: %s", cpe)
 
 	// Find matching datastream
-	ds, err := findMatchingDatastream()
+	ds, err := findMatchingDatastream(WorkspaceConfig{})
 	require.NoError(t, err, "Failed to find matching datastream")
 	t.Logf("Matched datastream: %s", ds)
 
@@ -49,7 +49,7 @@ func TestDatastreamDirEnvVar(t *testing.T) {
 		customDir := "/nonexistent/ssg/path"
 		require.NoError(t, os.Setenv(DatastreamsDirEnvVar, customDir))
 
-		_, err := findMatchingDatastream()
+		_, err := findMatchingDatastream(WorkspaceConfig{})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), customDir)
 		require.Contains(t, err.Error(), "Install scap-security-guide")
@@ -59,7 +59,7 @@ func TestDatastreamDirEnvVar(t *testing.T) {
 	t.Run("valid directory works", func(t *testing.T) {
 		require.NoError(t, os.Setenv(DatastreamsDirEnvVar, "/usr/share/xml/scap/ssg/content"))
 
-		ds, err := findMatchingDatastream()
+		ds, err := findMatchingDatastream(WorkspaceConfig{})
 		require.NoError(t, err)
 		require.Contains(t, ds, "ssg-cs10-ds.xml")
 	})
@@ -91,7 +91,7 @@ CPE_NAME="cpe:/o:test:test:1"
 
 		require.NoError(t, os.Setenv(SystemInfoFileEnvVar, tmpFile))
 
-		cpe, err := getSystemCPE()
+		cpe, err := getSystemCPE(getSystemInfoFile())
 		require.NoError(t, err)
 		require.Equal(t, "cpe:/o:test:test:1", cpe)
 	})
@@ -99,7 +99,7 @@ CPE_NAME="cpe:/o:test:test:1"
 	t.Run("missing file produces error", func(t *testing.T) {
 		require.NoError(t, os.Setenv(SystemInfoFileEnvVar, "/nonexistent/os-release"))
 
-		_, err := getSystemCPE()
+		_, err := getSystemCPE(getSystemInfoFile())
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "/nonexistent/os-release")
 	})

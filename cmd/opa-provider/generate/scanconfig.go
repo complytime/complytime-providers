@@ -21,6 +21,8 @@ type ScanConfig struct {
 	ReverseMapping map[string]string `json:"reverse_mapping"`
 	PolicyDir      string            `json:"bundle_dir"`
 	GeneratedAt    string            `json:"generated_at"`
+	// ContentKey is populated from the Generate index, not persisted as a policy digest.
+	ContentKey string `json:"-"`
 }
 
 // WriteScanConfig writes a scan-config.json to the given directory.

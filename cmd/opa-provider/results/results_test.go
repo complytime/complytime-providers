@@ -4,8 +4,6 @@ package results
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -293,36 +291,28 @@ func TestToScanResponse_Empty(t *testing.T) {
 	assert.Empty(t, resp.Errors)
 }
 
-func TestWritePerTargetResult(t *testing.T) {
-	dir := t.TempDir()
-	result := &PerTargetResult{
-		Target:       "org/repo",
-		Branch:       "main",
-		Status:       "scanned",
-		SuccessCount: 3,
-		Findings: []Finding{
-			{RequirementID: "test.rule", Result: "fail", Reason: "bad"},
-		},
+func TestToScanResponse_RetainedArtifacts(t *testing.T) {
+	item := provider.Evidence{ID: "conftest_token", Type: evidence.TypeConftestResult,
+		Source: &provider.EvidenceSource{ReferenceID: "conftest-result_token",
+			Coordinate: ".complytime/opa/results/target/evaluation-time-token/conftest.json",
+			Digest:     "sha256:retained-output"}}
+	reference := provider.MappingReference{ID: item.Source.ReferenceID,
+		URL: "file:///workspace/" + item.Source.Coordinate}
+	result := &PerTargetResult{Target: "target", Status: "scanned",
+		ReverseMapping:   map[string]string{"one": "req-1", "two": "req-2"},
+		RetainedEvidence: []provider.Evidence{item}, References: []provider.MappingReference{reference}}
+	response := ToScanResponse([]*PerTargetResult{result}, nil)
+	require.Len(t, response.Assessments, 2)
+	for _, assessment := range response.Assessments {
+		assert.Equal(t, []provider.Evidence{item}, assessment.Evidence)
 	}
-
-	err := WritePerTargetResult(result, dir)
-	require.NoError(t, err)
-
-	files, err := os.ReadDir(dir)
-	require.NoError(t, err)
-	require.Len(t, files, 1)
-
-	data, err := os.ReadFile(filepath.Join(dir, files[0].Name()))
-	require.NoError(t, err)
-
-	var parsed PerTargetResult
-	require.NoError(t, json.Unmarshal(data, &parsed))
-	assert.Equal(t, "org/repo", parsed.Target)
-	assert.Len(t, parsed.Findings, 1)
-
-	info, err := os.Stat(filepath.Join(dir, files[0].Name()))
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+	assert.Equal(t, []provider.MappingReference{reference}, response.MappingReferences)
+	result.Status = "error"
+	result.Error = "failed evaluation"
+	response = ToScanResponse([]*PerTargetResult{result}, nil)
+	assert.Empty(t, response.Assessments)
+	assert.Empty(t, response.MappingReferences)
+	assert.Equal(t, []string{"target: failed evaluation"}, response.Errors)
 }
 
 func TestResolveRequirementID_MappingHit(t *testing.T) {

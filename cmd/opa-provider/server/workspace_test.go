@@ -139,7 +139,7 @@ func TestScan_ExplicitWorkspaceTargetsRejected(t *testing.T) {
 	require.NoError(t, os.MkdirAll(configuredWorkspace, 0750))
 	require.NoError(t, os.WriteFile(filepath.Join(hostWorkspace, "file.json"), []byte("{}"), 0600))
 	require.NoError(t, os.WriteFile(external, []byte("{}"), 0600))
-	writeScanConfig(t, configuredWorkspace)
+	writeScanConfig(t, hostBase)
 
 	tests := []struct {
 		name   string
@@ -155,7 +155,7 @@ func TestScan_ExplicitWorkspaceTargetsRejected(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			runner := conftestRunner(conftestAllSuccessJSON)
-			srv := New(ServerOptions{
+			srv := newWorkspaceTestServer(t, ServerOptions{
 				Runner:       runner,
 				ToolChecker:  func() ([]string, error) { return nil, nil },
 				WorkspaceDir: configuredWorkspace,
@@ -184,7 +184,7 @@ func TestScan_ExplicitWorkspaceTargetsRejected(t *testing.T) {
 func TestScan_WorkspaceRejectionPrecedesPolicyResolution(t *testing.T) {
 	workspace := t.TempDir()
 	runner := conftestRunner(conftestAllSuccessJSON)
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner:       runner,
 		ToolChecker:  func() ([]string, error) { return nil, nil },
 		WorkspaceDir: workspace,

@@ -89,7 +89,7 @@ func TestScan_RemoteCloneAliases(t *testing.T) {
 			}}
 			runner := conftestRunner(`[{"filename":"eligible.json","namespace":"main",` +
 				`"failures":[{"msg":"blocked", "metadata":{"query":"data.main.deny"}}]}]`)
-			srv := New(ServerOptions{
+			srv := newWorkspaceTestServer(t, ServerOptions{
 				Runner: runner, Loader: ldr, WorkspaceDir: workspace,
 				ToolChecker: func() ([]string, error) { return nil, nil },
 			})
@@ -124,17 +124,17 @@ func TestScan_RemoteCloneAliases(t *testing.T) {
 
 func TestScan_RemoteCloneRejectsInjectedWorkspaceAlias(t *testing.T) {
 	workspace := t.TempDir()
-	writeScanConfig(t, workspace)
 	clone := filepath.Join(workspace, "clone")
 	require.NoError(t, os.Mkdir(clone, 0750))
 	hostBase := t.TempDir()
+	writeScanConfig(t, hostBase)
 	hostWorkspace := filepath.Join(hostBase, provider.WorkspaceDir)
-	require.NoError(t, os.Mkdir(hostWorkspace, 0750))
+	require.NoError(t, os.MkdirAll(hostWorkspace, 0750))
 	artifact := filepath.Join(hostWorkspace, "artifact.json")
 	require.NoError(t, os.WriteFile(artifact, []byte("{}"), 0600))
 	require.NoError(t, os.Link(artifact, filepath.Join(clone, "hardlink.json")))
 	runner := conftestRunner(conftestAllSuccessJSON)
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner: runner, WorkspaceDir: workspace,
 		Loader:      &mockLoader{loadFn: func(provider.Target, string) (string, error) { return clone, nil }},
 		ToolChecker: func() ([]string, error) { return nil, nil },
@@ -177,7 +177,7 @@ func TestScan_RemoteCloneRootMismatchHasRemedy(t *testing.T) {
 	writeScanConfig(t, workspace)
 	input := t.TempDir()
 	runner := conftestRunner(conftestAllSuccessJSON)
-	srv := New(ServerOptions{Runner: runner, WorkspaceDir: workspace,
+	srv := newWorkspaceTestServer(t, ServerOptions{Runner: runner, WorkspaceDir: workspace,
 		Loader:      &mockLoader{loadFn: func(provider.Target, string) (string, error) { return input, nil }},
 		ToolChecker: func() ([]string, error) { return nil, nil }})
 	target := remoteTarget("", "https://example.com/org/repo")
@@ -210,7 +210,7 @@ func TestScan_RemoteWorkspaceInspectionErrors(t *testing.T) {
 			require.NoError(t, os.WriteFile(workspaceFile, []byte("{}"), 0600))
 			require.NoError(t, os.WriteFile(cloneFile, []byte("{}"), 0600))
 			runner := conftestRunner(conftestAllSuccessJSON)
-			srv := New(ServerOptions{
+			srv := newWorkspaceTestServer(t, ServerOptions{
 				Runner: runner, WorkspaceDir: workspace,
 				Loader: &mockLoader{loadFn: func(provider.Target, string) (string, error) {
 					return clone, nil

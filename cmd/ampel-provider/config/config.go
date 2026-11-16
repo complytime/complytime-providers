@@ -8,6 +8,8 @@ import (
 
 	"github.com/complytime/complyctl/pkg/provider"
 	"github.com/hashicorp/go-hclog"
+
+	"github.com/complytime/complytime-providers/internal/evidence"
 )
 
 const (
@@ -24,11 +26,26 @@ const (
 )
 
 // Config holds the provider configuration with hardcoded workspace-relative paths.
-type Config struct{}
+type Config struct {
+	WorkspaceRoot string
+}
 
 // NewConfig returns a new Config.
 func NewConfig() *Config {
 	return &Config{}
+}
+
+// NewWorkspaceConfig binds provider paths to the per-RPC resolved workspace.
+func NewWorkspaceConfig(root string) *Config { return &Config{WorkspaceRoot: root} }
+
+// Path resolves provider configuration paths beneath the selected workspace root.
+func (c *Config) Path(path string) string { return evidence.WorkspacePath(c.WorkspaceRoot, path) }
+
+// StorageOptions supplies explicit provider roots and OS identity to the allocator.
+// The caller resolves WorkspaceRoot once per RPC; no root selection occurs here.
+func (c *Config) StorageOptions(identity evidence.Identity) evidence.StorageOptions {
+	return evidence.StorageOptions{WorkspaceRoot: c.WorkspaceRoot,
+		ResultsRoot: c.Path(ResultsDirPath()), Identity: identity}
 }
 
 // ampelDir returns the path to the ampel subdirectory within the workspace.
@@ -38,6 +55,12 @@ func ampelDir() string {
 
 // EnsureDirectories creates the workspace directory structure required by the provider.
 func EnsureDirectories() error {
+	return NewConfig().EnsureDirectories()
+}
+
+// EnsureDirectories creates generated/configuration directories beneath the
+// selected root. Retained evaluation storage uses the shared constrained allocator.
+func (c *Config) EnsureDirectories() error {
 	directories := []string{
 		ampelDir(),
 		GranularPolicyDirPath(),
@@ -46,7 +69,11 @@ func EnsureDirectories() error {
 		ResultsDirPath(),
 		SpecDirPath(),
 	}
+	if c.WorkspaceRoot != "" {
+		return evidence.EnsureDirectories(c.WorkspaceRoot, directories...)
+	}
 	for _, dir := range directories {
+		dir = c.Path(dir)
 		if err := os.MkdirAll(dir, 0750); err != nil {
 			return fmt.Errorf("creating directory %s: %w", dir, err)
 		}

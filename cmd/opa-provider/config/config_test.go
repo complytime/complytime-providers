@@ -73,7 +73,11 @@ func TestEnsureDirectories(t *testing.T) {
 		info, err := os.Stat(subdir)
 		require.NoError(t, err, "directory should exist: %s", subdir)
 		assert.True(t, info.IsDir())
-		assert.Equal(t, os.FileMode(0750), info.Mode().Perm())
+		mode := os.FileMode(0o700)
+		if subdir == cfg.ResultsDirPath() {
+			mode = 0o755
+		}
+		assert.Equal(t, mode, info.Mode().Perm())
 	}
 }
 

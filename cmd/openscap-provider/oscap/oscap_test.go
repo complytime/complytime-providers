@@ -65,7 +65,7 @@ func TestExecuteCommand_TimeoutIncludesCommand(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := executeCommand(ctx, []string{"sleep", "10"})
+	_, err := executeCommand(ctx, []string{"sleep", "10"}, t.TempDir())
 	if err == nil {
 		t.Fatal("expected error for cancelled context")
 	}
@@ -82,7 +82,7 @@ func TestExecuteCommand_TimeoutIncludesCommand(t *testing.T) {
 }
 
 func TestExecuteCommand_NonTimeoutErrorOmitsCommand(t *testing.T) {
-	_, err := executeCommand(context.Background(), []string{"nonexistent-binary-12345"})
+	_, err := executeCommand(context.Background(), []string{"nonexistent-binary-12345"}, t.TempDir())
 	if err == nil {
 		t.Fatal("expected error for missing binary")
 	}

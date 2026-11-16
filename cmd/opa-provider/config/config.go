@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/complytime/complyctl/pkg/provider"
+	"github.com/complytime/complytime-providers/internal/evidence"
 )
 
 const (
@@ -24,7 +27,21 @@ const (
 
 // Config holds the provider configuration with workspace-relative paths.
 type Config struct {
-	WorkspaceDir string
+	WorkspaceDir  string
+	WorkspaceRoot string
+}
+
+// NewWorkspaceConfig derives provider paths from one resolved coordinate root.
+// The configured artifact boundary for input isolation remains a server concern.
+func NewWorkspaceConfig(root string) *Config {
+	return &Config{WorkspaceDir: filepath.Join(root, provider.WorkspaceDir), WorkspaceRoot: root}
+}
+
+// StorageOptions supplies resolved roots and execution identity without selecting
+// workspace precedence or importing provider orchestration into shared helpers.
+func (c *Config) StorageOptions(identity evidence.Identity) evidence.StorageOptions {
+	return evidence.StorageOptions{WorkspaceRoot: c.WorkspaceRoot,
+		ResultsRoot: c.ResultsDirPath(), Identity: identity}
 }
 
 // NewConfig returns a new Config rooted at the given workspace directory.
@@ -70,8 +87,21 @@ func (c *Config) PolicyDirForBundle(bundleRef string) string {
 	return filepath.Join(c.OpaDir(), PolicyDir, sanitized)
 }
 
-// EnsureDirectories creates all workspace subdirectories with mode 0750.
+// EnsureDirectories creates private working directories with mode 0700 and
+// ordinary retained-result context parents. Existing working leaves must already
+// be private; unrelated ancestors retain their modes and ownership.
 func (c *Config) EnsureDirectories() error {
+	root := c.WorkspaceRoot
+	if root == "" {
+		var err error
+		root, err = filepath.Abs(c.WorkspaceDir)
+		if err != nil {
+			return fmt.Errorf("resolving provider workspace: %w", err)
+		}
+		if err := os.MkdirAll(root, evidence.DirectoryMode); err != nil {
+			return fmt.Errorf("creating provider workspace: %w", err)
+		}
+	}
 	directories := []string{
 		c.OpaDir(),
 		c.PolicyDirPath(),
@@ -80,7 +110,20 @@ func (c *Config) EnsureDirectories() error {
 		c.GeneratedDirPath(),
 	}
 	for _, dir := range directories {
-		if err := os.MkdirAll(dir, 0750); err != nil {
+		absolute, err := filepath.Abs(dir)
+		if err != nil {
+			return fmt.Errorf("resolving provider directory: %w", err)
+		}
+		relative, err := filepath.Rel(root, absolute)
+		if err != nil {
+			return fmt.Errorf("resolving provider directory: %w", err)
+		}
+		if dir == c.ResultsDirPath() {
+			err = evidence.EnsureDirectories(root, relative)
+		} else {
+			err = evidence.EnsurePrivateDirectory(root, relative)
+		}
+		if err != nil {
 			return fmt.Errorf("creating directory %s: %w", dir, err)
 		}
 	}

@@ -63,7 +63,7 @@ func TestLocalWorkspaceIgnore_ReturnsOnlyOverlappingBoundaries(t *testing.T) {
 	hostWorkspace := filepath.Join(input, provider.WorkspaceDir)
 	require.NoError(t, os.Mkdir(hostWorkspace, 0750))
 	externalWorkspace := t.TempDir()
-	srv := New(ServerOptions{Runner: &mockRunner{}})
+	srv := newWorkspaceTestServer(t, ServerOptions{Runner: &mockRunner{}})
 	pattern, environment, overlapping, err := srv.localWorkspaceIgnore(
 		input, map[string]string{loader.VarWorkspace: input}, externalWorkspace,
 	)
@@ -106,15 +106,15 @@ func TestScan_OverlappingTargetIgnoreConfiguration(t *testing.T) {
 				require.NoError(t, os.Unsetenv(conftestIgnoreEnv))
 			}
 			beforeValue, beforeSet := os.LookupEnv(conftestIgnoreEnv)
-			if test.configName != "" {
-				require.NoError(t, os.WriteFile(filepath.Join(workingDir, test.configName), nil, 0600))
-			}
 			input := filepath.Join(t.TempDir(), "input [x]+")
 			workspace := filepath.Join(input, "workspace (custom)+")
 			require.NoError(t, os.MkdirAll(workspace, 0750))
+			if test.configName != "" {
+				require.NoError(t, os.WriteFile(filepath.Join(workspace, test.configName), nil, 0600))
+			}
 			writeScanConfig(t, workspace)
 			runner := conftestRunner(conftestAllSuccessJSON)
-			srv := New(ServerOptions{
+			srv := newWorkspaceTestServer(t, ServerOptions{
 				Runner:       runner,
 				ToolChecker:  func() ([]string, error) { return nil, nil },
 				WorkspaceDir: workspace,
@@ -142,7 +142,7 @@ func TestScan_OverlappingTargetIgnoreConfiguration(t *testing.T) {
 					assert.Contains(t, response.Errors[0], "/fake/conftest")
 					assert.Contains(t, response.Errors[0], "injected failure")
 				} else {
-					assert.Contains(t, response.Errors[0], filepath.Join(workingDir, test.configName))
+					assert.Contains(t, response.Errors[0], filepath.Join(workspace, test.configName))
 				}
 				assert.Empty(t, response.Assessments)
 				assert.Empty(t, runner.calls)
@@ -193,9 +193,14 @@ func TestScan_ExplicitConfigPathsRejected(t *testing.T) {
 			input := t.TempDir()
 			workspace := filepath.Join(input, "workspace")
 			require.NoError(t, os.MkdirAll(workspace, 0750))
+			if !absolute {
+				path = filepath.Join(workspace, setting)
+				require.NoError(t, os.MkdirAll(filepath.Dir(path), 0750))
+				require.NoError(t, os.WriteFile(path, nil, 0600))
+			}
 			writeScanConfig(t, workspace)
 			runner := conftestRunner(conftestAllSuccessJSON)
-			srv := New(ServerOptions{
+			srv := newWorkspaceTestServer(t, ServerOptions{
 				Runner: runner, WorkspaceDir: workspace,
 				ToolChecker: func() ([]string, error) { return nil, nil },
 			})
@@ -226,7 +231,7 @@ func TestScan_NonOverlappingInputsDoNotAddIgnore(t *testing.T) {
 	for _, input := range []string{directory, file} {
 		t.Run(input, func(t *testing.T) {
 			runner := conftestRunner(conftestAllSuccessJSON)
-			srv := New(ServerOptions{
+			srv := newWorkspaceTestServer(t, ServerOptions{
 				Runner: runner, WorkspaceDir: workspace,
 				ToolChecker: func() ([]string, error) { return nil, nil },
 			})
@@ -288,7 +293,7 @@ func TestScan_RemoteRepositoryCloneRemainsEvaluable(t *testing.T) {
 			}]
 		}]`), nil
 	}}
-	srv := New(ServerOptions{
+	srv := newWorkspaceTestServer(t, ServerOptions{
 		Runner: runner, WorkspaceDir: workspace,
 		ToolChecker: func() ([]string, error) { return nil, nil },
 	})
@@ -328,14 +333,16 @@ func TestScan_WorkspaceIgnoreWithConftest(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(input, "eligible.json"), []byte(`{"blocked":true}`), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(input, "user-ignored.json"), []byte(`{invalid`), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(workspace, "artifact.json"), []byte(`{invalid`), 0600))
-	cfg := config.NewConfig(workspace)
+	cfg := config.NewWorkspaceConfig(workspace)
 	require.NoError(t, cfg.EnsureDirectories())
 	require.NoError(t, generate.WriteScanConfig(
 		cfg.GeneratedDirPath(), []string{"main"}, map[string]string{"main": "test-req"}, policyDir,
 	))
-	for _, path := range []string{filepath.Base(input), input} {
+	relativeInput, err := filepath.Rel(workspace, input)
+	require.NoError(t, err)
+	for _, path := range []string{relativeInput, input} {
 		t.Run(path, func(t *testing.T) {
-			srv := New(ServerOptions{
+			srv := newWorkspaceTestServer(t, ServerOptions{
 				WorkspaceDir: workspace,
 				ToolChecker:  func() ([]string, error) { return nil, nil },
 			})

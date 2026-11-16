@@ -18,7 +18,7 @@ func shellJoin(command []string) string {
 	return strings.Join(command, " ")
 }
 
-func executeCommand(ctx context.Context, command []string) ([]byte, error) {
+func executeCommand(ctx context.Context, command []string, workspace string) ([]byte, error) {
 	cmdPath, err := exec.LookPath(command[0])
 	if err != nil {
 		return nil, fmt.Errorf("command not found: %s: %w", command[0], err)
@@ -27,6 +27,7 @@ func executeCommand(ctx context.Context, command []string) ([]byte, error) {
 	cmdStr := shellJoin(command)
 	hclog.Default().Info("Executing command", "command", cmdStr)
 	cmd := exec.CommandContext(ctx, cmdPath, command[1:]...)
+	cmd.Dir = workspace
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -68,10 +69,11 @@ func constructScanCommand(openscapFiles map[string]string, profile string) []str
 	return cmd
 }
 
-func OscapScan(ctx context.Context, openscapFiles map[string]string, profile string) ([]byte, error) {
+// OscapScan evaluates explicit input/output paths with the workspace as subprocess CWD.
+func OscapScan(ctx context.Context, openscapFiles map[string]string, profile, workspace string) ([]byte, error) {
 	command := constructScanCommand(openscapFiles, profile)
 
-	return executeCommand(ctx, command)
+	return executeCommand(ctx, command, workspace)
 }
 
 func constructGenerateFixCommand(fixType, output, profile, tailoringFile, datastream string) []string {
@@ -90,7 +92,9 @@ func constructGenerateFixCommand(fixType, output, profile, tailoringFile, datast
 	return cmd
 }
 
-func OscapGenerateFix(ctx context.Context, providerDir, profile, policyFile, datastream string) error {
+// OscapGenerateFix writes remediation files beneath providerDir, using the supplied
+// tailoring/datastream paths and workspace subprocess CWD. Command errors propagate.
+func OscapGenerateFix(ctx context.Context, providerDir, profile, policyFile, datastream, workspace string) error {
 	fixTypes := map[string]string{
 		"bash":      "remediation-script.sh",
 		"ansible":   "remediation-playbook.yml",
@@ -101,7 +105,7 @@ func OscapGenerateFix(ctx context.Context, providerDir, profile, policyFile, dat
 		outputPath := filepath.Join(providerDir, config.RemediationDir, outputFile)
 		hclog.Default().Debug("Generating remedation file %s", outputPath)
 		command := constructGenerateFixCommand(fixType, outputPath, profile, policyFile, datastream)
-		_, err := executeCommand(ctx, command)
+		_, err := executeCommand(ctx, command, workspace)
 		if err != nil {
 			return err
 		}

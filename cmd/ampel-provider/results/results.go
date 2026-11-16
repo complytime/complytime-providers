@@ -5,8 +5,6 @@ package results
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -86,6 +84,10 @@ type PerRepoResult struct {
 	SnappyDigest          string    `json:"snappy_digest,omitempty"`
 	Remarks               string    `json:"remarks,omitempty"`
 	RequirementIDs        []string  `json:"-"`
+	// RetainedEvidence and References are constructed together from validated storage
+	// before publication. Legacy pure-mapping callers may still supply the path fields.
+	RetainedEvidence []provider.Evidence         `json:"-"`
+	References       []provider.MappingReference `json:"-"`
 }
 
 // Finding represents an individual rule evaluation result.
@@ -132,6 +134,17 @@ func ParseAmpelOutput(raw []byte, repo, branch string) (*PerRepoResult, error) {
 	if err := json.Unmarshal(raw, &stmt); err != nil {
 		return nil, fmt.Errorf("parsing ampel verify attestation: %w", err)
 	}
+	status := strings.ToUpper(strings.TrimSpace(stripControlChars(stmt.Predicate.Status)))
+	errorMessage := ""
+	if stmt.Predicate.Error != nil {
+		if len(stmt.Predicate.Error.Message) > maxFieldSize {
+			return nil, fmt.Errorf("ampel output error field exceeds maximum size")
+		}
+		errorMessage = strings.TrimSpace(stripControlChars(stmt.Predicate.Error.Message))
+	}
+	if status == "" && errorMessage == "" {
+		return nil, fmt.Errorf("ampel attestation has no result-set status or error")
+	}
 
 	result := &PerRepoResult{
 		Repository: repo,
@@ -140,13 +153,13 @@ func ParseAmpelOutput(raw []byte, repo, branch string) (*PerRepoResult, error) {
 	}
 
 	// Handle ResultSet-level error
-	if stmt.Predicate.Error != nil && stmt.Predicate.Error.Message != "" {
-		if len(stmt.Predicate.Error.Message) > maxFieldSize {
-			return nil, fmt.Errorf("ampel output error field exceeds maximum size")
-		}
+	if errorMessage != "" {
 		result.Status = "error"
-		result.Error = stripControlChars(stmt.Predicate.Error.Message)
+		result.Error = errorMessage
 		return result, nil
+	}
+	if status != "PASS" && status != "FAIL" && status != "SKIP" {
+		return nil, fmt.Errorf("ampel attestation has unsupported result-set status")
 	}
 
 	// Extract findings from each policy result's tenet evaluations
@@ -200,7 +213,10 @@ func ParseAmpelOutput(raw []byte, repo, branch string) (*PerRepoResult, error) {
 		}
 	}
 
-	switch strings.ToUpper(stmt.Predicate.Status) {
+	if status == "FAIL" && len(result.Findings) == 0 {
+		return nil, fmt.Errorf("ampel failed result set has no findings or error")
+	}
+	switch status {
 	case "PASS":
 		result.Status = "pass"
 	case "SKIP":
@@ -210,27 +226,6 @@ func ParseAmpelOutput(raw []byte, repo, branch string) (*PerRepoResult, error) {
 	}
 
 	return result, nil
-}
-
-// WritePerRepoResult writes a PerRepoResult as JSON to the given directory.
-func WritePerRepoResult(result *PerRepoResult, dir string) error {
-	if err := os.MkdirAll(dir, 0750); err != nil {
-		return fmt.Errorf("creating results directory: %w", err)
-	}
-
-	filename := targets.SanitizeRepoURL(result.Repository) + "-" + result.Branch + ".json"
-	path := filepath.Join(dir, filename)
-
-	data, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling per-repo result: %w", err)
-	}
-
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		return fmt.Errorf("writing per-repo result: %w", err)
-	}
-
-	return nil
 }
 
 // ToScanResponse maps a slice of PerRepoResults to a provider.ScanResponse.
@@ -442,6 +437,9 @@ func repoEvidencePrefix(repo, branch, specLabel string) string {
 // the spec label to disambiguate scans of the same repo/branch with
 // different spec files.
 func buildRepoEvidence(rr *PerRepoResult) []provider.Evidence {
+	if rr.RetainedEvidence != nil {
+		return rr.RetainedEvidence
+	}
 	if rr.AmpelAttestationPath == "" && rr.SnappyAttestationPath == "" {
 		return nil
 	}
@@ -488,6 +486,15 @@ func buildMappingReferences(repoResults []*PerRepoResult) []provider.MappingRefe
 
 	for _, rr := range repoResults {
 		if rr.Status == "error" {
+			continue
+		}
+		if rr.References != nil {
+			for _, reference := range rr.References {
+				if !seen[reference.ID] {
+					seen[reference.ID] = true
+					refs = append(refs, reference)
+				}
+			}
 			continue
 		}
 		prefix := repoEvidencePrefix(

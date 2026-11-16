@@ -5,7 +5,6 @@ package results
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -21,6 +20,29 @@ func loadFixture(t *testing.T, path string) []byte {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	return data
+}
+
+func TestParseAmpelOutput_RejectsMeaninglessResultSets(t *testing.T) {
+	for _, raw := range []string{
+		`{"predicate":{"error":{}}}`,
+		`{"predicate":{"status":" \t","error":{"message":"\n\t"}}}`,
+		`{"predicate":{"status":"UNKNOWN","error":{}}}`,
+		`{"predicate":{"status":"FAIL","error":{}}}`,
+	} {
+		result, err := ParseAmpelOutput([]byte(raw), "https://example.com/repo", "main")
+		require.Error(t, err, raw)
+		require.Nil(t, result)
+	}
+	result, err := ParseAmpelOutput([]byte(`{"predicate":{"error":{"message":"tool failed"}}}`),
+		"https://example.com/repo", "main")
+	require.NoError(t, err)
+	require.Equal(t, "error", result.Status)
+	require.Equal(t, "tool failed", result.Error)
+	result, err = ParseAmpelOutput(loadFixture(t, "testdata/ampel-verify-fail.json"),
+		"https://example.com/repo", "main")
+	require.NoError(t, err)
+	require.Equal(t, "fail", result.Status)
+	require.NotEmpty(t, result.Findings, "legitimate noncompliance remains an evaluation, not an operational error")
 }
 
 func TestAllFindingsSkipped(t *testing.T) {
@@ -424,51 +446,16 @@ func TestParseAmpelOutput_OversizedGuidance(t *testing.T) {
 	require.Contains(t, err.Error(), "guidance field exceeds maximum size")
 }
 
-func TestWritePerRepoResult(t *testing.T) {
-	dir := t.TempDir()
-	result := &PerRepoResult{
-		Repository: "https://github.com/myorg/repo1",
-		Branch:     "main",
-		Status:     "pass",
-		Findings: []Finding{
-			{TenetID: "t1", Title: "Test", Result: "pass", Reason: "OK"},
-		},
-	}
-	err := WritePerRepoResult(result, dir)
-	require.NoError(t, err)
-
-	files, err := os.ReadDir(dir)
-	require.NoError(t, err)
-	require.Len(t, files, 1)
-	require.Contains(t, files[0].Name(), "myorg-repo1-main.json")
-}
-
-func TestWritePerRepoResult_Overwrites(t *testing.T) {
-	dir := t.TempDir()
-	r1 := &PerRepoResult{Repository: "https://github.com/org/repo", Branch: "main", Status: "pass"}
-	r2 := &PerRepoResult{Repository: "https://github.com/org/repo", Branch: "main", Status: "fail"}
-
-	require.NoError(t, WritePerRepoResult(r1, dir))
-	require.NoError(t, WritePerRepoResult(r2, dir))
-
-	files, err := os.ReadDir(dir)
-	require.NoError(t, err)
-	require.Len(t, files, 1)
-
-	data, err := os.ReadFile(filepath.Join(dir, files[0].Name()))
-	require.NoError(t, err)
-	require.Contains(t, string(data), `"fail"`)
-}
-
-func TestWritePerRepoResult_InvalidDir(t *testing.T) {
+func TestToScanResponse_OperationalFailureHasNoSummaryOrEvidence(t *testing.T) {
 	result := &PerRepoResult{
 		Repository: "https://github.com/org/repo",
 		Branch:     "main",
-		Status:     "pass",
+		Status:     "error", Error: "required artifact write failed",
 	}
-	err := WritePerRepoResult(result, "/dev/null/impossible")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "creating results directory")
+	response := ToScanResponse([]*PerRepoResult{result}, nil)
+	require.Len(t, response.Errors, 1)
+	require.Empty(t, response.Assessments)
+	require.Empty(t, response.MappingReferences)
 }
 
 func TestToScanResponse(t *testing.T) {

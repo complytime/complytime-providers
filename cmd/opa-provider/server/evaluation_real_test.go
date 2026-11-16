@@ -45,7 +45,8 @@ func TestScan_RealConftestRequiresEvaluatedInput(t *testing.T) {
 				require.NoError(t, os.WriteFile(filepath.Join(policy, "policy.rego"), []byte(
 					"package main\nfoo := true\n"), 0600))
 			}
-			cfg := config.NewConfig(workspace)
+			cfg := config.NewWorkspaceConfig(workspace)
+			require.NoError(t, os.MkdirAll(workspace, 0750))
 			require.NoError(t, cfg.EnsureDirectories())
 			require.NoError(t, generate.WriteScanConfig(cfg.GeneratedDirPath(), []string{"main"},
 				map[string]string{"main": "test-req"}, policy))
@@ -71,7 +72,7 @@ func TestScan_RealConftestRequiresEvaluatedInput(t *testing.T) {
 				target = remoteTarget("", "https://example.com/org/repo")
 				target.Variables[loader.VarScanPath] = scanPath
 			}
-			srv := New(opts)
+			srv := newWorkspaceTestServer(t, opts)
 			response, err := srv.Scan(context.Background(), makeScanRequest(t, []provider.Target{target}))
 			require.NoError(t, err)
 			if strings.HasPrefix(scenario, "evaluated") {
