@@ -114,6 +114,21 @@ automatic access for other users. The execution account needs a writable workspa
 and traversal access through every parent; new context parents permit that access
 without changing unrelated existing directories.
 
+OPA working directories, including private clones beneath `.complytime/opa/repos/`,
+use `0700`. Existing OPA working leaves with broader access fail closed: inspect
+their ownership and contents, then have the authorized execution account secure
+those specific directories before retrying. The provider does not chmod existing
+working directories or unrelated workspace ancestors automatically.
+
+Keep workspace ancestors under trusted control while providers and tools run.
+Held descriptors prevent symlink redirection but cannot freeze directory ancestry:
+concurrent renames can move writes outside the original pathname subtree, and tools
+reopening absolute paths can reach replacement trees. Locator checks reject observed
+relocation before/after provider writes and before publication; they cannot undo
+written bytes or guarantee detection of a move away and back. Retained regular
+outputs with multiple hard links are rejected before reading or chmod. These checks
+do not protect against arbitrary concurrent mutation by the same execution account.
+
 For permission errors, check the execution account and parent traversal. For disk-space
 errors, provide sufficient writable capacity before retrying. Failures or interrupted
 evaluations can leave unreferenced partial outputs; their presence does not prove

@@ -440,6 +440,13 @@ incomplete. For access errors, check execution-account and parent permissions;
 for disk-space errors, provide sufficient writable capacity. Do not widen evidence
 modes or treat partial files as published evidence.
 
+Generate replaces tailoring through a fresh inode and a no-follow parent-directory
+handle, preserving reruns without truncating external symlink/hard-link referents.
+Scan requires recognizable XCCDF 1.1/1.2 `Benchmark`/`TestResult` supporting output,
+not merely well-formed XML; this is structural recognition, not schema validation.
+Keep workspace ancestors under trusted control throughout execution: held handles
+do not prevent concurrent ancestor relocation, and oscap reopens absolute paths.
+
 Preserve both the Evaluation Log and its log-selected evidence files. Uploading the
 log alone does not transfer artifact bytes. Downstream collection must keep both
 retrievable, verify transferred bytes against logged digests, and map moved files

@@ -368,6 +368,27 @@ Fix account access or capacity before retrying; the provider does not
 transfer owners, widen historical permissions or promise access to
 arbitrary other users.
 .PP
+OPA working directories (\f[B]opa\f[R], \f[B]policy\f[R],
+\f[B]repos\f[R], and \f[B]generated\f[R]) use \f[B]0700\f[R] to protect
+private clones.
+Existing working leaves must already have that mode and belong to the
+execution account.
+Inspect rejected older \f[B]0750\f[R]/\f[B]0755\f[R] directories and
+have the authorized account secure those specific leaves before
+retrying.
+The provider does not chmod unrelated existing ancestors.
+.PP
+Keep workspace ancestors under trusted control during execution.
+Held descriptors pin inodes, not directory ancestry.
+Locator checks reject observed relocation before/after provider writes
+and before publication, but cannot undo written bytes or detect every
+move\-away/back race.
+External tools reopen supplied paths and can reach replacement trees
+after a concurrent rename.
+Multiply\-linked retained outputs are rejected before reading or
+changing permissions; arbitrary concurrent same\-account mutation is not
+prevented.
+.PP
 Uploading the Evaluation Log does not transfer its evidence bytes.
 Customer\-owned storage and transfer integrations must preserve both the
 log and log\-selected files, keep them retrievable and verify

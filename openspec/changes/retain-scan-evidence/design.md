@@ -179,6 +179,21 @@ results root. Reject artifact symlinks and non-regular outputs before parsing or
 hashing; use constrained handles rather than a pathname check followed by an
 unconstrained reopen. Confirm validated and hashed bytes belong to the same artifact.
 
+Reject multiply-linked regular outputs before reads and permission changes,
+including unvalidated supporting files. Matching UID/GID alone does not exclude
+external aliases of the same inode. These checks do not prevent arbitrary concurrent
+same-account mutation. Malformed sensitive URL-like context containing whitespace
+is omitted as a whole, without changing retained raw evidence bytes.
+
+Workspace ancestors must remain under trusted control during execution. A held
+descriptor pins an inode, not its pathname ancestry. Deterministic relocation tests
+confirm that renaming an ancestor can move descriptor-relative writes outside the
+original workspace subtree, while external tools reopening absolute paths can write
+into a replacement tree. Check locators before/after provider writes and before
+finalization side effects/publication to reject observed relocation. Those checks
+are not atomic rename prevention: bytes already written are not undone, and a move
+away and back need not be detected. Do not promise race-free ancestry confinement.
+
 The author has selected private evaluation directories (0700) and files (0600),
 including tool outputs and metadata, with execution-account ownership per D9. This is
 the evidence-access product decision, not an open mode choice. Centralize these
@@ -636,14 +651,25 @@ requiring a new host identity protocol to give them to the original user.
 
 ## Repository instruction conflicts
 
-### Maintainer reconciliation (2026-11-10)
+### Maintainer reconciliation (durable reference verified 2026-11-16)
 
-The requesting maintainer confirmed in this implementation conversation:
-“I am maintainer and the decision is to keep the information from spec instead of
-from the pack. The spec is more restrict.” This conversation is the decision venue;
-no external decision link was supplied. The decision applies only to this change's
-new evaluation directories and evidence/supporting files: D1/D9's stricter 0700/0600
-requirements take precedence over Go pack SC-005's generic 0755/0644 modes.
+Maintainer `marcusburghardt` (GitHub association MEMBER) supplied the durable decision
+in [issue #242, comment 6916993610](https://github.com/complytime/complytime-providers/issues/242#issuecomment-6916993610):
+“As maintainer, I authorize the scoped SC-005 override: require 0700 for OPA working
+directories containing private clones and retained evaluation directories, and 0600
+for retained evidence and supporting files. Generic defaults and all other security,
+review, and merge requirements remain unchanged.”
+
+This records the decision venue, link, scope and applicable instruction required by
+task 0.1. The scoped product instruction is **0700**, not 0750, for OPA private-clone
+working directories and retained evaluation leaves, and **0600** for retained files.
+Other context-parent defaults are unchanged. Existing working leaves must already
+be private and execution-account owned; do not chmod unrelated ancestors.
+
+The separate [governance PR #243](https://github.com/complytime/complytime-providers/pull/243)
+remains OPEN/REVIEW_REQUIRED at verification time, head `73e8a5e`. Its CR-006 rule is
+not present on this feature branch. The scoped authorization is not governance merge
+or council approval, and does not authorize agents to edit packs or quality gates.
 Convention packs, severity rules, and review requirements remain unchanged.
 
 - **Reconciled permission-mode instruction conflict (HIGH):** The selected 0700/0600 modes
@@ -659,8 +685,9 @@ existing tactical OpenSpec tier without waiving or modifying AGENTS.md.
 
 For the permission conflict, the readiness record MUST identify the authorized
 maintainer decision, its scope, the decision venue and link, and the resulting
-applicable instruction. Until that evidence is recorded, reconciliation remains
-outstanding. This record does not authorize an agent to amend or waive a convention
+applicable instruction. The durable evidence above now satisfies that recording
+requirement; the separate governance review remains pending. This record does not
+authorize an agent to amend or waive a convention
 pack, and it does not substitute broader access for the selected private modes.
 
 ## Migration Plan

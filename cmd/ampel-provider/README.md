@@ -171,6 +171,11 @@ authorized elevated access to read and hash it. There is no original-user handof
 For permission or disk-space failures, check execution-account access, parent
 traversal and capacity without widening old evidence permissions or changing owners.
 
+An empty result-set error object is not an operational error message or a valid
+evaluation result. Meaningless result sets are rejected through the existing
+per-evaluation error channel without publishing evidence or synthetic passing
+assessments for configured requirements. Valid noncompliant findings remain results.
+
 Uploading a log alone does not upload its evidence bytes. Customers own storage,
 transfers, access policies and longevity: preserve the log and its log-selected
 files, keep them retrievable and verify transferred bytes against the digests.

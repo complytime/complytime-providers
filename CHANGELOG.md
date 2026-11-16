@@ -50,6 +50,20 @@
 
 ### Security
 
+- **opa-provider**: Create private-clone working directories at `0700` with
+  no-follow traversal; reject broader existing working leaves without chmodding
+  unrelated directories. Existing installations may need authorized mode repair.
+- **internal/evidence**: Reject multiply-linked retained outputs before reads or
+  chmod, omit ambiguous whitespace-containing URL context atomically, and check
+  evaluation locators before/after writes. Document concurrent-rename limitations;
+  retained raw evidence is unchanged by context redaction. Preserve safe diagnostic
+  fallbacks and compose readable references from individually sanitized context.
+- **openscap-provider**: Replace Generate-time tailoring safely without truncating
+  symlink/hard-link referents, and require recognizable XCCDF supporting results.
+- **ampel-provider**: Reject meaningless result sets, including empty error objects,
+  instead of allowing configured requirements to receive synthetic passing results.
+  Preserve publication-critical storage verification failures during tool-output
+  writes/reservations as RPC errors rather than continuing later evaluations.
 - **dependencies**: Bumped `golang.org/x/net` from v0.61.0 to v0.62.0, addressing GO-2026-6866 (missed ancestor namespace transitions when rendering raw text in `html`) and GO-2026-6860 (quadratic complexity when coalescing text nodes in `html`). Both affect `golang.org/x/net/html`, which is reached indirectly through `antchfx/xmlquery` and `google.golang.org/grpc`. Neither was reachable from provider code. No exported API or transitive dependency changes.
 - **ampel-provider**, **opa-provider**: Added aggregate extraction size limit (500 MB total) and file count limit (10,000 files) for complypack tar.gz archives. Previously, only individual files were capped at 100 MB. (Fixes #71)
 - **opa-provider**: Fixed missing cleanup of partial extractions on error. Previously, a failed extraction left corrupted content that would be silently reused on subsequent attempts.

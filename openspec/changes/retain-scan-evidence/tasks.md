@@ -49,6 +49,11 @@ error while adding the new finalization errors from D6/D9.
   the design without modifying convention packs in this change. Keep this task
   incomplete until the decision is recorded; no companion complyctl contract is
   required to satisfy it.
+  Durable reference verified and recorded on 2026-11-16:
+  [maintainer authorization](https://github.com/complytime/complytime-providers/issues/242#issuecomment-6916993610).
+  The scope also requires 0700 for OPA private-clone working directories.
+  [Governance PR #243](https://github.com/complytime/complytime-providers/pull/243)
+  remains pending; this checkbox is not council or merge approval.
 
 ## 1. Shared evaluation storage and context
 
@@ -618,6 +623,66 @@ write/close failure coverage rather than deleting the error-path protection.
   external CI parity, controlled host-root verification or fresh council approval.
   The original PR review binds only its frozen head; changed code requires review
   again. Unrelated user-owned workflow/tooling edits and untracked files are preserved.
+
+### PR #238 accepted feedback implementation (2026-11-16)
+
+- [x] Record the verified scoped maintainer authorization and its durable link,
+  including 0700 OPA private-clone working directories. Keep governance PR #243
+  separate and pending; no packs, thresholds, review limits or workflow gates change.
+- [x] Create OPA working leaves privately with no-follow traversal, rejecting
+  broader existing leaves without chmodding unrelated ancestors. Update legacy
+  working-data fixtures without creating retained history in invocation workspaces.
+- [x] Reject multiply-linked retained regular files before reads/chmod, including
+  supporting files and links introduced after validation. Regressions assert
+  external bytes/modes remain unchanged and that reads do not occur on rejection.
+- [x] Omit ambiguous whitespace-containing sensitive URL context atomically through
+  actual metadata/label persistence, without modifying raw evidence. Preserve an
+  operational-error message when detailed context must be omitted.
+- [x] Document LocalTargetKey's already-absolute, workspace-resolved precondition.
+- [x] Safely replace Generate tailoring through a fresh inode and no-follow held
+  parent, preserving reruns and external symlink/hard-link referents.
+- [x] Reject meaningless Ampel result sets, including empty/whitespace error objects
+  and unsupported statuses; verify configured and absent requirement-ID paths
+  cannot publish synthetic passing assessments. Preserve valid noncompliance.
+- [x] Recognize XCCDF 1.1/1.2 Benchmark/TestResult supporting output before publication;
+  reject unrelated XML without adding a schema engine.
+- [x] Investigate allocation-to-write ancestor relocation with deterministic channel
+  synchronization. Confirm moved-descriptor bytes and replacement-tree tool writes;
+  add before/after locator checks and publication rejection. Document that checks
+  cannot undo writes or atomically prevent every move-away/back race.
+- Verification: `make build`, `make test`, full `go test -race -count=1 ./...`,
+  `make lint` (zero issues), strict OpenSpec validation, man generation, whitespace,
+  all four released-baseline shell suites, shellcheck, targeted workflow yamllint
+  and actionlint pass. Real-conftest isolation and all offline CLI tests pass with
+  no skips, including Gemara v1.6.0 CUE validation. Actual binaries: installed
+  complyctl 1.2.0 RPM, rebuilt OPA provider, conftest module v0.68.2 (CLI reports
+  `dev`) and OPA 1.15.2. Private run evidence is recorded in the feedback workflow.
+- The required Gaze-reporter invocation fails before reporting with provider HTTP
+  401 (`invalid API key`); no fresh Gaze result or baseline comparison is claimed.
+  Historical comparison limitations remain. Credentialed cross-repo integration,
+  controlled host-root verification and a fresh passing cumulative council are
+  still required before readiness; tasks 5.3/5.4/5.8 remain incomplete.
+- The first full six-persona cumulative native council completes with REQUEST
+  CHANGES. It identifies a conservative-redaction side effect: OPA clone-error
+  explanations and URL-bearing reference titles can become empty. Add safe OPA
+  diagnostic fallbacks and sanitize individual fields into scheme-independent
+  display keys before composing reference prose; keep atomic malformed-value
+  omission unchanged. Focused race regressions verify failed HTTPS clone errors,
+  meaningful Ampel titles/spec context and secret exclusion. A separate MEDIUM
+  release-note advisory concerns pre-existing user-owned workflow edits and is
+  left outside these feedback-fix commits. A fresh cumulative council is required.
+- The second full six-persona cumulative council also completes with REQUEST
+  CHANGES. A new deterministic regression reproduces Ampel downgrading locator
+  VerificationError from Write/Prepare into ordinary per-evaluation errors.
+  Preserve that typed failure at the execution boundary, suppress the RPC response
+  and stop later evaluations; both Write/Prepare regressions fail before the fix
+  and pass afterward. The separate pre-existing workflow release-note gap receives
+  a Curator REQUEST CHANGES and requires author handling outside these feedback
+  commits. Do not change governance rules or exclude that work to obtain approval.
+- Documentation impact: update CHANGELOG, provider/root READMEs, OPA man source and
+  generated page, and design/readiness records. Existing packages/build commands
+  remain unchanged, so no AGENTS structural update is needed. Preserve unrelated
+  user-owned workflow/tooling changes and untracked files.
 
 ### Remaining follow-up
 

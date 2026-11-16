@@ -228,6 +228,19 @@ account access and retry; the provider never changes older owners or grants acce
 to another user. Metadata write/close failures warn without suppressing complete,
 verified evidence.
 
+Working directories (`opa`, `policy`, `repos`, and `generated`) use `0700`, including
+the boundary protecting private clones. An existing working leaf must already be
+owned by the execution account with that mode. If setup rejects an older `0750`
+or `0755` directory, inspect it and have the authorized account secure that specific
+directory before retrying; the provider never chmods unrelated existing ancestors.
+Retained-result context parents retain their separate creation policy.
+
+Workspace ancestors must remain under trusted control during execution. Held
+descriptors pin inodes, not ancestry; concurrent ancestor renames can relocate
+writes, and conftest reopens supplied output/input paths. Locator checks reject
+observed relocation but cannot undo bytes or detect every move-away/back race.
+Multiply-linked retained outputs are rejected before reads or permission changes.
+
 The log alone does not contain or transfer artifact bytes: uploading a log does
 not upload its evidence. Customer-owned storage and transfer integrations must
 preserve both the log and its log-selected files, keep them retrievable and verify

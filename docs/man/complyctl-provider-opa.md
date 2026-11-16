@@ -314,6 +314,20 @@ disk-space failures can leave unreferenced partial files. Fix account access or
 capacity before retrying; the provider does not transfer owners, widen historical
 permissions or promise access to arbitrary other users.
 
+OPA working directories (**opa**, **policy**, **repos**, and **generated**) use
+**0700** to protect private clones. Existing working leaves must already have that
+mode and belong to the execution account. Inspect rejected older **0750**/**0755**
+directories and have the authorized account secure those specific leaves before
+retrying. The provider does not chmod unrelated existing ancestors.
+
+Keep workspace ancestors under trusted control during execution. Held descriptors
+pin inodes, not directory ancestry. Locator checks reject observed relocation
+before/after provider writes and before publication, but cannot undo written bytes
+or detect every move-away/back race. External tools reopen supplied paths and can
+reach replacement trees after a concurrent rename. Multiply-linked retained
+outputs are rejected before reading or changing permissions; arbitrary concurrent
+same-account mutation is not prevented.
+
 Uploading the Evaluation Log does not transfer its evidence bytes. Customer-owned
 storage and transfer integrations must preserve both the log and log-selected files,
 keep them retrievable and verify transferred bytes against the logged digests.
