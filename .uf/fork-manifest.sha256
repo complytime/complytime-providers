@@ -1,0 +1,7 @@
+# Repository-owned fork of the UF v0.21.0 review commands.
+# Verified by `make verify-uf-fork`. Update this manifest in the same commit as
+# any intentional command change. Do not run `uf init --force` while the fork is
+# active; reconcile with upstream first (see AGENTS.md).
+802bf04152c7137a305a36cc0e085dacb62d27b01baa2091e588050577e9c793  .opencode/commands/uf.address-feedback.md
+87bcdae22ba64512a88f21719dbb30f79176e1ec1493f06f26c183847f9ffd49  .opencode/commands/uf.review-council.md
+4a10ed97cfd08c1802af39b23bd0da78996a9b5c8b84d3b5b2ef6aee032e1d44  .opencode/commands/uf.review-pr.md

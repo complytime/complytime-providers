@@ -36,6 +36,9 @@ bash .github/scripts/test/validate-released-complyctl-checkout_test.sh
 bash .github/scripts/test/released-baseline-diagnostics_test.sh
 bash .github/scripts/test/canonical-complyctl-harness_test.sh
 
+# Run the UF fork guard test (requires GNU findutils and Git)
+bash .github/scripts/test/verify_uf_fork_test.sh
+
 # Lint CI helper scripts and the cross-repo workflow
 shellcheck .github/scripts/*.sh .github/scripts/test/*.sh
 yamllint .github/workflows/ci_cross_repo_integration.yml
@@ -56,6 +59,12 @@ GEMARA_CUE_TEST_MODULE=github.com/gemaraproj/gemara@v1.6.0 \
 
 # Run linter (golangci-lint with default config)
 make lint
+
+# Verify the repository-owned UF review commands match the fork manifest
+make verify-uf-fork
+
+# List per-invocation UF workflow records with no write in 14 days (PRUNE=1 deletes)
+make clean-uf-workflows
 
 # Generate man pages (requires pandoc)
 make man
@@ -127,6 +136,8 @@ complytime-providers/
 │   ├── archive/               #   Completed/superseded change specs
 │   └── changes/               #   Active change specs
 ├── .opencode/                 # Agent definitions & convention packs
+├── .uf/                       # Review policy, schemas, tracked fork manifest
+│                              #   (workflows/, feedback/, artifacts/ are ignored runtime data)
 ├── .goreleaser.yaml           # GoReleaser v2 release config
 ├── go-vendor-tools.toml       # Vendored license detection config (Fedora RPM)
 └── complytime-providers.spec  # RPM packaging spec
@@ -195,7 +206,30 @@ CRITICAL severity.
 | Command | When | Scope |
 |---------|------|-------|
 | `/uf.review-council` | Pre-PR (local) | 5+ Divisor agents |
-| `/uf.review-pr [N]` | Post-PR (GitHub) | Single agent, CI analysis |
+| `/uf.review-pr [N]` | Post-PR (GitHub) | Divisor council fan-out, CI analysis |
+| `/uf.address-feedback` | Post-review (local) | Feedback triage + council gate |
+
+### Local UF fork
+
+`/uf.review-council`, `/uf.review-pr`, and `/uf.address-feedback` are a
+repository-owned fork of the UF v0.21.0 scaffold. The embedded UF
+plugins target the OpenCode V1 plugin API and do not load on V2, so
+these three commands execute a native path. Other `uf.*` commands remain
+scaffold-managed.
+
+- Each command MUST report its execution path before dispatch.
+- `make verify-uf-fork` fails when one of the three files changes
+  without updating `.uf/fork-manifest.sha256`; `make update-uf-fork-manifest`
+  regenerates it after an intentional change.
+- `make clean-uf-workflows` lists per-invocation records under
+  `.uf/workflows/` with no write in the last `UF_WORKFLOW_RETENTION_DAYS`
+  days (default 14) and deletes them only with `PRUNE=1`. Feedback posting
+  receipts under `.uf/feedback/` are never pruned.
+- Evidence and limits for this path: `docs/review-command-compatibility.md`.
+- Do NOT run `uf init --force` while the fork is active. When a
+  V2-compatible UF release ships, compare upstream commands with the
+  fork, reconcile deliberately, then remove the marker and manifest.
+
 
 ## Specification Workflow
 
