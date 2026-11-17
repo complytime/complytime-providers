@@ -170,7 +170,7 @@ passed=$((passed + 1))
     cd "$WORK_DIR"
     fixture | jq -L "$LIBRARY" -cs -f "$HELPER" >/dev/null
 )
-if [ -n "$(find "$WORK_DIR" -mindepth 1 -print -quit)" ]; then
+if [[ -n "$(find "$WORK_DIR" -mindepth 1 -print -quit)" ]]; then
     fail "preflight created invocation artifacts"
 fi
 printf 'UF review preflight decision fixtures: %d passed\n' "$passed"

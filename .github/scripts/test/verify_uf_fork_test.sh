@@ -36,7 +36,7 @@ copy_fixture() {
     for file in "${FILES[@]}"; do
         cp "$REPOSITORY_ROOT/$file" "$WORK_DIR/$file"
     done
-    if [ ! -d "$WORK_DIR/.git" ]; then
+    if [[ ! -d "$WORK_DIR/.git" ]]; then
         git init -q "$WORK_DIR"
     fi
 }
@@ -189,13 +189,13 @@ touch -d '40 days ago' "$WORK_DIR/.uf/feedback/pr-7/receipts.json"
 run_make clean-uf-workflows >"$WORK_DIR/list.log" 2>&1 || fail "clean-uf-workflows listing failed"
 grep -Fq 'uf.review-council/stale' "$WORK_DIR/list.log" || fail "listing omitted the stale record"
 grep -Fq 'set PRUNE=1' "$WORK_DIR/list.log" || fail "listing did not explain how to delete"
-[ -d "$WORK_DIR/.uf/workflows/uf.review-council/stale" ] || fail "default run deleted a record"
+[[ -d "$WORK_DIR/.uf/workflows/uf.review-council/stale" ]] || fail "default run deleted a record"
 
 # 9. PRUNE=1 removes only the stale record and keeps feedback receipts.
 run_make clean-uf-workflows PRUNE=1 >/dev/null 2>&1 || fail "clean-uf-workflows PRUNE=1 failed"
-[ ! -d "$WORK_DIR/.uf/workflows/uf.review-council/stale" ] || fail "stale record was not pruned"
-[ -d "$WORK_DIR/.uf/workflows/uf.review-council/fresh" ] || fail "fresh record was pruned"
-[ -f "$WORK_DIR/.uf/feedback/pr-7/receipts.json" ] || fail "feedback posting receipt was pruned"
+[[ ! -d "$WORK_DIR/.uf/workflows/uf.review-council/stale" ]] || fail "stale record was not pruned"
+[[ -d "$WORK_DIR/.uf/workflows/uf.review-council/fresh" ]] || fail "fresh record was pruned"
+[[ -f "$WORK_DIR/.uf/feedback/pr-7/receipts.json" ]] || fail "feedback posting receipt was pruned"
 
 # 10. Retention boundary: 13 days kept, 14 and 15 days pruned.
 for age in 13 14 15; do
@@ -204,9 +204,9 @@ for age in 13 14 15; do
     touch -d "$age days ago" "$WORK_DIR/.uf/workflows/uf.review-council/age-$age/state.json"
 done
 run_make clean-uf-workflows PRUNE=1 >/dev/null 2>&1 || fail "boundary prune failed"
-[ -d "$WORK_DIR/.uf/workflows/uf.review-council/age-13" ] || fail "13-day-old record was pruned"
-[ ! -d "$WORK_DIR/.uf/workflows/uf.review-council/age-14" ] || fail "14-day-old record was kept"
-[ ! -d "$WORK_DIR/.uf/workflows/uf.review-council/age-15" ] || fail "15-day-old record was kept"
+[[ -d "$WORK_DIR/.uf/workflows/uf.review-council/age-13" ]] || fail "13-day-old record was pruned"
+[[ ! -d "$WORK_DIR/.uf/workflows/uf.review-council/age-14" ]] || fail "14-day-old record was kept"
+[[ ! -d "$WORK_DIR/.uf/workflows/uf.review-council/age-15" ]] || fail "15-day-old record was kept"
 
 # 11. A recent nested write protects an otherwise old record.
 mkdir -p "$WORK_DIR/.uf/workflows/uf.review-council/resumed"
@@ -214,13 +214,13 @@ printf '{"step":"done"}\n' >"$WORK_DIR/.uf/workflows/uf.review-council/resumed/s
 touch -d '30 days ago' "$WORK_DIR/.uf/workflows/uf.review-council/resumed/state.json"
 printf '{"step":"assess"}\n' >"$WORK_DIR/.uf/workflows/uf.review-council/resumed/assessment.json"
 run_make clean-uf-workflows PRUNE=1 >/dev/null 2>&1 || fail "resumed-record prune failed"
-[ -d "$WORK_DIR/.uf/workflows/uf.review-council/resumed" ] ||
+[[ -d "$WORK_DIR/.uf/workflows/uf.review-council/resumed" ]] ||
     fail "a recently written record was pruned"
 
 # 12. An empty record directory is retained, not classified stale.
 mkdir -p "$WORK_DIR/.uf/workflows/uf.review-council/empty"
 run_make clean-uf-workflows PRUNE=1 >/dev/null 2>&1 || fail "empty-record prune failed"
-[ -d "$WORK_DIR/.uf/workflows/uf.review-council/empty" ] || fail "empty record directory was pruned"
+[[ -d "$WORK_DIR/.uf/workflows/uf.review-council/empty" ]] || fail "empty record directory was pruned"
 
 # 13. A missing workflow directory is reported and is not an error.
 mv "$WORK_DIR/.uf/workflows" "$WORK_DIR/.uf/workflows.off"
@@ -240,11 +240,11 @@ for name in 'run docs' 'run [ab]*' $'line\nbreak'; do
     touch -d '40 days ago' "$WORK_DIR/.uf/workflows/uf.review-council/$name/state.json"
 done
 run_make clean-uf-workflows >"$WORK_DIR/paths.log" 2>&1 || fail "literal-path listing failed"
-[ -f "$WORK_DIR/docs/retained" ] || fail "dry run touched an unrelated directory"
+[[ -f "$WORK_DIR/docs/retained" ]] || fail "dry run touched an unrelated directory"
 run_make clean-uf-workflows PRUNE=1 >/dev/null 2>&1 || fail "literal-path prune failed"
-[ -f "$WORK_DIR/docs/retained" ] || fail "prune escaped into the repository docs directory"
+[[ -f "$WORK_DIR/docs/retained" ]] || fail "prune escaped into the repository docs directory"
 for name in 'run docs' 'run [ab]*' $'line\nbreak'; do
-    [ ! -d "$WORK_DIR/.uf/workflows/uf.review-council/$name" ] ||
+    [[ ! -d "$WORK_DIR/.uf/workflows/uf.review-council/$name" ]] ||
         fail "literal invocation path was not pruned"
 done
 
@@ -255,7 +255,7 @@ for input in "\`touch $WORK_DIR/injected\`14" \
         >"$WORK_DIR/injection.log" 2>&1; then
         fail "command substitution accepted as retention input"
     fi
-    [ ! -e "$WORK_DIR/injected" ] || fail "retention input executed a command"
+    [[ ! -e "$WORK_DIR/injected" ]] || fail "retention input executed a command"
 done
 run_make clean-uf-workflows UF_WORKFLOW_RETENTION_DAYS=00014 >/dev/null 2>&1 ||
     fail "leading-zero decimal retention rejected"
@@ -280,7 +280,7 @@ for prune in 0 1; do
     fi
     grep -Fq 'cannot inspect tracked workflow paths' "$WORK_DIR/git-failure.log" ||
         fail "Git inventory failure was not explained"
-    [ -d "$WORK_DIR/.uf/workflows/uf.review-council/git-failure" ] ||
+    [[ -d "$WORK_DIR/.uf/workflows/uf.review-council/git-failure" ]] ||
         fail "Git inventory failure deleted a record"
 done
 
@@ -290,7 +290,7 @@ ln -s workflows.real "$WORK_DIR/.uf/workflows"
 if run_make clean-uf-workflows PRUNE=1 >"$WORK_DIR/symlink.log" 2>&1; then
     fail "symlinked workflow tree permitted cleanup"
 fi
-[ -d "$WORK_DIR/.uf/workflows.real/uf.review-council/git-failure" ] ||
+[[ -d "$WORK_DIR/.uf/workflows.real/uf.review-council/git-failure" ]] ||
     fail "symlinked tree cleanup deleted a record"
 rm "$WORK_DIR/.uf/workflows"
 mv "$WORK_DIR/.uf/workflows.real" "$WORK_DIR/.uf/workflows"
