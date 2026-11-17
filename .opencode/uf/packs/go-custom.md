@@ -34,3 +34,31 @@ Use the `CR-NNN` prefix for all custom rules. Use `[MUST]`,
   entrypoint lifecycle.
 - **CR-005** [MUST] Override AP-004: providers have no static
   assets to embed. Do NOT require `embed.FS` usage.
+- **CR-006** [MUST] Scoped override of Go pack SC-005:
+  - OPA working directories containing private clones MUST
+    use `0o700`.
+  - Retained evaluation directories MUST use `0o700`.
+  - Retained evidence and supporting files MUST use `0o600`.
+  - Outside these scopes, SC-005 remains unchanged:
+    `0o644` for regular files and `0o755` for executable
+    scripts and directories.
+  - This override MUST NOT waive path validation, ownership,
+    secret protection, testing, or security and review
+    requirements.
+
+## SC-005 Maintainer Decision
+
+The maintainer decision is to preserve private clones and
+retained evaluation evidence through the narrowly scoped
+permission modes in CR-006, rather than broaden access to
+satisfy SC-005's generic defaults.
+
+- **Authorizing maintainer:** marcusburghardt
+- **Decision date:** 2026-11-16
+- **Durable authorization:** [Issue #242](https://github.com/complytime/complytime-providers/issues/242)
+- **Affected implementation:**
+  [PR #238](https://github.com/complytime/complytime-providers/pull/238).
+
+The authorization applies only to CR-006's listed scopes.
+All other convention rules, security requirements, review
+gates, and merge requirements remain unchanged.
