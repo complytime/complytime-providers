@@ -4,6 +4,12 @@
 
 ### Added
 
+- **ai-tooling**: Add path-aware fork verification and regression fixtures so
+  plugin instructions can be isolated without allowing native execution to
+  depend on plugin workflow tools. Add read-only capability-selection and recovery
+  decision helpers with controlled fixtures; compatible plugins are preferred and
+  incompatible contracts are reported before bounded native fallback. Actual
+  V1/V2 command acceptance remains pending.
 - **opa-provider**: Preserve exact conftest JSON output for every local or remote
   evaluation, with result-file SHA256 digests, collection-start timestamps, private
   execution-account-owned storage and best-effort target/configuration metadata.
@@ -23,6 +29,9 @@
 
 ### Fixed
 
+- **ai-tooling**: Confine workflow cleanup to literal invocation paths, validate
+  retention input without shell evaluation, and fail closed on Git inventory
+  errors. Preserve working-tree content when reviewing oversized frozen captures.
 - **ci**: Validate the unchanged released complyctl host with a separately pinned,
   reviewed canonical harness so evidence assertions no longer depend on historical
   filename assumptions. Preserve released dependency/build/test validation and report

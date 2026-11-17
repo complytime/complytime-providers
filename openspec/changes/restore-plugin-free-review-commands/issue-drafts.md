@@ -1,9 +1,25 @@
 # Upstream drafts
 
-Drafts for upstream repositories. Nothing here has been posted; filing them is
-tracked by task 6.3 in `tasks.md`, which also records the resulting issue URLs.
-They are part of this change's evidence so the measured friction informs the
-projects that own the root cause, instead of being rediscovered.
+Historical drafts for upstream repositories, retained as change context.
+The maintainer has managed the issue disposition; these drafts are not a
+posting queue or authorization for further external actions. The UF #962
+comment was declined and not posted. Three issues were created prematurely
+without preview: [UF #1176](https://github.com/unbound-force/unbound-force/issues/1176),
+[org-infra #747](https://github.com/complytime/org-infra/issues/747), and
+[org-infra #746](https://github.com/complytime/org-infra/issues/746).
+Do not infer their current state from this record. Future issue/comment
+creation, editing, or closure requires showing the exact proposed content or
+action and receiving explicit maintainer approval. No more posting is needed
+to complete this PR.
+
+Reconciled for the plugin-first implementation revision on 2026-11-17:
+the session counts and plugin-load observations below are historical measurements,
+not rerun statistics. The repository now has contract-gated plugin instructions,
+bounded native fallback, and controlled selection/recovery fixtures, but no new
+end-to-end V1/V2 compatibility claim. The pinned feedback response-contract gap
+is documented in `docs/review-plugin-contracts.md`; the maintainer elected not
+to modify upstream plugin sources here. Keep filing separate from implementation
+acceptance and preserve these qualifications in any posted body.
 
 - Draft 1: comment on [UF #962][962] (existing downstream bug).
 - Draft 2: new UF issue for scaffold drift detection.
@@ -17,7 +33,8 @@ projects that own the root cause, instead of being rediscovered.
 
 ## Draft 1 — comment on UF #962
 
-> Re-verified on OpenCode v2.2.7 with the UF v0.21.0 scaffold. The failure is
+> Historical downstream measurement on OpenCode v2.2.7 with the UF v0.21.0
+> scaffold (not a claim about current upstream releases): the failure is
 > broader than the missing workflow tools in the original report: all four
 > scaffolded plugins fail to load, so no plugin tool exists at all.
 >
@@ -61,6 +78,15 @@ projects that own the root cause, instead of being rediscovered.
 >
 > Happy to test a prerelease against this repository; the saved review and
 > feedback fixtures here make a good downstream regression corpus.
+>
+> Downstream implementation follow-up (2026-11-17): the three command templates
+> now prefer a complete compatible plugin contract before bounded native
+> execution. Controlled decision fixtures are not real-runtime compatibility
+> evidence. Source inspection of v0.21.0 also found that feedback prompt building
+> injects the code-review response contract, while consolidation projects
+> code-review verdicts into feedback recommendations. Please verify the
+> item-specific feedback contract in a compatible release; registration alone
+> does not establish it.
 
 ---
 
@@ -81,11 +107,15 @@ projects that own the root cause, instead of being rediscovered.
 >
 > `complytime-providers` adapted `.opencode/commands/uf.review-council.md`,
 > `uf.review-pr.md`, and `uf.address-feedback.md` to run without the plugins on
-> OpenCode v2 (about 870 changed lines). Those edits are the only working path.
+> the affected OpenCode v2 runtime. The initial fork supplied a native path.
 > Until recently they lived uncommitted in a feature branch, precisely because a
 > scaffold refresh would discard them; they are now committed behind a fork
 > marker, a pinned version, and a digest manifest. That workaround is itself the
 > argument for a supported adaptation path.
+>
+> The subsequent plugin-first revision retains those drift checks and adds
+> static path-isolation fixtures; it does not establish end-to-end compatibility
+> for either revised backend. Working compatible plugins should remain preferred.
 >
 > ## Proposal
 >
@@ -113,27 +143,28 @@ projects that own the root cause, instead of being rediscovered.
 
 > ## Context
 >
-> Several organization repositories depend on UF's local `review-council`,
-> `review-pr`, and `address-feedback` commands. Those commands require UF plugins
-> that do not load on OpenCode v2, and the v2 migration (#714, #797) is
-> unreleased. Downstream repositories are currently maintaining local forks.
+> Organization guidance names UF's local review workflows. In the measured
+> `complytime-providers` case, the pinned UF v0.21.0 plugins fail to load on
+> OpenCode v2.2.7/v2.3.0. That repository maintains a local command fork.
+> Verify the current upstream migration/release status (#714, #797) before
+> deciding whether another platform would address an ongoing gap.
 >
-> [Fullsend](https://github.com/fullsend-ai/fullsend) is an Apache-2.0,
-> self-hosted agentic SDLC platform that runs purpose-built triage, review, fix,
-> and retro agents against GitHub and GitLab repositories. It is a different
-> layer from UF: post-PR bots in CI, not local pre-PR commands.
+> [Fullsend](https://github.com/fullsend-ai/fullsend) is licensed under Apache-2.0 and is a
+> candidate for a time-boxed evaluation. Verify its current deployment model,
+> supported hosts/runtimes, review/fix workflows and security controls against
+> an explicitly selected release. Do not assume it replaces UF's local pre-PR
+> workflow or treat repository marketing as compatibility evidence.
 >
 > ## Why evaluate rather than adopt
 >
-> - It cannot replace the local pre-PR gate as written: the repository
->   constitution requires a pre-PR council, and Fullsend reviews after the PR
->   exists. It would be additive, or the gate would have to be redefined.
-> - Its OpenCode runtime is experimental and limited to read-only agents
->   (triage, prioritize) until a security-hook adapter lands. Default runtimes are
->   Claude Code, pi, and codex.
-> - Adoption needs infrastructure: GitHub App, an OIDC token mint
->   (GCP Cloud Function or Cloudflare Worker), an OpenShell sandbox, and an
->   inference gateway. That is an ownership decision, not a tool switch.
+> - Existing repository rules require a local pre-PR council. Establish whether
+>   the candidate supports that stage; post-PR automation alone would be additive,
+>   not a replacement for the existing gate.
+> - Confirm the chosen release's OpenCode support and read/write security
+>   boundaries before attempting a fix workflow.
+> - Inventory deployment ownership, GitHub App permissions, credential/OIDC
+>   requirements, sandboxing and inference infrastructure rather than assuming
+>   adoption is only a local tool switch.
 >
 > ## Proposed evaluation
 >
@@ -157,7 +188,8 @@ projects that own the root cause, instead of being rediscovered.
 >
 > `org-infra/docs/AI_TOOLING.md` names `/uf.review-pr` as the review command for
 > every provisioned repository. Until a V2-compatible UF release exists, that
-> guidance points at commands most consumers cannot run. Either annotate the
+> guidance needs to distinguish affected runtimes from compatible consumers.
+> Either annotate the
 > runtime requirement or publish the interim native-path guidance.
 
 ---

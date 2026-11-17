@@ -5,11 +5,93 @@ the bounded native reviewer prototype for the
 `restore-plugin-free-review-commands` change in `openspec/changes/`. It is
 repository-owned evidence, not part of the provisioned AI tooling guide.
 
-Status: the three commands are a repository-owned native fork of the UF v0.21.0
-scaffold (`make verify-uf-fork`). The prototype evidence below establishes
+Status: the repository-owned UF v0.21.0 fork is being extended with plugin-first
+command instructions and path-bound recovery. The path-aware local verifier
+and pure selection/recovery fixtures pass, but revised command workflows are
+not yet accepted end to end on actual V1/V2 runtimes.
+The pinned feedback plugin has a behavioral incompatibility; see the
+[contract inventory](review-plugin-contracts.md#feedback-restoration-blocker).
+Earlier smoke evidence below describes the native fork, not this revision.
+The prototype evidence below establishes
 API-level reviewer lifecycle behaviour; it does not establish that each command
 honours every safeguard end to end. Command-level verification remains open in
 the change's tasks.
+
+## Plugin-first revision: verified boundary
+
+The three command templates now share capability-based selection and path-bound
+recovery. Compatible complete plugin contracts are preferred independently of the
+reported runtime version. Missing/incompatible contracts permit bounded native
+execution selected before backend work; uncertain discovery or an unusable saved
+backend stops. A plugin failure, policy rejection, unavailable model, or blocking
+verdict never authorizes a backend switch.
+
+The maintainer elected to leave plugin sources unchanged. The pinned feedback
+contract gap is therefore an incompatibility reported during preflight, not a
+claim that all registered V1 plugin tools constitute a usable feedback workflow.
+Future compatible contracts can select the plugin path through the same check.
+
+`make test-uf-review` runs the existing fork/cleanup tests plus 79 selection and
+46 recovery decision fixtures. The decision helpers consume inspected capability
+and provenance evidence; they neither discover tools nor launch reviewers,
+validate actual remote receipts, cancel children, write backend progress, or
+authorize mutations. Tests cover complete/partial/missing/incompatible/unknown
+capabilities, optional-tool absence, version-independent preference, fixed-path
+recovery, digest reuse/invalidation, failure events, and post-fix council gates.
+Every decision returns no backend actions and false mutation authorization.
+These are controlled decision tests and static path-isolation checks, not
+end-to-end runtime compatibility tests.
+
+The executable available in this implementation session reports **OpenCode
+v2.3.0**. No actual V1 plugin-loaded command run has been established for this
+revision, and earlier V2 smoke observations below do not validate the revised
+templates. Task 8.8 remains runtime acceptance work. Fresh council results for
+the revised implementation are recorded below; historical native-fork approval
+was not reused.
+
+The full decision input contract and pinned source references are in
+[the plugin contract inventory](review-plugin-contracts.md). `README.md` needs no
+change: provider installation, scanning behavior, and CLI usage are unaffected.
+
+### Final local verification — 2026-11-17
+
+The current implementation passes `make test-uf-review` (79 selection and 46
+recovery fixtures, plus retained fork/cleanup tests), `make verify-uf-fork`,
+`make build`, `make test`, `make lint` (zero issues), shellcheck for repository
+CI scripts/tests, strict OpenSpec validation, whitespace checks, and all four
+released-baseline CI helper suites. These results do not stand in for full
+cross-repository host integration or actual command execution.
+
+Read-only inspection of the live project-scoped OpenCode v2.3.0 API confirmed
+the unchanged six review personas' deny-edit/deny-shell permissions and four
+failed UF plugin loads. Project-scoped discovery is necessary: unscoped API
+agent discovery can return different global agent definitions.
+
+A new invocation-local supervisor fixture used the live caller's observed
+`complytime/gpt-6.1-sol#default` identity and a five-second test deadline. The
+reviewer was interrupted at that deadline and terminal state independently
+verified: no active execution, unfinished assistant, queued input, or running
+descendant jobs. The accepted run completed cleanup in 5.508 seconds.
+An initial verifier attempt falsely treated a retained `time.busy` timestamp
+as active execution; that attempt remains a failed verifier observation, and
+independent inspection reconciled the interrupted child before the accepted
+rerun. Use the live active-execution API, not timestamp presence alone.
+
+This is bounded lifecycle evidence on V2.3.0, not acceptance of all three revised
+commands and not V1 plugin compatibility. The configured review deadline remains
+1,200 seconds; the shortened deadline applies only to the lifecycle fixture.
+
+The first fresh full-panel council completed six real reviewer sessions on the
+same frozen 22-file scope, with verified terminal state and inherited caller
+model/variant. Its consolidated result was `REQUEST CHANGES`, not approval.
+Five root causes covered cleanup path splitting, retention-input evaluation,
+masked Git inventory failures, oversized local-capture preservation, and
+independent assessment-freshness regression cases. The implementation now fixes
+those cases. The second full-panel iteration completed six verified reviewer
+sessions and returned `APPROVE WITH ADVISORIES`, with no blocking findings.
+Its remaining LOW-severity Design D7 wording mismatch has been aligned with
+the corrected frozen-capture instructions. Subsequent edits are documentation
+and task bookkeeping only; implementation code is unchanged.
 
 ## Baseline and supported scope
 
@@ -47,10 +129,12 @@ canonical source for the provisioned
 That draft is not committed or published. Keep this repository's inventory and
 runtime evidence here rather than in the provisioned guide.
 
-### Current dependency inventory
+### Historical pinned-template dependency inventory
 
-This inventory includes shared skills, child prompts, feedback's post-fix council,
-and resume paths. A forbidden alternative is not an additional required call.
+This source-inspection inventory predates the revised executable preflight.
+For the current closure, including PR progress and explicit correlation recovery,
+use [the contract inventory](review-plugin-contracts.md). A forbidden alternative
+is not an additional required call.
 
 | Surface | Native or external prerequisites | Current required UF plugin tools |
 | --- | --- | --- |

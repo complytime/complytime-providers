@@ -63,6 +63,9 @@ make lint
 # Verify the repository-owned UF review commands match the fork manifest
 make verify-uf-fork
 
+# Run static fork isolation and read-only selection/recovery decision fixtures (requires jq)
+make test-uf-review
+
 # List per-invocation UF workflow records with no write in 14 days (PRUNE=1 deletes)
 make clean-uf-workflows
 
@@ -213,18 +216,29 @@ CRITICAL severity.
 
 `/uf.review-council`, `/uf.review-pr`, and `/uf.address-feedback` are a
 repository-owned fork of the UF v0.21.0 scaffold. The embedded UF
-plugins target the OpenCode V1 plugin API and do not load on V2, so
-these three commands execute a native path. Other `uf.*` commands remain
-scaffold-managed.
+plugins target the OpenCode V1 plugin API and do not load on the measured V2
+runtimes. Plugin-first instructions and path-bound native fallback are under
+implementation; revised command compatibility is not yet established. The
+pinned feedback plugin has a known contract gap documented in
+`docs/review-plugin-contracts.md`. Other `uf.*` commands remain scaffold-managed.
 
 - Each command MUST report its execution path before dispatch.
 - `make verify-uf-fork` fails when one of the three files changes
   without updating `.uf/fork-manifest.sha256`; `make update-uf-fork-manifest`
-  regenerates it after an intentional change.
+  regenerates it after an intentional change. The target also runs
+  `.github/scripts/verify-uf-paths.awk` to reject plugin calls outside explicit
+  plugin sections and malformed plugin/native boundaries. This static check
+  does not establish runtime compatibility.
+- `make test-uf-review` also exercises the shared read-only jq preflight and
+  recovery helpers under `.github/scripts/uf-review-*.jq`. They consume inspected
+  evidence, not runtime discovery, and never dispatch reviewers or authorize
+  external actions. Passing fixtures do not establish end-to-end compatibility.
 - `make clean-uf-workflows` lists per-invocation records under
   `.uf/workflows/` with no write in the last `UF_WORKFLOW_RETENTION_DAYS`
   days (default 14) and deletes them only with `PRUNE=1`. Feedback posting
-  receipts under `.uf/feedback/` are never pruned.
+  receipts under `.uf/feedback/` are never pruned. The Bash helper
+  `.github/scripts/clean-uf-workflows.sh` preserves literal paths, rejects
+  symlinked workflow roots, and stops if Git cannot inspect tracked paths.
 - Evidence and limits for this path: `docs/review-command-compatibility.md`.
 - Do NOT run `uf init --force` while the fork is active. When a
   V2-compatible UF release ships, compare upstream commands with the

@@ -74,9 +74,13 @@ verification guard without maintainer approval.
   prototype evidence separate from command compatibility claims.
 - [x] 6.2 [P] Add the `CHANGELOG.md` entries and assess `README.md` impact.
   Verify `docs/AI_TOOLING.md` is not edited locally.
-- [ ] 6.3 File the four drafts in `issue-drafts.md` (UF #962 comment, UF
-  scaffold-drift issue, `org-infra` evaluation issue) and record their URLs here
-  and in the proposal.
+- [x] 6.3 Reconcile upstream drafts with the maintainer's disposition.
+  Supersedes the earlier automatic-filing task: the maintainer managed the
+  issues and explicitly requires preview and approval before any future
+  issue/comment creation, update, or closure. The UF #962 comment was declined
+  and not posted. References for the maintainer-managed issues:
+  UF #1176, org-infra #747, and org-infra #746 (linked in the proposal).
+  No further external posting is required for this PR.
 
 ## 7. Verify
 
@@ -116,52 +120,113 @@ verification guard without maintainer approval.
 
 ## 8. Prefer working plugins and retain a native fallback
 
-- [ ] 8.1 Inventory required tool contracts per command from the pinned UF
+- [x] 8.1 Inventory required tool contracts per command from the pinned UF
   v0.21.0 templates, including conditional phases, child submission, checkpoints,
   and feedback's post-fix council. Separate optional evidence from required tools.
   Specify a side-effect-free capability probe and compatible-contract criteria.
-- [ ] 8.2 Obtain and record maintainer approval before changing the existing
+  Inventory: `docs/review-plugin-contracts.md`, inspected against tag target
+  `ebed75730066865d777288a999aa3906f6a8b3f7`. Records template/schema
+  inconsistencies without changing plugin sources, commands, or guards.
+- [x] 8.2 Obtain and record maintainer approval before changing the existing
   fork guard's global plugin-tool rejection. If approval is absent, stop this
   subtask without disabling the guard. With approval, retain digest,
   missing-manifest, scaffold-drift, and cleanup coverage; replace the native-only
   assertion with path-aware checks and positive/negative fixtures for misplaced
   plugin calls or native dependence on plugin tools. Do not change CI or policy.
-- [ ] 8.3 Implement shared preflight for all three commands: prefer a complete
+  Maintainer approval recorded on 2026-11-17: after being asked explicitly to
+  approve this path-aware guard replacement, the contributor replied, "Yes, I
+  am maintainer." Approval covers implementation maintenance preserving the
+  existing review requirements, not changes to CI or governance policy.
+  Implemented `.github/scripts/verify-uf-paths.awk`; the Make target still
+  verifies digests and now checks explicit plugin/native sections. Positive,
+  leakage, malformed-boundary, scaffold-restoration, and retained cleanup
+  fixtures pass, as do `make verify-uf-fork` and shellcheck.
+- [x] 8.3 Implement shared preflight for all three commands: prefer a complete
   compatible plugin contract regardless of runtime version; report capability
   gaps before selecting bounded native execution; stop when neither path works.
   Emit one truthful banner and bind the path before backend work.
-- [ ] 8.4 Restore complete plugin-backed workflows from pinned templates,
+  All three templates consume the shared inspection protocol and read-only
+  `uf-review-preflight.jq` decision helper. Fixture selection is covered in 8.6;
+  actual command acceptance remains 8.8.
+- [x] 8.4 Restore complete plugin-backed workflows from pinned templates,
   including capture/ingestion, planning, dispatch, child submission, progress,
   consolidation/finalization, and post-fix council as applicable. Isolate native
   instructions and plugin-only skills. Keep scope, policy, verdicts, human gates,
   and artifact requirements common without changing their authority.
-- [ ] 8.5 Bind checkpoints, assessment provenance, and external receipts to the
+  Isolated plugin/native template branches restored, including capture/ingestion,
+  progress, child submissions, finalization and cumulative post-fix council.
+  Maintainer elected to keep plugin sources unchanged and report the pinned
+  feedback behavioral gap as a preflight incompatibility, selecting bounded
+  native execution when supported. See
+  `docs/review-plugin-contracts.md#feedback-restoration-blocker`. No actual V1
+  plugin-feedback compatibility is claimed; 8.8 remains open.
+- [x] 8.5 Bind checkpoints, assessment provenance, and external receipts to the
   selected path. Preserve same-path digest reuse and fresh consent. Reject
   incompatible or unbound legacy state; stop when the saved backend is
   unavailable. Reconcile active children and ambiguous receipts before a fresh
   invocation; never automatically switch on plugin failures or adverse results.
-- [ ] 8.6 Add deterministic fixtures for complete, partial, missing, incompatible,
+  Versioned path bindings, backend progress references, cache provenance and
+  receipt reconciliation are specified in the templates and checked through the
+  shared read-only recovery decision helper; live artifact/receipt inspection
+  remains the command's responsibility.
+- [x] 8.6 Add deterministic fixtures for complete, partial, missing, incompatible,
   and ambiguous plugin capabilities; optional-tool absence; both/neither path
   usable; and plugin selection independent of reported V1/V2 version. Verify
   preflight creates no reviewers or backend checkpoints, and native execution
   invokes no plugin workflow tools.
-- [ ] 8.7 Verify failures and recovery with controlled fixtures: plugin runtime
+  `uf_review_preflight_test.sh`: 79 passing decision fixtures, plus the path
+  guard's native/shared leakage fixtures. Probe decisions create no files or
+  backend actions. Static isolation and controlled decisions are not actual
+  runtime execution evidence.
+- [x] 8.7 Verify failures and recovery with controlled fixtures: plugin runtime
   error, policy rejection, unavailable model, blocking verdict, selected-backend
   loss, matching-digest resume, incompatible/legacy records, and post-fix council.
   Assert no backend switch, duplicate assessment, unauthorized mutation, or
   misleading plugin provenance. Capture external actions without real PR writes.
+  `uf_review_recovery_test.sh`: 46 passing controlled decision fixtures, including
+  failure events, path ownership, digest reuse, reconciliation and post-fix
+  council. Outputs contain no backend actions and never authorize mutation.
+  This does not claim a real plugin error, remote write, or reviewer lifecycle
+  was exercised; those end-to-end observations remain in 8.8.
 - [ ] 8.8 Exercise all three commands on an actual V1 runtime with the required
   plugins loaded and on V2 with plugins unavailable and bounded native execution.
   Record exact versions, tools used, structured outcomes, and failure behavior;
   mocked tests or lifecycle probes cannot establish command compatibility.
   Report missing runtimes/delegation as blocked or unverified, not passed.
-- [ ] 8.9 Update `docs/review-command-compatibility.md`, `AGENTS.md`, and
+  V2.3.0 live project-scoped capability inspection and a five-second bounded
+  native lifecycle/cancellation fixture passed; exact caller model/variant and
+  terminal state were verified. No configured V1 executable was identified.
+  The native V2 council has additionally completed two real six-persona review
+  iterations with verified identity, permissions and terminal state. Neither
+  that council nor lifecycle evidence is full three-command compatibility;
+  V1 and revised PR/feedback command acceptance remain unverified, so task stays
+  open.
+- [x] 8.9 Update `docs/review-command-compatibility.md`, `AGENTS.md`, and
   `CHANGELOG.md` to describe actual dual-path behavior and evidence; assess
   `README.md` impact and reconcile upstream drafts before filing. Preserve
   plugin sources/registrations and other UF commands. Regenerate the fork
   manifest in the same commit as intentional command edits.
-- [ ] 8.10 Run strict OpenSpec validation, `git diff --check`, the approved fork
+  Updated documentation distinguishes controlled decisions, historical smoke
+  evidence and pending runtime acceptance. README impact: none (provider usage
+  unchanged). Upstream drafts now qualify historical measurements and the pinned
+  feedback gap. Plugin sources/registrations and other UF commands are untouched.
+  Intentional command edits and their regenerated manifest remain together in
+  the working tree for one eventual implementation commit.
+- [x] 8.10 Run strict OpenSpec validation, `git diff --check`, the approved fork
   guard and shell tests, and applicable local CI-derived checks. Run a fresh
   pre-PR council on the implementation and resolve all REQUEST CHANGES. Record
   unavailable tools and cross-repo blockers; earlier native-fork approvals do
   not approve this revision.
+  Final local checks passed: 79 selection and 46 recovery fixtures, retained
+  fork/cleanup guard, strict OpenSpec validation, whitespace check, build, unit
+  tests, lint (zero issues), shellcheck, and four released-baseline CI helper
+  suites. Fresh full-panel iteration 1 completed all six reviewers with verified
+  native terminal state and returned REQUEST CHANGES on five root causes.
+  Fixes cover confined literal-path cleanup, raw retention input, fail-closed
+  Git inventory, oversized local-capture fidelity, and independent stale-digest
+  fixtures. Full-panel iteration 2 completed all six reviewers and returned
+  APPROVE WITH ADVISORIES, with no blocking findings. Its LOW-severity Design D7
+  wording mismatch was aligned in a documentation-only follow-up; no
+  implementation code changed after approval. Actual V1/V2 command acceptance
+  remains explicitly unverified in 8.8; no full cross-repository host integration
+  is claimed from the passing helper suites.

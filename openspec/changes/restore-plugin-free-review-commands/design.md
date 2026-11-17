@@ -266,9 +266,12 @@ the measured size; 5 MB is a budget, not a runtime control, so the report must
 state the measured value rather than assert compliance.
 
 When the frozen scope exceeds the budget, do not copy it twice and do not narrow
-what reviewers see: give them the exact base/head SHAs and file list, and have
-them read the frozen objects directly with `git diff <base_sha>...<head_sha> --
-<path>`.
+what reviewers see. Give them the exact base/head SHAs, complete file list and
+capture digest. For local captures containing working-tree or feature-directory
+content, use bounded targeted reads of the existing frozen capture or immutable
+included-file snapshots. Commit-only diffs cannot reconstruct those bytes.
+Reading `git diff <base_sha>...<head_sha> -- <path>` is an alternative only for
+fully committed captures whose equivalence to the frozen scope is verified.
 
 `make clean-uf-workflows` lists per-invocation directories under
 `.uf/workflows/` that have no write in the last

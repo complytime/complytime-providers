@@ -2,8 +2,13 @@
 
 Status: Plugin-first revision specified on 2026-11-17; implementation and
 verification of this revision are pending in task group 8. Tasks 1-7 record the
-earlier native-fork work, not dual-path acceptance. Upstream drafts remain
-unfiled (task 6.3). The existing fork guard runs locally only, not in CI.
+earlier native-fork work, not dual-path acceptance. The maintainer has managed
+upstream issue disposition (task 6.3); no additional posting is needed for this
+PR. Existing references are [UF #1176][drift-issue],
+[org-infra #747][evaluation-issue], and [org-infra #746][guidance-issue].
+The UF #962 comment was declined and not posted. Future external actions
+require preview and explicit maintainer approval. The fork guard runs locally
+only, not in CI.
 This revision retains the containment scope and change name: keep the three main
 review commands usable when plugins are unavailable, without replacing working
 plugin-backed execution.
@@ -85,8 +90,9 @@ can use the same plugin-first path.
 - Add `docs/review-command-compatibility.md` recording the measured runtime
   status, the safeguard reconciliation, and the prototype evidence, and record
   the pinned version, drift guard, and upgrade trigger in `AGENTS.md`.
-- Publish **upstream drafts** so the measured evidence informs UF #962 and
-  proposes a scaffold drift check (see `issue-drafts.md`).
+- Retain the historical **upstream drafts** and maintainer-managed disposition
+  (see `issue-drafts.md`); further publication is not implementation work and
+  requires content preview and explicit approval.
 
 Out of scope: porting the four plugins, changing council eligibility, model
 policy, limits, verdicts, severity rules, convention packs, personas, or the
@@ -136,3 +142,6 @@ contributor review commands.
 [migration]: https://github.com/unbound-force/unbound-force/issues/714
 [umbrella]: https://github.com/unbound-force/unbound-force/issues/797
 [downstream]: https://github.com/unbound-force/unbound-force/issues/962
+[drift-issue]: https://github.com/unbound-force/unbound-force/issues/1176
+[evaluation-issue]: https://github.com/complytime/org-infra/issues/747
+[guidance-issue]: https://github.com/complytime/org-infra/issues/746

@@ -17,13 +17,13 @@ You are a token-efficient code reviewer. The user will provide a PR number or yo
 > context causes incomplete reviews or unauthorized
 > actions.
 
-Read **Native Progress and Recovery** and the **Shared Dispatch, Evidence,
+Read **Progress and Backend Ownership**, **Path Binding and Recovery**, and the **Shared Dispatch, Evidence,
 and Finalization Protocol** in `.opencode/commands/uf.review-council.md` before
 execution. Apply only those shared sections with command `uf.review-pr` and
 its frozen PR input; do not invoke the council command's fix loop or posting
 steps. Persist this command's completed steps and action receipts there.
-Native todos are optional. No UF plugin tool or canonical plugin artifact is
-required or produced. Missing shared instructions fail closed.
+Use only the bound backend's marked sections. Native todos are optional and
+native records never claim plugin validation. Missing shared instructions fail closed.
 
 ## Arguments
 
@@ -215,7 +215,7 @@ Fetch the full PR diff from the resolved immutable base and head SHAs:
 Ensure both frozen commit objects are available, fetching exact immutable
 objects without checkout if necessary; verify their hashes. Capture
 `git diff <base_sha>...<head_sha>` and its per-file statistics to a private file
-once, with a SHA256 recorded in the native phase record. Never use a later
+once, with a SHA256 recorded in the invocation binding. Never use a later
 `gh pr diff` response as evidence for previously fetched metadata. Pass this
 same file and context to every reviewer. Apply any user-selected file focus
 consistently and label the report as scoped, never as approval of unreviewed files.
@@ -357,19 +357,31 @@ Before dispatch, discover which reviewer agents are available:
    name matches `divisor-*.md`. Strip `.md` and sort the complete list.
    Filenames/frontmatter alone do not establish review eligibility.
 
-3. **Validate existing policy** through the shared native planning protocol.
+3. **Validate existing policy** through the selected backend's planning protocol.
    Do not change the manifest, matrix, overrides, or persona definitions.
 
 4. **Guard clause**: zero discovered agents produces `INCONCLUSIVE`.
-   Do not start a child session. Persist the failed native review record.
+   Do not start a child session. Persist the failed selected-backend result.
 
 ---
 
 ### 4. Council Dispatch
 
-Use the shared native protocol in `.opencode/commands/uf.review-council.md`
+Use the selected shared protocol in `.opencode/commands/uf.review-council.md`
 without invoking its command-level fix loop or posting steps.
 
+<!-- uf-path: plugin begin -->
+#### Plugin PR Council
+
+Execute the shared **Plugin Planning, Dispatch, and Finalization** protocol with
+mode `code`, `full: false`, the exact PR capture, raw file counts, all discovered
+personas, actual pre-flight/CI coverage, packs, review context/walkthrough and
+bounded prior review state. Preserve its separate PR finalization call, all
+terminal runs, validated canonical output, and unchanged posting gates. Use
+this command's invocation key for progress; never execute the native block.
+<!-- uf-path: plugin end -->
+
+<!-- uf-path: native begin -->
 #### 4.1 Plan and Run the PR Council
 
 Use mode `code`, `full: false`, augmentation off, all discovered personas,
@@ -398,6 +410,7 @@ approval or offering posting. Persistence, unsafe live-child, policy, or stale
 scope failures block automation even when a reviewer approved. Report the
 native record path; canonical plugin output is not produced. Do not fabricate
 plugin-validated artifacts or substitute a parent-only AI review.
+<!-- uf-path: native end -->
 
 **Artifact retention**: apply **Artifact Retention** from the Shared Execution
 Contract in `.opencode/commands/uf.review-council.md`.
@@ -464,8 +477,8 @@ Present the findings in this structured format:
 
 <Brief justification. Pre-existing CI failures do NOT block the PR verdict.>
 
-Native record: <path and persistence status>
-Canonical plugin output: not produced (native execution)
+Backend binding and result: <selected path, record references and persistence status>
+Canonical output: <validated plugin artifact, or not produced (native execution)>
 ```
 
 Severity levels from `.opencode/uf/packs/severity.md` when loaded, otherwise:
@@ -753,7 +766,7 @@ The review body MUST include:
 Always write the JSON payload to a temporary file rather than
 interpolating into shell arguments. Create it with mode `0600` from the start.
 Remove the temporary file after posting, on ALL exit paths. Record the returned
-review ID/URL before marking the native posting step complete.
+review ID/URL before marking the selected-backend posting step complete.
 
 **Graceful degradation**: If `gh api` returns HTTP 403, 404, or 422:
 fall back to posting as `"event": "COMMENT"` with a note. If the

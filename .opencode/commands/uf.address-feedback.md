@@ -15,7 +15,7 @@ The command follows four sequential phases (Ingest → Assess → Triage → Exe
 > **SESSION-RESUME GUARD**: If this session has been resumed
 > from compressed context, you MUST:
 > 1. Re-read this full command template
-> 2. Read and validate the native phase record for `uf.address-feedback`
+> 2. Read and validate the path-bound records for `uf.address-feedback`
 > 3. Check `.uf/feedback/pr-<PR_NUMBER>/state.json` for
 >    cached assessment state
 > 4. Do NOT infer phase completion or triage decisions from
@@ -45,18 +45,18 @@ Apply **Execution Path Preflight** from the Shared Execution Contract in
 
 ## Progress Tracking
 
-Read **Native Progress and Recovery** and the **Shared Dispatch, Evidence,
+Read **Progress and Backend Ownership**, **Path Binding and Recovery**, and the **Shared Dispatch, Evidence,
 and Finalization Protocol** in `.opencode/commands/uf.review-council.md` before
 execution. Apply those sections with command `uf.address-feedback` and this
 invocation's frozen PR context. Do not invoke the council command's fix loop
 or posting steps during assessment. Missing shared instructions fail closed.
 
-Use that private atomic native record to recover completed steps, active child
+Use the selected backend's records to recover completed steps, active child
 identities/deadlines, assessment evidence, and external-action receipts.
-CHECKPOINT markers mean persist their named step/data through native file tools,
-not a plugin call. The feedback cache remains disposable and must be validated
+CHECKPOINT markers mean persist their named step/data through the bound backend
+and update its references in the binding. The feedback cache must be validated
 against GitHub, current scope, and thread fingerprints before reuse. Neither
-record stores reusable human consent. No UF plugin tools are required.
+record stores reusable human consent. Never switch backend during recovery.
 
 Progress steps in order:
 - `ingest` — Phase 1 complete
@@ -68,7 +68,7 @@ Progress steps in order:
 - `push` — Phase 4.4 complete
 - `reply-comments` — Phase 4.5 complete (then clear)
 
-Native todos are optional display only. The durable native record, validated
+Todos are optional display only. The durable selected-backend record, validated
 against actual evidence, supplies recovery when todo tooling is unavailable.
 Do not enable a global feature or use compressed summaries as progress evidence.
 
@@ -176,6 +176,16 @@ than mix feedback, file statistics, and diff from different revisions.
 
 ### 1.4 Fetch and Save the PR Diff
 
+<!-- uf-path: plugin begin -->
+Call `fetch_pr_review_context` once with the validated PR number. Use its saved
+diff outputs, not its abbreviated comments as a substitute for the complete
+paginated ingestion above. Verify returned input context, file inventory/counts,
+and diff against the exact frozen base/head. Save its path/digest in the binding
+and reuse it for all items. Any API, context, capture, or persistence error stops;
+never substitute native ingestion after plugin selection.
+<!-- uf-path: plugin end -->
+
+<!-- uf-path: native begin -->
 Use native Git tools to obtain and verify the exact base/head commit objects
 from Section 1.2 without switching branches or altering the worktree. Capture
 only `git diff <base_sha>...<head_sha>` to a private file once; record its
@@ -188,6 +198,7 @@ Preserve existing diff/prompt size limits from `.opencode/lib/review-diff.ts`
 and `.opencode/lib/agent-executor.ts`. On fetch, verification, capture, size,
 permission, or persistence failure, report the cause and **STOP**. Do not
 assess from partial data or silently truncate a diff to fit a prompt.
+<!-- uf-path: native end -->
 
 ### 1.4.1 Tooling Scope Partition
 
@@ -224,8 +235,9 @@ For each reviewer, map `author_association` to authority tier:
 
 ### 1.7 Cache Check
 
-Check local cache at `.uf/feedback/pr-<PR_NUMBER>/state.json`. Require two
-digests per item:
+Check local cache at `.uf/feedback/pr-<PR_NUMBER>/state.json`. Validate the
+invocation's backend binding before considering any cached completion.
+Require digests and provenance per item:
 
 - `scope_digest`: SHA256 of the exact bytes of the frozen capture from 1.4.
 - `item_digest`: SHA256 over a canonical item serialization. Membership is the
@@ -242,21 +254,28 @@ digests per item:
 - Storage: `state.json` holds `scope_digest` as a string and
   `items[].item_digest` as a string, next to `items[].resolved`. Do not rename
   or nest these fields.
+- Also retain execution path, policy/agent-definition digests, originating
+  invocation and backend record references, and validated assessment provenance.
+  Legacy records without path ownership or incompatible backend state stop for
+  reconciliation; matching content digests alone never authorize reuse.
 
 Reuse rules, in precedence order:
 
 1. **Thread resolved on GitHub since the last run**: skip it entirely. This is
    evaluated first; a digest change caused only by resolution does not trigger
    re-assessment.
-2. **Scope and item digests match**: reuse the recorded assessment. Do not
+2. **Path, scope/item and policy/agent digests match with valid provenance**:
+   reuse the recorded assessment. Do not
    dispatch Tier 2 reviewers again, and state that the assessment was reused.
 3. **Scope digest changed**: mark every assessment stale and re-capture scope
    before assessing.
 4. **Item digest changed**: re-assess only the affected items; mark superseded
    results rather than deleting them.
-5. **Digest missing or unreadable**: treat as a cache miss and re-assess, recording
-   that the record was reconstructed.
-6. **Cache missing**: assess from scratch, which is correct but slower.
+5. **Assessment missing/unreadable under a valid backend binding**: reconcile
+   active children and receipts before reconstruction; record it as reconstructed.
+6. **Cache missing**: reuse validated backend assessment records where available.
+   Reconcile active work/receipts before any new assessment. Missing cache never
+   authorizes replaying completed dispatch, replies, or other mutations.
 
 On crash-recovery re-entry: items marked as fully executed (`comment-posted`) in
 the cache MUST be skipped to prevent duplicate comments.
@@ -266,7 +285,7 @@ work is a defect, not extra safety.
 
 If no items remain after filtering: report "No unresolved feedback to address" and **STOP**.
 
-> **CHECKPOINT**: Persist native step `ingest` and
+> **CHECKPOINT**: Persist selected-backend step `ingest` and
 > `{"items_fetched": N}` before proceeding to
 > Phase 2.
 
@@ -301,7 +320,7 @@ For each feedback item, determine the assessment tier:
 - No architectural implications
 - Reviewer feedback and project standards do not conflict
 
-**Tier 2 (Divisor escalation)** — use a policy-planned native Divisor assessment
+**Tier 2 (Divisor escalation)** — use a policy-planned Divisor assessment on the bound backend
 when ANY condition is met:
 - Security concern raised → `divisor-adversary`
 - Architectural change suggested → `divisor-architect`
@@ -314,7 +333,7 @@ when ANY condition is met:
 
 These criteria and domain mappings retain their existing meaning. They identify
 the item's Tier 2 domains and prompt focus; they do not override the validated
-native policy plan or authorize an unbounded Task call.
+selected backend's policy plan or authorize an unbounded Task call.
 
 **Fallback (unchanged)**: If no Divisor agents are deployed, all items fall
 back to the existing Tier 1 assessment. Set `tier2_unavailable: true` in the
@@ -322,7 +341,7 @@ assessment output. This deployment fallback is distinct from a planned Tier 2
 dispatch whose runs fail: planned no-success results follow Section 2.3.6 and
 MUST NOT silently fall back to Tier 1 or `AUTHOR-DECIDES`.
 
-### 2.3 Native Tier 2 Dispatch
+### 2.3 Selected-Backend Tier 2 Dispatch
 
 Run this protocol independently for each current Tier 2 feedback item. Tier 1
 items never create a reviewer plan and continue directly to Section 2.4.
@@ -332,7 +351,7 @@ items never create a reviewer plan and continue directly to Section 2.4.
 1. Read `.opencode/agents/` and retain every regular file matching
    `divisor-*.md`. Strip `.md` and sort the complete list. Filenames and
    frontmatter alone do not establish eligibility.
-2. The existing native policy protocol and `.uf/reviewer-capabilities.yaml` own review
+2. The selected backend's policy protocol and `.uf/reviewer-capabilities.yaml` own review
    eligibility. The known review personas are `divisor-adversary`,
    `divisor-architect`, `divisor-curator`, `divisor-guard`, `divisor-sre`, and
    `divisor-testing`. Additional personas run only when the manifest and plan
@@ -368,6 +387,33 @@ and use the exact same signal for planning, every child prompt, consolidation,
 and finalization. Do not reuse a plan when the item, context, affected files,
 categories, or triage data differ.
 
+<!-- uf-path: plugin begin -->
+#### 2.3.3 Plugin Tier 2 Assessment
+
+Execute the council template's shared **Plugin Planning, Dispatch, and
+Finalization** protocol independently for each current Tier 2 item. Use mode
+`feedback`, command `address-feedback`, `full: false`, augmentation off, all
+discovered personas, and this signal's sorted affected-file counts. Use the exact
+saved diff from 1.4 and the complete item signal, domain focus, project context,
+packs, specs and linked issues as review context. Preserve one sibling acquisition
+per invocation across items/iterations; verify the aggregate's supported reuse
+contract instead of silently reacquiring or losing provenance.
+
+Only actual successful child assessments with all required feedback fields vote.
+Collapse successful runs per persona first: any `ACCEPT` wins over
+`AUTHOR-DECIDES`; apply the same strictest rule across personas, never extra votes
+from fan-out. Deduplicate findings by file/root cause with complete provenance.
+Failed runs do not strengthen the recommendation. No successes means
+`UNAVAILABLE` for availability-only causes, otherwise `INCONCLUSIVE`, retaining
+the item for explicit human handling and blocking automated Tier 2 resolution.
+
+Retrieve actual results and optional proposals once, finalize through
+provenance-bearing `consolidate_dispatch`, and save this item's correlation,
+artifact authority, exact signal and digests before processing another item.
+Do not fall back to native assessment or Tier 1 on plugin failure.
+<!-- uf-path: plugin end -->
+
+<!-- uf-path: native begin -->
 #### 2.3.3 Validate the Native Plan
 
 Apply Section 1 of the council template's shared native protocol with mode
@@ -473,6 +519,7 @@ per-persona/panel recommendations, native/generic result, manual status, and
 record path. Canonical plugin output is `not produced (native execution)`.
 Curator runs at most once per item, never creates issues, and only the parent
 may propose one deduplicated curation issue after explicit human approval.
+<!-- uf-path: native end -->
 
 ### 2.4 Classify Each Item
 
@@ -523,13 +570,15 @@ Write assessment results to `.uf/feedback/pr-<PR_NUMBER>/state.json`:
 - Per-thread: classification, tier, evidence, recommendation, comment count, last
   comment ID, content snapshot at referenced lines
 - Per Tier 2 thread: the bound feedback signal, plan, terminal run provenance,
-  strictest native/generic outcome, no-success cause when present,
-  manual-retention state, native record path, and canonical output not produced
+   strictest native/generic outcome, no-success cause when present,
+   manual-retention state, selected execution path, policy/agent digests,
+   invocation/backend references, and authoritative plugin artifact references
+   only when actually validated (native canonical output is not produced)
 - Timestamp: ISO 8601 last-fetched time
 
 **Permissions**: files `600`, directories `700`.
 
-> **CHECKPOINT**: Persist native step `assess` and
+> **CHECKPOINT**: Persist selected-backend step `assess` and
 > `{"items_classified": N}` before proceeding to
 > Phase 3.
 
@@ -552,7 +601,8 @@ Evidence: <pack/rule references or "none">
 Recommendation: <ACCEPT|AUTHOR-DECIDES|INCONCLUSIVE|UNAVAILABLE>
 Conflict: <yes — conflicts with item X|no>
 Tier: <1|2> <(Divisor agents: ...)>
-Tier 2 outcome: <native / generic, or "n/a">; canonical output: not produced
+Tier 2 outcome: <native / generic, or "n/a">; backend: <plugin / native>
+Canonical output: <validated plugin reference, or not produced (native execution)>
 Model provenance: <requested / resolved / reported / self-reported, or "n/a">
 Dispatch failures: <informational failures, or "none">
 Retained for manual handling: <yes|no>
@@ -608,7 +658,7 @@ List each item with its decision. Use the
 proceed with execution", "Revise -- change decisions"]`
 before execution proceeds.
 
-> **CHECKPOINT**: Persist native step `triage` and
+> **CHECKPOINT**: Persist selected-backend step `triage` and
 > `{"items_decided": N}` before proceeding to
 > Phase 4. Verify all items have decisions recorded.
 
@@ -672,7 +722,7 @@ For each ACCEPT and MODIFY item, implement the code change:
 
 **If a code change cannot be applied cleanly** (e.g., referenced code has changed since the review): skip that item with a clear report, note the failure for the reply comment, and continue with remaining items.
 
-**CHECKPOINT**: Persist native step `code-changes`, recording the exact files,
+**CHECKPOINT**: Persist selected-backend step `code-changes`, recording the exact files,
 content digests, and item outcomes. Revalidate the frozen assessment/triage
 binding before the first edit; unexpected remote-head or local-content changes
 require fresh assessment and human confirmation, not applying stale decisions.
@@ -690,14 +740,23 @@ Signed-off-by: <author>
 Assisted-by: OpenCode (<actual-model-id>)
 ```
 
+<!-- uf-path: plugin begin -->
+Call `normalize_model_name` with `rawModelId` from the current runtime/system
+identity for the pinned attribution display. Preserve its warning or
+`unknown-model` result transparently. The commit's Assisted-by trailer still
+identifies OpenCode and the actual model ID as required by repository standards.
+<!-- uf-path: plugin end -->
+
+<!-- uf-path: native begin -->
 Use the actual model identifier from the current runtime/system identity.
 Do not require a normalization plugin or guess a different model family.
 If unavailable, report that limitation and use `unknown-model` transparently.
+<!-- uf-path: native end -->
 Commit with `git commit -s`; preserve required author sign-off and AI attribution.
 
 The `<scope>` is the package or directory of the changed files. The description summarizes the logical group of fixes.
 
-> **CHECKPOINT**: Persist native step `commits`, `{"commit_count": N}`,
+> **CHECKPOINT**: Persist selected-backend step `commits`, `{"commit_count": N}`,
 > and the actual commit SHAs and per-item addressing receipts.
 
 ### 4.3 Review-Council Gate
@@ -708,14 +767,17 @@ After all code changes are committed locally, run `/uf.review-council` on the cu
 - **If fails**: enter fix loop (same behavior as `/uf.unleash`). Fix findings and re-run council.
 - **If fix loop exhausts iterations**: **STOP** and report persistent findings. Do NOT push until council passes.
 
-Read and execute the updated `uf.review-council.md` native workflow for the
+Read and execute `uf.review-council.md` on the already selected backend for the
 cumulative local fixes, not just the last commit or prior blockers. Bind its
 passing result to the post-fix HEAD, included worktree content, and policy
 digests. `INCONCLUSIVE`/`UNAVAILABLE` and stale or unpersisted results do not pass.
 No code changes are allowed between passing review and push. After each run,
-retain native evidence; mark this step complete only for the passing iteration.
+retain that backend's evidence; mark this step complete only for the passing
+iteration. Bind the nested council to this invocation's path and its own backend
+record key; do not reselect a backend or print a second execution-path banner.
+Missing selected-backend council capabilities stop, never trigger native replay.
 
-> **CHECKPOINT**: Persist native step `review-council` and
+> **CHECKPOINT**: Persist selected-backend step `review-council` and
 > `{"iteration": N, "result": "PASS"}` with the reviewed scope/record path.
 > Record only when the council passes.
 
@@ -754,7 +816,7 @@ scope and the verified pushed head receipt, not the intentionally replaced
 pre-fix PR head. Unrelated remote commits or new feedback invalidate affected
 assessments and require re-ingestion and fresh human decisions.
 
-> **CHECKPOINT**: Persist native step `push` with the verified remote head receipt.
+> **CHECKPOINT**: Persist selected-backend step `push` with the verified remote head receipt.
 
 ### 4.5 Post Reply Comments
 
@@ -783,7 +845,7 @@ If the content, targets, or scope change, re-present and obtain fresh confirmati
 
 
 **Progress gate**: Before presenting comments for posting,
-read and validate the native phase record and verify:
+read and validate the selected-backend records and binding, and verify:
 1. `triage` step is complete (all items decided)
 2. `commits`, `review-council`, and `push` steps are
    complete, or explicitly not applicable because no code change was queued
@@ -818,7 +880,7 @@ Never interpolate reply text into shell arguments or JSON syntax.
 
 Record progress in `.uf/feedback/pr-<PR_NUMBER>/state.json` for idempotent retry.
 
-> **CHECKPOINT**: Persist native step `reply-comments`,
+> **CHECKPOINT**: Persist selected-backend step `reply-comments`,
 > `{"posted": N, "total": M}`, and each returned comment ID/URL.
 > Keep records through thread resolution and artifact production; do not
 > clear action receipts needed for idempotent recovery. Record terminal status
@@ -838,7 +900,7 @@ Use the **question tool** with options
 threads open"]` before resolving.
 
 List exact thread IDs before confirmation, validate each returned resolution,
-and persist its receipt in the native record so a resumed run does not repeat
+and persist its receipt in the binding so a resumed run does not repeat
 an ambiguous mutation. A declined reply must not be represented as posted or
 used as evidence that a thread is ready for resolution.
 
@@ -846,9 +908,10 @@ used as evidence that a thread is ready for resolution.
 
 Write the artifact to `.uf/artifacts/feedback-triage/pr-<PR_NUMBER>-round-<M>.json`.
 This existing feedback-triage artifact and its schema remain unchanged. It is
-emitted alongside the native Tier 2 assessment records, not canonical plugin
-`review-dispatch` or `review-verdict` artifacts. Never label native records as
-plugin-validated output or fabricate canonical projections.
+emitted alongside the selected backend's Tier 2 assessment records. It is
+distinct from canonical plugin `review-dispatch` and `review-verdict` artifacts.
+Reference those only when actually validated by the bound plugin backend; never
+label native records as plugin-validated or fabricate canonical projections.
 
 For a no-success Tier 2 item, keep `tier2_unavailable: true`. If the unchanged
 legacy recommendation field must contain `author-decides`, label it explicitly
@@ -944,7 +1007,7 @@ Fields `file`, `line`, `decision_reasoning`, and `commit_sha` may be `null` (gen
 10. **Commit scope**: Only commit files directly related to addressing the specific feedback item. Do not bundle unrelated changes into feedback fix commits.
 
 11. **No unbounded or unplanned Tier 2 dispatch**: Every assessment run MUST
-come from the validated native policy plan and use the shared bounded native
+come from the selected backend's validated policy plan and use its isolated
 execution protocol. Never substitute a parent-only review, another model, or
 an unbounded Task fallback for a failed plan/run. Preserve explicit human gates.
 
