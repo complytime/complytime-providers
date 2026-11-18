@@ -1,8 +1,11 @@
 # Proposal
 
-Status: Plugin-first revision specified on 2026-11-17; implementation and
-verification of this revision are pending in task group 8. Tasks 1-7 record the
-earlier native-fork work, not dual-path acceptance. The maintainer has managed
+Status: Outcome-focused revision specified on 2026-11-18 in task group 10.
+The commands must run without UF plugins and produce comparable review and
+feedback outcomes. The evidence-first approach in task group 9 produced partial
+diagnostics, not working commands, and its remaining verifier work is superseded.
+Tasks 1-8 retain historical implementation and verification records, not acceptance
+of this revision. The maintainer has managed
 upstream issue disposition (task 6.3); no additional posting is needed for this
 PR. Existing references are [UF #1176][drift-issue],
 [org-infra #747][evaluation-issue], and [org-infra #746][guidance-issue].
@@ -70,8 +73,20 @@ can use the same plugin-first path.
   tool contract for that command is available, including child submission,
   recovery, and post-fix review dependencies.
 - Fall back to **native execution only during preflight**, when a required plugin
-  capability is unavailable or incompatible and native controls are sufficient.
-  Report missing capabilities and the chosen path once; stop if neither works.
+  capability is unavailable, incompatible, or cannot be established and native
+  controls are sufficient. Unknown plugin capabilities do not become compatible,
+  but they do not prevent independently supported native execution.
+  Report the reasons and the chosen path once; stop if neither works.
+- Preserve comparable outcomes across backends: required reviewer participation,
+  structured findings and valid clean reviews, consolidated verdicts, feedback
+  assessments, and gated actions. Native execution need not reproduce plugin
+  artifacts or claim plugin validation.
+- Use supported runtime interfaces and one repeatable native execution procedure.
+  If native tools cannot enforce the existing lifecycle requirements, provide a
+  small tested supervisor shared by the commands, not per-invocation generated
+  orchestration. No observer plugin, loaded-source attestation service, or generic
+  receipt verifier is required to start a command. The partial diagnostic
+  collector remains optional and cannot establish readiness.
 - Bind one path to the invocation and its recovery state. Plugin execution
   failures, policy rejections, and unavailable models never authorize a switch
   to native execution or a second assessment.
@@ -130,6 +145,11 @@ contributor review commands.
   plugin registrations, so they are not removed here.
 - No new runtime packages, no V2 plugin adapter, no global OpenCode
   configuration, and no CI gate changes.
+- Implementation may update the existing pure routing helper and its fixtures,
+  the three command templates, and a shared native supervisor if needed. Readiness
+  checks apply to the selected backend; existing review and authorization gates
+  are unchanged. Claim native support only after actual plugin-free command runs,
+  independently of whether a plugin-enabled runtime is available for testing.
 - Documentation: `docs/review-command-compatibility.md`, `AGENTS.md`, and
   `CHANGELOG.md` will need dual-path wording and separate V1-plugin/V2-native
   command evidence during implementation. This revision changes spec artifacts

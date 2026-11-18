@@ -115,25 +115,37 @@ the pinned v0.21.0 templates without undoing the shared containment safeguards.
 
 Before input capture, feedback ingestion, checkpoint writes, or child creation:
 
-1. Inspect the current session's registered tools and exposed contracts. Determine
-   the complete required set for the command, including enabled conditional
-   phases, injected child submission calls, recovery, and the post-fix council.
-   Plugin configuration or a successful load log alone is not sufficient.
-2. Prefer the plugin path when all required tools expose compatible contracts.
-   Do not require native delegation or native caller-discovery support on this
-   path. Optional evidence remains optional under existing policy.
-3. If required tools are missing or their exposed contracts are incompatible,
-   record the specific gaps and evaluate the native path. Partial plugin loading
-   never permits combining plugin planning with native dispatch or checkpoints.
-   Ambiguous capability discovery stops rather than assuming absence.
+1. Inspect the available callable tools and their exposed contracts for the
+   command, including enabled conditional phases, submission, recovery, and the
+   post-fix council. Configuration or load logs alone do not establish usability.
+2. Prefer plugins when that required contract is established as usable. Preserve
+   documented incompatibilities; a matching tool name does not repair them.
+3. Otherwise record why plugins cannot be selected and evaluate native execution
+   independently. Missing, incompatible, and unknown remain distinct observations.
+   Once a required plugin dependency is definitively unusable, further plugin
+   investigation is unnecessary. Unknown plugin behavior never becomes compatible
+   and never disqualifies an independently supported native backend.
 4. Select native execution only when its delegation, model/variant, permissions,
-   deadline, cancellation, and observable-terminal-state controls are supported.
-   Otherwise report `UNAVAILABLE` and create no reviewers or mutations.
+   deadline, cancellation, terminal-state observation, caller binding, and policy
+   controls are supported. Uncertainty about a required native control stops
+   native execution; a known missing control makes that path unavailable.
+   If neither path can run, name the blocking operation and create no reviewers.
 
 Inspect capabilities without dispatching probe reviewers or writing plugin
-progress. Runtime version is diagnostic metadata, not a selector: compatible V1
-uses plugins, V2 without plugins uses native execution, and a future compatible
-V2 plugin set also uses plugins.
+progress. Runtime version is diagnostic metadata, not a selector. A failed
+discovery call is not proof of absence and must not be reported as such. It blocks
+execution only if the chosen backend needs the unavailable observation.
+
+| Plugin contract | Native controls | Fresh-invocation result |
+| --- | --- | --- |
+| Usable | Any | Plugin |
+| Missing, incompatible, or unknown | Supported | Native, with plugin reasons |
+| Missing, incompatible, or unknown | Unknown | Stop, naming native uncertainty |
+| Missing, incompatible, or unknown | Missing or incompatible | Unavailable |
+
+For a saved invocation, check its bound backend and recovery state first. An
+unrelated backend's discovery failure must not block recovery, and a failure of
+the selected backend must not authorize switching paths.
 
 Retain original plugin-backed capture/ingestion, planning, dispatch,
 consolidation, finalization, checkpoints, and child structured submission in the
@@ -144,10 +156,19 @@ an unsupported required policy is a blocker, not grounds to bypass it.
 #### Native execution controls
 
 Use the native delegation tool when it can express the run. Where a configured
-deadline cannot be expressed natively (the V2 subagent tool exposes no per-run
-deadline), use the bounded shell/API supervisor already proven in
-`docs/review-command-compatibility.md`, and record the child session, requested
-and resolved model/variant, deadline, and verified terminal state.
+deadline cannot be expressed natively (the inspected V2 subagent tool exposes no
+per-run deadline), reuse the bounded shell/API mechanism documented in
+`docs/review-command-compatibility.md`. If executable support is needed, implement
+one small tested supervisor shared by the three commands instead of asking each
+invocation to generate it again. Record the child session, requested and resolved
+model/variant, deadline, and verified terminal state.
+
+Use the existing runtime's supported authenticated connection and runtime-provided
+caller identity. Do not read credentials or private databases, guess the latest
+session, install dependencies, change configuration, or start a replacement
+runtime. An authenticated managed connection and an explicit-server connection
+are not interchangeable; use only a supported no-auto-start mechanism whose
+authentication and server identity can be established.
 
 Rules that apply to both paths:
 
@@ -157,91 +178,68 @@ Rules that apply to both paths:
   child rather than reporting success.
 - Failed children are non-voting and named; they never become approvals.
 
-### D3a: Collect reproducible capability evidence before applying selection
+### D3a: Validate command outcomes, not an evidence framework
 
-The 2026-11-18 specification revision addresses
-[PR review 5943477705][preflight-review]. The reviewer reports that registered
-tools still leave child visibility and lifecycle contracts unknown, stopping
-`/uf.review-pr 244` before review. The current selector correctly preserves the
-uncertainty; changing `unknown` to absence or compatibility would hide the gap.
-The missing component is repeatable evidence acquisition, not a less restrictive
-selection rule. This section specifies pending implementation, not verified
-runtime support.
+The earlier 2026-11-18 revision responding to
+[PR review 5943477705][preflight-review] required a collector, loaded-source
+identity, and verified behavioral receipts before any command could run. Its
+partial collector always returns incomplete/stop. It does not solve the reported
+failure, and the inspected runtime does not expose several required observations.
+The contributor clarified the objective: run the same UF commands without plugins
+and obtain comparable outcomes. This revision supersedes the unfinished generic
+verifier and receipt-attestation work, not the reviewer's requested runtime tests.
 
-Implement a repository-owned evidence collector/verifier with a documented entry
-point and regression tests. It supplies the existing decision input; the pure jq
-selector keeps its selection rules and does not acquire runtime side effects.
-Prefer the runtime's supported discovery/API interfaces. Consult the exact live
-schema rather than assuming an endpoint, response shape, or V1/V2 equivalence.
-If those interfaces cannot establish a required property, preserve `unknown` and
-name the unsupported observation.
+#### Production readiness
 
-#### Capability acceptance and authoritative sources
+Keep the existing routing helper pure and deterministic. Update its routing and
+input contract to distinguish plugin uncertainty from native readiness. Record
+the actual tool/API observations and named gaps; do not manufacture capability
+statuses. Use supported runtime schemas rather than guessed endpoints. Check only
+the selected backend's execution requirements before work and verify actual child
+identity, results, usage, and terminal state as that work runs.
 
-The contract inventory will map every required key to an exact observation,
-pass/fail criteria, source reference, and verifier case. Use this minimum mapping:
+The partial collector remains optional diagnostics, outside production readiness.
+Do not require a new observer plugin, loaded-source byte attestation, imported
+behavioral receipts, or a generic evidence service. Do not claim plugin behavior
+was verified when selecting native execution. Startup remains read-only and
+creates no probe reviewers, backend checkpoints, or external mutations.
 
-| Capability | Evidence source and acceptance |
+#### Comparable outcomes
+
+Both backends retain the same authoritative reviewer selection, frozen scope,
+model policy, persona permissions, limits, verdict and partial-success rules, and
+human gates. Plugin children use their supported findings-submission contract;
+native children return validated structured assessments. A valid clean review
+has no findings and must not fabricate one to satisfy a plugin-only submission
+API. Native records identify themselves as native, without imitating canonical
+plugin artifacts. Recovery retains selected-backend ownership and never repeats
+completed external actions or reuses consent.
+
+#### Actual-command acceptance
+
+Test the user-facing commands with plugins unavailable before expanding optional
+diagnostics. Use disposable repository fixtures and unchanged policy/personas.
+Capture external-action attempts instead of issuing real GitHub writes or pushes.
+Record exact invocation, runtime version, selected backend, reviewer participation,
+results, and terminal outcomes privately, without credentials or transcripts.
+
+| Command | Required actual native-flow outcomes |
 | --- | --- |
-| Required parent tools and schemas | Complete current-session callable inventory and exposed schemas, checked against the pinned contract. Parent registration establishes neither child visibility nor successful execution. |
-| `immutable_scope` | Identified loaded dispatch implementation plus controlled command receipts showing all children consume the same frozen diff, inventory, and SHA pair. |
-| `child_contract` | Effective tool/permission evidence for the actual reviewer persona and controlled findings-submission and clean-review receipts harvested into the correct run. A clean review must not fabricate findings or submit a schema-invalid empty array. |
-| Plugin `lifecycle` | Controlled dispatch receipts showing observed model/variant, inherited permissions, enforced deadline, cancellation, and independently observed terminal state for the exact runtime and loaded implementation. |
-| Native controls | Project-scoped supported delegation/session interfaces and effective persona definitions, with controlled receipts for `model_variant`, `permissions`, `deadline`, `cancellation`, `terminal_state`, and trustworthy `caller_binding`. Validate `delegation` itself against the exposed interface. |
-| `policy` | Current authoritative matrix, overrides, capability manifest, and persona definitions, plus evidence that the selected execution mechanism preserves their configured requirements. |
-| `feedback_assessment` | Identified loaded trusted child-response/consolidation implementation and actual feedback-command receipts preserving item assessment fields. Retain the pinned implementation's documented incompatibility. |
-| `frozen_sibling_evidence`, when configured | Identified loaded aggregate implementation and receipts establishing one invocation-wide frozen bundle, not reacquisition per item or iteration. |
+| `/uf.review-council` | Required reviewers receive one frozen scope; findings and valid clean assessments consolidate under existing verdict rules |
+| `/uf.review-pr` | PR context and CI are inspected; council results reach the report; declining posting performs no GitHub mutation |
+| `/uf.address-feedback` | Feedback is assessed; approved local fixture fixes receive cumulative council review; declining push/reply/resolution performs none of those actions |
 
-Source inspection supplies implementation identity and static semantics, not
-proof that a particular child can call a tool or that a deadline fired. Runtime
-receipts supply observed behavior, not a waiver of incompatible static contracts.
-Handwritten status assertions, model prose, version strings, and fixture-only
-successes cannot supply missing runtime evidence.
+Across these flows, exercise reviewer failure, enforced timeout/cancellation and
+independently observed terminal state, unchanged permissions/model selection,
+same-path resume, and the registered-parent-tools/unknown-child regression.
+Backend selection must remain native when plugin evidence is unknown but native
+controls are supported; uncertain native controls must stop execution.
 
-#### Separate collection from controlled runtime acceptance
-
-Production preflight remains read-only: discover supported interfaces, read
-current policy and eligible evidence, validate bindings, and emit deterministic
-capability JSON with source references and a named reason for every gap. It must
-not create reviewers, call workflow tools, write backend progress, or mutate
-GitHub. Malformed, incomplete, ambiguous, or inaccessible observations fail closed.
-Do not automatically install packages or start a replacement runtime.
-
-Obtain behavioral receipts through a separate, explicitly invoked acceptance
-harness in disposable repositories with isolated configuration/state. The harness
-tests the specified controls without issuing a production review verdict or
-authorizing a production invocation. It is not a fallback for a failed preflight.
-Keep unchanged persona permissions, model selection, policy, and plugin sources;
-capture attempted external actions with controlled fixtures rather than real
-pushes, comments, reviews, or thread resolutions.
-
-Bind each receipt to its runtime/service identity, project context, loaded plugin
-identity where applicable, exposed-contract digest, policy/agent digests,
-execution mechanism, scenario, outcome, and concrete observation references.
-Production preflight must verify that the evidence applies to its current
-context; a copied receipt or the contributor's assertion is not verification.
-Changes to a bound identity or contract invalidate affected evidence, and absent
-or unverifiable loaded-source identity remains unknown. Never assume installed
-source is the source loaded by the running service.
-
-Store evidence privately with directories `0700` and files `0600`, excluding
-credentials and transcripts. Document the exact collection and acceptance
-commands, their inputs/outputs and side effects, and how a new session verifies
-and refreshes evidence. Identical normalized observations must produce identical
-capability decisions. Positive runtime claims require inspectable observation
-receipts; filenames, digests, or a self-reported `passed` field alone do not
-establish provenance.
-
-#### Acceptance boundary
-
-Exercise all three real command flows for each claimed supported runtime/backend,
-including findings, clean results, timeout/cancellation, terminal-state recording,
-and declined mutation gates. Include the reported registered-tools/unknown-child
-case, stale evidence, missing observation interfaces, and known incompatible
-contracts. Record commands and exact versions in the compatibility page. A
-missing V1 runtime remains unverified; an isolated lifecycle test alone does not
-complete task 8.8. No source changes in this specification revision are authorized
-until these artifacts are committed and pushed.
+Keep offline routing/recovery tests, but do not call them command acceptance.
+Record plugin-path coverage separately when a compatible runtime is available.
+Unavailable V1/plugin coverage stays unverified and does not prevent establishing
+V2/native support. Task 8.8 remains open for any untested part of its original
+cross-runtime scope. Commit and push this spec revision before implementation.
 
 [preflight-review]: https://github.com/complytime/complytime-providers/pull/244#pullrequestreview-5943477705
 

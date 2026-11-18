@@ -26,7 +26,8 @@ a verdict, a triage summary, or a gated mutation while the path is unreported.
 
 #### Scenario: Plugin tools are available
 
-- **GIVEN** a runtime where the required UF plugin tools are registered
+- **GIVEN** a runtime where the required UF plugin tools are registered and their
+  complete command contract is established as usable
 - **WHEN** a contributor invokes one of the three commands
 - **THEN** the command reports the plugin path
 - **AND** it executes the plugin-backed workflow rather than native orchestration
@@ -77,11 +78,11 @@ SHALL remain optional according to existing policy.
 
 ### Requirement: Native fallback requires complete native capabilities
 
-When required plugin contracts are missing or incompatible, the command SHALL
-record the gaps and select native execution only with supported model/variant,
-unchanged permissions, bounded delegation, cancellation, and observable terminal
-state. Uncertain discovery SHALL stop progression. Capability probes SHALL NOT
-create reviewers, write backend checkpoints, or perform external mutations.
+An unestablished plugin contract SHALL permit independently supported native
+execution, preserving missing/incompatible/unknown distinctions. Native execution
+SHALL require supported model/variant, unchanged permissions, bounded delegation,
+cancellation, terminal-state observation, caller binding, and policy enforcement.
+Uncertainty about a required native control SHALL stop native execution.
 
 #### Scenario: Only some required plugin tools loaded
 
@@ -98,132 +99,143 @@ create reviewers, write backend checkpoints, or perform external mutations.
 - **THEN** it records the incompatibility and evaluates the complete native path
 - **AND** it stops with `UNAVAILABLE` if native controls are insufficient
 
-#### Scenario: Capability discovery is uncertain
+#### Scenario: An unusable plugin dependency makes further plugin checks unnecessary
 
-- **WHEN** the command cannot reliably inspect required tool contracts
-- **THEN** it stops rather than guessing a backend
+- **GIVEN** a required plugin tool is definitively missing or incompatible
+- **AND** other plugin capabilities remain unknown
+- **WHEN** native execution satisfies all required controls
+- **THEN** preflight records those distinct observations and selects native execution
+- **AND** it does not require proving the remaining plugin behavior
+
+#### Scenario: Plugin discovery is uncertain but native execution is supported
+
+- **WHEN** the command cannot establish a usable plugin contract
+- **AND** supported native interfaces establish all required native controls
+- **THEN** it selects native execution and reports the plugin uncertainty
+- **AND** it makes no plugin compatibility claim and invokes no plugin workflow tools
+
+#### Scenario: A required native control is uncertain
+
+- **GIVEN** a usable plugin contract has not been established
+- **WHEN** a required native execution control cannot be established
+- **THEN** it stops and names that control rather than guessing support
 - **AND** it has created no reviewers, backend checkpoints, or external mutations
 
-### Requirement: Capability decisions have repeatable evidence acquisition
+### Requirement: Readiness checks are specific to the execution backend
 
-Each required capability SHALL have documented acceptance criteria, an
-authoritative observation source, and a reproducible collection/verification
-procedure. A repository-owned collector/verifier SHALL produce the existing
-preflight decision input from inspected observations and eligible runtime
-receipts, rather than requiring an assistant to invent evidence classifications.
-The pure selector's existing fail-closed rules SHALL remain unchanged.
+The commands SHALL document each backend's required operations and concrete
+selection failures. The routing helper SHALL remain pure and deterministic,
+evaluating plugin and native readiness independently. Production startup SHALL
+NOT require a diagnostic collector, observer plugin, loaded-source attestation,
+or generic receipt verifier, and SHALL NOT create probe reviewers, checkpoints,
+or external mutations.
 
 #### Scenario: Parent tools are registered but child access is unverified
 
 - **GIVEN** all required parent tools expose compatible schemas
-- **AND** no authoritative observation establishes actual reviewer-child access
-- **WHEN** capability evidence is collected
-- **THEN** child access remains unknown and preflight stops
-- **AND** diagnostics name the missing observation and documented validation step
-- **AND** registration alone does not authorize plugin or native execution
+- **AND** actual reviewer-child access has not been established
+- **WHEN** native execution independently satisfies all required controls
+- **THEN** plugin child access remains unknown and the command selects native execution
+- **AND** registration alone does not establish plugin compatibility
+- **AND** native execution does not require the plugin submission tool
 
-#### Scenario: Repeatable evidence collection
+#### Scenario: Repeatable path selection
 
-- **GIVEN** identical normalized runtime observations and applicable receipts
-- **WHEN** the documented collector/verifier runs in separate sessions
-- **THEN** it produces identical capability classifications and source references
-- **AND** every required key has an explicit acceptance result or named gap
-- **AND** it does not substitute model prose or handwritten status assertions for
-  authoritative observations
+- **GIVEN** identical normalized tool/runtime observations, policy, and saved binding
+- **WHEN** the routing helper evaluates them
+- **THEN** it produces the same selected path or named blocking reason
+- **AND** it performs no discovery, reviewer dispatch, or persistent writes itself
 
 #### Scenario: Runtime observation is unsupported or fails
 
-- **WHEN** a supported discovery interface cannot establish a required property,
-  returns ambiguous data, or fails
-- **THEN** collection preserves uncertainty and reports the actual failure
+- **WHEN** a discovery interface cannot establish a property or fails
+- **THEN** diagnostics preserve uncertainty and report the actual failure
 - **AND** it does not infer absence, guess an API shape, install dependencies,
-  start a replacement runtime, or weaken the selection rule
+  or start a replacement runtime
+- **AND** it stops execution when the selected backend needs that unavailable observation
 
-#### Scenario: Production preflight collects evidence
+### Requirement: Native execution uses a repeatable supported mechanism
 
-- **WHEN** any of the three commands invokes production capability collection
-- **THEN** collection only reads supported discovery interfaces, policy, and
-  applicable evidence and emits the decision input
-- **AND** it creates no reviewers, workflow-tool calls, backend checkpoints, or
-  external mutations
-- **AND** missing or malformed evidence cannot become a ready result
+The three commands SHALL share a documented native execution procedure using
+supported tools and the existing authenticated runtime. If those tools cannot
+express the existing lifecycle requirements, a small tested shared supervisor
+SHALL supply the missing execution support rather than generating a new
+supervisor on each invocation. No new runtime dependency, plugin, service, or
+configuration change SHALL be required.
 
-### Requirement: Runtime evidence is bound to the observed execution context
+#### Scenario: Native tool lacks a per-run deadline
 
-Behavioral evidence SHALL identify the observed runtime/service, project context,
-loaded plugin implementation where applicable, exposed-contract digest,
-policy/agent digests, execution mechanism, scenario, outcome, and inspectable
-observation references. The verifier SHALL establish applicability to the current
-invocation. Static source inspection SHALL NOT substitute for observed child
-access, deadline enforcement, cancellation, or terminal state.
+- **GIVEN** the native delegation tool cannot enforce the configured deadline
+- **WHEN** a supported shared supervisor can enforce it on the existing runtime
+- **THEN** the commands use that mechanism with unchanged persona permissions
+- **AND** timeout triggers explicit cancellation and independently observed terminal state
+- **AND** prompt text or client termination alone is not treated as enforcement
 
-#### Scenario: Applicable verified runtime evidence exists
+#### Scenario: Authenticated runtime or caller cannot be established
 
-- **GIVEN** authoritative observations and controlled runtime receipts establish
-  every required contract for the current context
-- **WHEN** preflight verifies the evidence
-- **THEN** it classifies capabilities using their documented acceptance criteria
-- **AND** the unchanged selector determines the execution path
-- **AND** a passing receipt does not grant mutation consent
+- **WHEN** native execution cannot establish the existing server, caller session,
+  project, or supported authentication
+- **THEN** it stops with the concrete connection or identity error
+- **AND** it does not read stored credentials/private databases, guess a session,
+  change configuration, or start a replacement runtime
 
 #### Scenario: Runtime or policy context changes
 
-- **WHEN** runtime/service identity, project context, loaded implementation,
-  exposed contracts, policy, agent definitions, or execution mechanism changes
-- **THEN** affected prior evidence is not reused as current capability proof
-- **AND** the verifier requires fresh authoritative observations
-- **AND** it does not silently carry a compatible status across the change
-
-#### Scenario: Claimed loaded implementation cannot be verified
-
-- **WHEN** installed source cannot be tied to the implementation loaded by the
-  running service, or receipt provenance cannot be verified
-- **THEN** affected capability evidence remains unknown
-- **AND** filenames, hashes, or self-reported pass fields alone do not establish
-  compatible runtime behavior
+- **WHEN** runtime, project, policy, agent definitions, or execution mechanism changes
+- **THEN** affected execution checks and saved assessments are revalidated
+- **AND** historical successful tests are not reported as proof of the current run
 
 #### Scenario: A known implementation is incompatible
 
 - **GIVEN** the pinned feedback response contract is incompatible
-- **WHEN** matching parent tool registration or unrelated successful receipts exist
-- **THEN** feedback capability remains incompatible with its documented reason
-- **AND** no collector changes plugin sources, persona permissions, or review policy
+- **WHEN** matching parent tools are registered
+- **THEN** feedback plugin capability remains incompatible with its documented reason
+- **AND** the command evaluates native execution without modifying plugins or policy
 
-### Requirement: Controlled acceptance is separate from production startup
+### Requirement: Comparable outcomes are tested through the actual commands
 
-A separately invoked runtime acceptance harness SHALL exercise real commands in
-disposable, isolated fixtures and retain private observation receipts. It SHALL
-NOT issue a production verdict or serve as a fallback from failed production
-preflight. Production startup SHALL NOT dispatch probe reviewers.
+Acceptance SHALL invoke all three real commands with UF plugins unavailable in
+disposable repository fixtures. Both backends SHALL preserve reviewer authority,
+scope, model policy, permissions, limits, structured results, verdict rules, and
+human gates. Backend-specific artifacts need not be identical. Production startup
+SHALL NOT dispatch probe reviewers. Test fixtures SHALL capture external actions
+instead of issuing real GitHub writes or pushes.
 
 #### Scenario: Findings and clean-review paths are exercised
 
-- **WHEN** a runtime/backend is claimed as supported
-- **THEN** acceptance exercises all three command flows with exact runtime and
-  implementation identities and documented reproduction commands
-- **AND** findings reach their intended run through actual child submission
-- **AND** a clean result succeeds through a contract-valid path without invented
-  findings or a schema-invalid empty submission
-- **AND** registered-tools/unknown-child and stale-evidence regressions are covered
+- **WHEN** native support is claimed for an exact runtime version
+- **THEN** all three commands run through their native workflows with documented
+  reproduction commands and actual reviewer outcomes
+- **AND** council findings and valid clean assessments reach their intended runs
+- **AND** PR review inspects context and CI and produces the council-based report
+- **AND** feedback assesses items and obtains cumulative council review of approved
+  local fixture fixes before offering a push
+- **AND** native clean results do not require plugin submission or invented findings
 
 #### Scenario: Lifecycle and authorization behavior is exercised
 
-- **WHEN** controlled runtime acceptance runs
+- **WHEN** actual-command acceptance runs
 - **THEN** it verifies observed model/variant, unchanged persona permissions,
   deadline enforcement, cancellation, and independently observed terminal state
-- **AND** it exercises declined mutation gates using captured external-action
-  fixtures without real GitHub writes or pushes
+- **AND** failed reviewers are named and never counted as approvals
+- **AND** declined posting, pushing, replying, and resolution produce no such mutations
+- **AND** same-path resume does not repeat completed assessments or external actions
 - **AND** a killed client, acknowledgement, or retained busy timestamp alone is
   not evidence that a reviewer is terminal
 
-#### Scenario: Runtime acceptance is unavailable or incomplete
+#### Scenario: Plugin-enabled runtime is unavailable for testing
 
-- **WHEN** a required runtime or observation interface is unavailable, or only
-  selector fixtures or isolated lifecycle probes have run
-- **THEN** command compatibility remains explicitly unverified for that context
-- **AND** task 8.8 remains open for missing command-level acceptance
-- **AND** evidence storage excludes credentials and transcripts and uses private
-  directories and files
+- **WHEN** native command acceptance passes but no compatible plugin runtime is available
+- **THEN** the report states native support and plugin-path coverage separately
+- **AND** unavailable plugin coverage does not invalidate observed native outcomes
+- **AND** task 8.8 remains open for untested parts of its cross-runtime scope
+
+#### Scenario: Only routing fixtures or lifecycle prototypes have passed
+
+- **WHEN** the real command workflows have not completed acceptance
+- **THEN** compatibility remains unverified for those workflows
+- **AND** the partial collector or passing helper tests do not establish command support
+- **AND** retained test records use private storage without credentials or transcripts
 
 ### Requirement: The selected execution path is fixed for the invocation
 

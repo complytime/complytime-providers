@@ -8,9 +8,10 @@ own branch so review scope stays clean.
 Tasks 1-7 record the earlier native-fork implementation and its reported
 verification; none establishes plugin-first behavior. Task group 8 tracks the
 2026-11-17 plugin-first revision; its remaining actual-runtime acceptance is
-tracked in 8.8. Group 9 specifies the 2026-11-18 response to PR review 5943477705:
-repeatable evidence acquisition, not weaker selection. Commit and push the group
-9 specification revision before implementing its collector or command changes.
+tracked in 8.8. Group 9 records the superseded evidence-first response to PR
+review 5943477705. Group 10 is the active outcome-focused plan: run the commands
+without plugins while preserving review and authorization safeguards. Commit and
+push the group 10 specification revision before implementing its command changes.
 Do not change an existing verification guard without maintainer approval.
 
 ## 1. Establish the durable fork
@@ -233,47 +234,85 @@ Do not change an existing verification guard without maintainer approval.
   remains explicitly unverified in 8.8; no full cross-repository host integration
   is claimed from the passing helper suites.
 
-## 9. Make preflight evidence repeatable (PR #244 feedback)
+## 9. Evidence-first approach (superseded; historical record)
 
 Review source:
 https://github.com/complytime/complytime-providers/pull/244#pullrequestreview-5943477705.
-This group is pending implementation; accepting the review does not establish
-runtime compatibility or authorize external actions.
+The contributor clarified that the required outcome is working UF commands
+without plugins, not a capability-attestation framework. Group 10 supersedes the
+unfinished work below. This is cancellation of that approach, not completion of
+its pending tasks or resolution of the review.
 
 - [x] 9.1 Specify capability acceptance criteria, authoritative evidence sources,
   context-bound receipt verification, and separate controlled runtime acceptance
   in design D3a and the spec delta. Preserve unknown-to-stop, backend ownership,
   persona permissions, plugin sources, and existing review/authorization gates.
-- [ ] 9.2 Commit and push the group 9 spec artifacts before implementation.
+- [x] 9.2 Commit and push the group 9 spec artifacts before implementation.
   Obtain separate push confirmation and verify the intended commit on the PR.
-- [ ] 9.3 Extend the contract inventory with every required plugin/native key,
-  exact supported observation interfaces, pass/fail criteria, evidence identity
-  fields, and documented collection/acceptance commands. Verify interfaces
-  against actual runtime schemas; unsupported observations remain unknown.
-- [ ] 9.4 Implement the read-only collector/verifier and integrate it into the
-  shared command preflight without changing the pure selector's decisions.
-  Validate current context and receipt provenance, preserve explicit known
-  incompatibilities, and report actionable gaps. No startup probe reviewers,
-  workflow-tool execution, dependency installation, or replacement runtime.
-- [ ] 9.5 Add deterministic regression fixtures for complete evidence, registered
-  parent tools with unknown child visibility, unsupported/failed discovery,
-  malformed or forged evidence, context/contract/policy changes, known feedback
-  incompatibility, and optional-tool absence. Assert identical decisions for
-  identical normalized observations and no backend or external mutations.
-- [ ] 9.6 Implement and exercise the separately invoked isolated acceptance
-  harness with unchanged personas, models, permissions, policy, and plugins.
-  Capture real findings submission, valid clean results, deadline/cancellation,
-  independently observed terminal state, and declined mutation gates across
-  actual command flows. Capture external actions without real GitHub writes or
-  pushes. Retain private redacted observation receipts, not transcripts.
-- [ ] 9.7 Record exact runtime/backend coverage, reproduction commands, observed
-  failures, and unavailable capabilities in the compatibility page. Complete
-  8.8 only for its full required actual-runtime acceptance; otherwise leave it
-  open and distinguish successful fixtures from verified command compatibility.
-- [ ] 9.8 Assess `CHANGELOG.md`, `AGENTS.md`, and `README.md` impact; update only
-  relevant documentation and regenerate the command manifest with intentional
-  command edits. Run strict OpenSpec validation, whitespace checks, evidence
-  regression tests, retained fork/preflight/recovery tests, and applicable
-  CI-derived build/test/lint checks. Obtain the mandatory cumulative post-fix
-  council before proposing an implementation push. Do not claim a blocked gate
-  passed, push without confirmation, or post an addressed reply prematurely.
+  Specification commit `1a72219993c419fd0d37956fd4672f744fba30db` was pushed
+  and verified as PR #244's head. Implementation remains pending.
+Historical partial work for former tasks 9.3-9.5: the inventory documents the
+inspected v2.3.0 GET routes and missing observations.
+`uf_review_capabilities.py` and `uf_review_runtime.py` collect bounded read-only
+context and always return incomplete/stop. Their 58 offline tests passed.
+This diagnostic implementation is preserved in local commit
+`cc3b2272998eacd1a7beedfd511115a2d5b1b89b`; it is not a working review backend.
+The generic verifier, loaded-source attestation, and production collector
+integration are cancelled, not deferred prerequisites for native execution.
+
+Former tasks 9.6-9.8 did not complete. Real-command acceptance, documentation, and
+the mandatory cumulative council remain actionable in group 10. Earlier local
+validation passed the partial collector tests, Ruff checks, fork/cleanup and
+79 selection/46 recovery fixtures, strict OpenSpec validation, build, Go tests,
+and lint. A live collector run stopped on explicit-server authentication failure.
+No actual command acceptance, council verdict, implementation push, or feedback
+reply follows from those results. Task 8.8 remains open.
+
+## 10. Make plugin-free commands work with comparable outcomes
+
+- [x] 10.1 Review the whole proposal, design, spec, and tasks against the
+  contributor's clarified objective. Replace global plugin-uncertainty blocking
+  and generic evidence-verifier prerequisites with backend-specific readiness
+  and actual-command acceptance. Preserve reviewer authority, policy, permissions,
+  limits, verdicts, immutable scope, recovery ownership, and human gates.
+- [ ] 10.2 Validate, commit, and separately confirm pushing this specification
+  revision before source implementation. Continue on the current branch, as the
+  contributor requested; do not create an isolated worktree. Before reorganizing
+  local-only commits, preserve the existing collector commit and obtain approval
+  for the exact history changes. Arrange the revised spec before implementation
+  without including the unreviewed collector in its push. Show the exact commit
+  set and destination and verify the spec on the remote before implementation.
+  Require fresh implementation confirmation. Do not rewrite published history,
+  discard existing work, or bypass the unresolved implementation review gate.
+- [ ] 10.3 Update the pure routing helper, its tests, and the shared command
+  preflight so usable plugins win, otherwise independently supported native
+  execution runs. Preserve distinct missing/incompatible/unknown observations.
+  Cover a definitive plugin gap plus other unknowns, all plugin behavior unknown
+  with supported native controls, uncertain native controls, and bound-backend
+  recovery unaffected by unrelated backend discovery. Do not change review policy.
+- [ ] 10.4 Make native execution repeatable across all three commands. Use native
+  tools where sufficient; otherwise supply a small tested shared supervisor for
+  the existing runtime's supported authenticated API. Preserve actual
+  model/variant, caller/project binding, unchanged persona permissions, configured
+  deadlines, cancellation, terminal-state checks, concurrency, and reported-cost
+  limits. Do not install dependencies, read credentials/private databases, change
+  configuration, start a runtime, or regenerate the supervisor per invocation.
+- [ ] 10.5 Exercise the three actual commands with plugins unavailable in
+  disposable fixtures: council findings and clean results; PR context/CI and
+  council reporting with posting declined; feedback assessment and approved
+  local fixture fixes with cumulative council and push/reply/resolution declined.
+  Include reviewer failure, timeout/cancellation, permissions/model verification,
+  same-path resume, and the registered-tools/unknown-child regression. Capture
+  attempted external actions without real GitHub mutations or pushes.
+- [ ] 10.6 Update the contract inventory and compatibility page with the actual
+  procedure, exact runtime/backend coverage, and reproduction commands. Keep the
+  diagnostic collector optional, distinguish native records from plugin artifacts,
+  and report missing plugin-enabled runtime coverage separately. Assess
+  `CHANGELOG.md`, `AGENTS.md`, and `README.md`; update only relevant documentation.
+  Regenerate the fork manifest alongside intentional command edits.
+- [ ] 10.7 Run strict OpenSpec validation, whitespace checks, routing/recovery and
+  supervisor regressions, retained fork/cleanup checks, and applicable CI-derived
+  build/test/lint checks. Obtain the mandatory cumulative council on the complete
+  implementation before proposing its push. Keep R1 unresolved until real command
+  acceptance and the required review pass; pushes and replies need separate
+  confirmation. Do not mark 8.8 complete for untested cross-runtime coverage.
