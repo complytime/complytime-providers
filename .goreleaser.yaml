@@ -80,6 +80,9 @@ changelog:
             - "^test:"
             - Merge pull request
     groups:
+        - title: "Breaking Changes"
+          regexp: '^.*?[a-z]+(\(.+\))?!:.+$'
+          order: 50
         - title: "New Features"
           regexp: '^.*?feat(\(.+\))??!?:.+$'
           order: 100
@@ -100,6 +103,12 @@ changelog:
           order: 400
         - title: "Other Work"
           order: 9999
+
+release:
+    footer: |
+        **Full changelog**: https://github.com/complytime/complytime-providers/blob/main/CHANGELOG.md
+
+        **Provider man pages**: https://github.com/complytime/complytime-providers/tree/main/docs/man
 
 sboms:
     - id: archive
