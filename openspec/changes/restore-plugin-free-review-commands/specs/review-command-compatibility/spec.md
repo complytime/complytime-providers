@@ -104,6 +104,127 @@ create reviewers, write backend checkpoints, or perform external mutations.
 - **THEN** it stops rather than guessing a backend
 - **AND** it has created no reviewers, backend checkpoints, or external mutations
 
+### Requirement: Capability decisions have repeatable evidence acquisition
+
+Each required capability SHALL have documented acceptance criteria, an
+authoritative observation source, and a reproducible collection/verification
+procedure. A repository-owned collector/verifier SHALL produce the existing
+preflight decision input from inspected observations and eligible runtime
+receipts, rather than requiring an assistant to invent evidence classifications.
+The pure selector's existing fail-closed rules SHALL remain unchanged.
+
+#### Scenario: Parent tools are registered but child access is unverified
+
+- **GIVEN** all required parent tools expose compatible schemas
+- **AND** no authoritative observation establishes actual reviewer-child access
+- **WHEN** capability evidence is collected
+- **THEN** child access remains unknown and preflight stops
+- **AND** diagnostics name the missing observation and documented validation step
+- **AND** registration alone does not authorize plugin or native execution
+
+#### Scenario: Repeatable evidence collection
+
+- **GIVEN** identical normalized runtime observations and applicable receipts
+- **WHEN** the documented collector/verifier runs in separate sessions
+- **THEN** it produces identical capability classifications and source references
+- **AND** every required key has an explicit acceptance result or named gap
+- **AND** it does not substitute model prose or handwritten status assertions for
+  authoritative observations
+
+#### Scenario: Runtime observation is unsupported or fails
+
+- **WHEN** a supported discovery interface cannot establish a required property,
+  returns ambiguous data, or fails
+- **THEN** collection preserves uncertainty and reports the actual failure
+- **AND** it does not infer absence, guess an API shape, install dependencies,
+  start a replacement runtime, or weaken the selection rule
+
+#### Scenario: Production preflight collects evidence
+
+- **WHEN** any of the three commands invokes production capability collection
+- **THEN** collection only reads supported discovery interfaces, policy, and
+  applicable evidence and emits the decision input
+- **AND** it creates no reviewers, workflow-tool calls, backend checkpoints, or
+  external mutations
+- **AND** missing or malformed evidence cannot become a ready result
+
+### Requirement: Runtime evidence is bound to the observed execution context
+
+Behavioral evidence SHALL identify the observed runtime/service, project context,
+loaded plugin implementation where applicable, exposed-contract digest,
+policy/agent digests, execution mechanism, scenario, outcome, and inspectable
+observation references. The verifier SHALL establish applicability to the current
+invocation. Static source inspection SHALL NOT substitute for observed child
+access, deadline enforcement, cancellation, or terminal state.
+
+#### Scenario: Applicable verified runtime evidence exists
+
+- **GIVEN** authoritative observations and controlled runtime receipts establish
+  every required contract for the current context
+- **WHEN** preflight verifies the evidence
+- **THEN** it classifies capabilities using their documented acceptance criteria
+- **AND** the unchanged selector determines the execution path
+- **AND** a passing receipt does not grant mutation consent
+
+#### Scenario: Runtime or policy context changes
+
+- **WHEN** runtime/service identity, project context, loaded implementation,
+  exposed contracts, policy, agent definitions, or execution mechanism changes
+- **THEN** affected prior evidence is not reused as current capability proof
+- **AND** the verifier requires fresh authoritative observations
+- **AND** it does not silently carry a compatible status across the change
+
+#### Scenario: Claimed loaded implementation cannot be verified
+
+- **WHEN** installed source cannot be tied to the implementation loaded by the
+  running service, or receipt provenance cannot be verified
+- **THEN** affected capability evidence remains unknown
+- **AND** filenames, hashes, or self-reported pass fields alone do not establish
+  compatible runtime behavior
+
+#### Scenario: A known implementation is incompatible
+
+- **GIVEN** the pinned feedback response contract is incompatible
+- **WHEN** matching parent tool registration or unrelated successful receipts exist
+- **THEN** feedback capability remains incompatible with its documented reason
+- **AND** no collector changes plugin sources, persona permissions, or review policy
+
+### Requirement: Controlled acceptance is separate from production startup
+
+A separately invoked runtime acceptance harness SHALL exercise real commands in
+disposable, isolated fixtures and retain private observation receipts. It SHALL
+NOT issue a production verdict or serve as a fallback from failed production
+preflight. Production startup SHALL NOT dispatch probe reviewers.
+
+#### Scenario: Findings and clean-review paths are exercised
+
+- **WHEN** a runtime/backend is claimed as supported
+- **THEN** acceptance exercises all three command flows with exact runtime and
+  implementation identities and documented reproduction commands
+- **AND** findings reach their intended run through actual child submission
+- **AND** a clean result succeeds through a contract-valid path without invented
+  findings or a schema-invalid empty submission
+- **AND** registered-tools/unknown-child and stale-evidence regressions are covered
+
+#### Scenario: Lifecycle and authorization behavior is exercised
+
+- **WHEN** controlled runtime acceptance runs
+- **THEN** it verifies observed model/variant, unchanged persona permissions,
+  deadline enforcement, cancellation, and independently observed terminal state
+- **AND** it exercises declined mutation gates using captured external-action
+  fixtures without real GitHub writes or pushes
+- **AND** a killed client, acknowledgement, or retained busy timestamp alone is
+  not evidence that a reviewer is terminal
+
+#### Scenario: Runtime acceptance is unavailable or incomplete
+
+- **WHEN** a required runtime or observation interface is unavailable, or only
+  selector fixtures or isolated lifecycle probes have run
+- **THEN** command compatibility remains explicitly unverified for that context
+- **AND** task 8.8 remains open for missing command-level acceptance
+- **AND** evidence storage excludes credentials and transcripts and uses private
+  directories and files
+
 ### Requirement: The selected execution path is fixed for the invocation
 
 The command SHALL bind its execution path before the first backend operation.

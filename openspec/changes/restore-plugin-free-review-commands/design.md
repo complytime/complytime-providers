@@ -157,6 +157,94 @@ Rules that apply to both paths:
   child rather than reporting success.
 - Failed children are non-voting and named; they never become approvals.
 
+### D3a: Collect reproducible capability evidence before applying selection
+
+The 2026-11-18 specification revision addresses
+[PR review 5943477705][preflight-review]. The reviewer reports that registered
+tools still leave child visibility and lifecycle contracts unknown, stopping
+`/uf.review-pr 244` before review. The current selector correctly preserves the
+uncertainty; changing `unknown` to absence or compatibility would hide the gap.
+The missing component is repeatable evidence acquisition, not a less restrictive
+selection rule. This section specifies pending implementation, not verified
+runtime support.
+
+Implement a repository-owned evidence collector/verifier with a documented entry
+point and regression tests. It supplies the existing decision input; the pure jq
+selector keeps its selection rules and does not acquire runtime side effects.
+Prefer the runtime's supported discovery/API interfaces. Consult the exact live
+schema rather than assuming an endpoint, response shape, or V1/V2 equivalence.
+If those interfaces cannot establish a required property, preserve `unknown` and
+name the unsupported observation.
+
+#### Capability acceptance and authoritative sources
+
+The contract inventory will map every required key to an exact observation,
+pass/fail criteria, source reference, and verifier case. Use this minimum mapping:
+
+| Capability | Evidence source and acceptance |
+| --- | --- |
+| Required parent tools and schemas | Complete current-session callable inventory and exposed schemas, checked against the pinned contract. Parent registration establishes neither child visibility nor successful execution. |
+| `immutable_scope` | Identified loaded dispatch implementation plus controlled command receipts showing all children consume the same frozen diff, inventory, and SHA pair. |
+| `child_contract` | Effective tool/permission evidence for the actual reviewer persona and controlled findings-submission and clean-review receipts harvested into the correct run. A clean review must not fabricate findings or submit a schema-invalid empty array. |
+| Plugin `lifecycle` | Controlled dispatch receipts showing observed model/variant, inherited permissions, enforced deadline, cancellation, and independently observed terminal state for the exact runtime and loaded implementation. |
+| Native controls | Project-scoped supported delegation/session interfaces and effective persona definitions, with controlled receipts for `model_variant`, `permissions`, `deadline`, `cancellation`, `terminal_state`, and trustworthy `caller_binding`. Validate `delegation` itself against the exposed interface. |
+| `policy` | Current authoritative matrix, overrides, capability manifest, and persona definitions, plus evidence that the selected execution mechanism preserves their configured requirements. |
+| `feedback_assessment` | Identified loaded trusted child-response/consolidation implementation and actual feedback-command receipts preserving item assessment fields. Retain the pinned implementation's documented incompatibility. |
+| `frozen_sibling_evidence`, when configured | Identified loaded aggregate implementation and receipts establishing one invocation-wide frozen bundle, not reacquisition per item or iteration. |
+
+Source inspection supplies implementation identity and static semantics, not
+proof that a particular child can call a tool or that a deadline fired. Runtime
+receipts supply observed behavior, not a waiver of incompatible static contracts.
+Handwritten status assertions, model prose, version strings, and fixture-only
+successes cannot supply missing runtime evidence.
+
+#### Separate collection from controlled runtime acceptance
+
+Production preflight remains read-only: discover supported interfaces, read
+current policy and eligible evidence, validate bindings, and emit deterministic
+capability JSON with source references and a named reason for every gap. It must
+not create reviewers, call workflow tools, write backend progress, or mutate
+GitHub. Malformed, incomplete, ambiguous, or inaccessible observations fail closed.
+Do not automatically install packages or start a replacement runtime.
+
+Obtain behavioral receipts through a separate, explicitly invoked acceptance
+harness in disposable repositories with isolated configuration/state. The harness
+tests the specified controls without issuing a production review verdict or
+authorizing a production invocation. It is not a fallback for a failed preflight.
+Keep unchanged persona permissions, model selection, policy, and plugin sources;
+capture attempted external actions with controlled fixtures rather than real
+pushes, comments, reviews, or thread resolutions.
+
+Bind each receipt to its runtime/service identity, project context, loaded plugin
+identity where applicable, exposed-contract digest, policy/agent digests,
+execution mechanism, scenario, outcome, and concrete observation references.
+Production preflight must verify that the evidence applies to its current
+context; a copied receipt or the contributor's assertion is not verification.
+Changes to a bound identity or contract invalidate affected evidence, and absent
+or unverifiable loaded-source identity remains unknown. Never assume installed
+source is the source loaded by the running service.
+
+Store evidence privately with directories `0700` and files `0600`, excluding
+credentials and transcripts. Document the exact collection and acceptance
+commands, their inputs/outputs and side effects, and how a new session verifies
+and refreshes evidence. Identical normalized observations must produce identical
+capability decisions. Positive runtime claims require inspectable observation
+receipts; filenames, digests, or a self-reported `passed` field alone do not
+establish provenance.
+
+#### Acceptance boundary
+
+Exercise all three real command flows for each claimed supported runtime/backend,
+including findings, clean results, timeout/cancellation, terminal-state recording,
+and declined mutation gates. Include the reported registered-tools/unknown-child
+case, stale evidence, missing observation interfaces, and known incompatible
+contracts. Record commands and exact versions in the compatibility page. A
+missing V1 runtime remains unverified; an isolated lifecycle test alone does not
+complete task 8.8. No source changes in this specification revision are authorized
+until these artifacts are committed and pushed.
+
+[preflight-review]: https://github.com/complytime/complytime-providers/pull/244#pullrequestreview-5943477705
+
 ### D4: Announce the selected path and never switch after execution starts
 
 Each command applies the Shared Execution Contract and prints exactly one banner.

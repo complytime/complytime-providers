@@ -7,9 +7,11 @@ own branch so review scope stays clean.
 
 Tasks 1-7 record the earlier native-fork implementation and its reported
 verification; none establishes plugin-first behavior. Task group 8 tracks the
-2026-11-17 plugin-first revision and remains unimplemented. Commit and push the
-revised spec before starting group 8 implementation. Do not change an existing
-verification guard without maintainer approval.
+2026-11-17 plugin-first revision; its remaining actual-runtime acceptance is
+tracked in 8.8. Group 9 specifies the 2026-11-18 response to PR review 5943477705:
+repeatable evidence acquisition, not weaker selection. Commit and push the group
+9 specification revision before implementing its collector or command changes.
+Do not change an existing verification guard without maintainer approval.
 
 ## 1. Establish the durable fork
 
@@ -230,3 +232,48 @@ verification guard without maintainer approval.
   implementation code changed after approval. Actual V1/V2 command acceptance
   remains explicitly unverified in 8.8; no full cross-repository host integration
   is claimed from the passing helper suites.
+
+## 9. Make preflight evidence repeatable (PR #244 feedback)
+
+Review source:
+https://github.com/complytime/complytime-providers/pull/244#pullrequestreview-5943477705.
+This group is pending implementation; accepting the review does not establish
+runtime compatibility or authorize external actions.
+
+- [x] 9.1 Specify capability acceptance criteria, authoritative evidence sources,
+  context-bound receipt verification, and separate controlled runtime acceptance
+  in design D3a and the spec delta. Preserve unknown-to-stop, backend ownership,
+  persona permissions, plugin sources, and existing review/authorization gates.
+- [ ] 9.2 Commit and push the group 9 spec artifacts before implementation.
+  Obtain separate push confirmation and verify the intended commit on the PR.
+- [ ] 9.3 Extend the contract inventory with every required plugin/native key,
+  exact supported observation interfaces, pass/fail criteria, evidence identity
+  fields, and documented collection/acceptance commands. Verify interfaces
+  against actual runtime schemas; unsupported observations remain unknown.
+- [ ] 9.4 Implement the read-only collector/verifier and integrate it into the
+  shared command preflight without changing the pure selector's decisions.
+  Validate current context and receipt provenance, preserve explicit known
+  incompatibilities, and report actionable gaps. No startup probe reviewers,
+  workflow-tool execution, dependency installation, or replacement runtime.
+- [ ] 9.5 Add deterministic regression fixtures for complete evidence, registered
+  parent tools with unknown child visibility, unsupported/failed discovery,
+  malformed or forged evidence, context/contract/policy changes, known feedback
+  incompatibility, and optional-tool absence. Assert identical decisions for
+  identical normalized observations and no backend or external mutations.
+- [ ] 9.6 Implement and exercise the separately invoked isolated acceptance
+  harness with unchanged personas, models, permissions, policy, and plugins.
+  Capture real findings submission, valid clean results, deadline/cancellation,
+  independently observed terminal state, and declined mutation gates across
+  actual command flows. Capture external actions without real GitHub writes or
+  pushes. Retain private redacted observation receipts, not transcripts.
+- [ ] 9.7 Record exact runtime/backend coverage, reproduction commands, observed
+  failures, and unavailable capabilities in the compatibility page. Complete
+  8.8 only for its full required actual-runtime acceptance; otherwise leave it
+  open and distinguish successful fixtures from verified command compatibility.
+- [ ] 9.8 Assess `CHANGELOG.md`, `AGENTS.md`, and `README.md` impact; update only
+  relevant documentation and regenerate the command manifest with intentional
+  command edits. Run strict OpenSpec validation, whitespace checks, evidence
+  regression tests, retained fork/preflight/recovery tests, and applicable
+  CI-derived build/test/lint checks. Obtain the mandatory cumulative post-fix
+  council before proposing an implementation push. Do not claim a blocked gate
+  passed, push without confirmation, or post an addressed reply prematurely.
