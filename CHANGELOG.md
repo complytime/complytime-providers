@@ -4,6 +4,12 @@
 
 ### Added
 
+- **ai-tooling**: Add path-aware fork verification and regression fixtures so
+  plugin instructions can be isolated without allowing native execution to
+  depend on plugin workflow tools. Add read-only capability-selection and recovery
+  decision helpers with controlled fixtures; compatible plugins are preferred and
+  incompatible contracts are reported before bounded native fallback. Actual
+  V1/V2 command acceptance remains pending.
 - **opa-provider**: Preserve exact conftest JSON output for every local or remote
   evaluation, with result-file SHA256 digests, collection-start timestamps, private
   execution-account-owned storage and best-effort target/configuration metadata.
@@ -23,6 +29,9 @@
 
 ### Fixed
 
+- **ai-tooling**: Confine workflow cleanup to literal invocation paths, validate
+  retention input without shell evaluation, and fail closed on Git inventory
+  errors. Preserve working-tree content when reviewing oversized frozen captures.
 - **ci**: Validate the unchanged released complyctl host with a separately pinned,
   reviewed canonical harness so evidence assertions no longer depend on historical
   filename assumptions. Preserve released dependency/build/test validation and report
@@ -87,6 +96,7 @@
   private/root-run access, evidence verification and upgrade/rollback behavior.
 - Document Ampel's retained evidence layout, workspace-relative coordinates, private
   access, storage growth, local digest verification and upgrade/rollback behavior.
+- Added `docs/review-command-compatibility.md` recording the measured OpenCode V2 runtime status, the safeguard reconciliation, and the bounded native reviewer prototype for the three review commands. The page separates API-level evidence from command compatibility claims, which remain open in the change tasks.
 - Added man pages for all three provider binaries (`complyctl-provider-openscap`, `complyctl-provider-ampel`, `complyctl-provider-opa`) documenting configuration variables, environment variables, required external tools, and workspace paths. Man pages are maintained as Pandoc markdown in `docs/man/` and rendered via `make man`.
 
 ### Infrastructure
@@ -97,6 +107,7 @@
 - Consolidated duplicate tar.gz extraction code from ampel and OPA providers into shared `internal/archive/` package, eliminating code duplication and ensuring consistent security behavior across providers.
 - **ci**: Pinned the `carabiner-dev/actions` install steps (`snappy`, `ampel`) in `ci_cross_repo_integration.yml` to the v1.3.1 release tag. The previous pin tracked an untagged post-v1.3.0 commit whose free-form version comment pinact v4 `--verify` rejects, which failed the `Standardized CI / Verify action versions` job on `main` and on every PR.
 - **ci**: Added released-baseline cross-repository integration validation. Each PR now builds providers against the highest stable `complyctl` release compatible with the declared module dependency and runs the existing integration harness, while retaining the `complyctl@main` integration job. (Spec: `openspec/changes/validate-complyctl-release-compatibility/`)
+- **ai-tooling**: Forked the UF v0.21.0 `/uf.review-council`, `/uf.review-pr`, and `/uf.address-feedback` commands because the scaffolded plugins target the OpenCode V1 plugin API and do not load on V2. The three files now carry a fork marker and are pinned by `.uf/fork-manifest.sha256`; `make verify-uf-fork` detects unreconciled changes or an accidental `uf init` overwrite, and `make update-uf-fork-manifest` regenerates the manifest. `make clean-uf-workflows` lists prunable per-invocation runtime records and deletes only with `PRUNE=1`. The commands now report their execution path, keep governance paths in review scope, separate excludable tooling, reuse assessments by digest on resume, and bound retained artifacts. Other `uf.*` commands remain scaffold-managed. Evidence: `docs/review-command-compatibility.md`. (Spec: `openspec/changes/restore-plugin-free-review-commands/`)
 
 ### Breaking Changes
 
